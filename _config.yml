@@ -1,0 +1,10 @@
+excerpt_separator: ""
+pygments: true
+markdown: kramdown
+url: http://sabino.github.io
+title: sabino's
+email: fgsabino@gmail.com
+author: sabino
+description: my awesome blog
+paginate: 3
+google_analytics: UA-80800236-1
