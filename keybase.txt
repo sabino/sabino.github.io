@@ -1,0 +1,68 @@
+==================================================================
+https://keybase.io/sabino
+--------------------------------------------------------------------
+
+I hereby claim:
+
+  * I am an admin of https://sabino.pro
+  * I am sabino (https://keybase.io/sabino) on keybase.
+  * I have a public key with fingerprint 6BB3 0301 27EB 2827 E299  4006 E010 2629 8FF5 E7A6
+
+To do so, I am signing this object:
+
+{
+  "body": {
+    "key": {
+      "eldest_kid": "01019abba6acf244885e52977e25dd01308604132eb85a960c8b4322695ae64069290a",
+      "fingerprint": "6bb3030127eb2827e2994006e01026298ff5e7a6",
+      "host": "keybase.io",
+      "key_id": "e01026298ff5e7a6",
+      "kid": "01019abba6acf244885e52977e25dd01308604132eb85a960c8b4322695ae64069290a",
+      "uid": "62869a2ed11cd8d8ecb060a487aa0219",
+      "username": "sabino"
+    },
+    "service": {
+      "hostname": "sabino.pro",
+      "protocol": "https:"
+    },
+    "type": "web_service_binding",
+    "version": 1
+  },
+  "ctime": 1515505100,
+  "expire_in": 157680000,
+  "prev": "7a10a1eee6b900db34443f7a93ca3afd71e594704abe66004d32b26ce8f99b78",
+  "seqno": 13,
+  "tag": "signature"
+}
+
+which yields the signature:
+
+-----BEGIN PGP MESSAGE-----
+Version: Keybase OpenPGP v2.0.76
+Comment: https://keybase.io/crypto
+
+yMIdAnicrVJdSBRRGN1dM3VFKjAqomxHiCCxO3dm7tzZh34gI3qIqKywn+3emW91
+UHe32XErTLMeKloJinroRfoDEwILAoOKsn+wgsqCsDBsqazAwDRD2roj9RD02Mt3
+ueeec+53Pr47RTm+oP8saF/7pj2u9Pd0H2/wVa2/+7BR4nFrtxRulGph4oA6C5Ju
+pNa2pLCEZCQbjHNGmBnFqkqpBho2dB2wZllIVhAlSJUVDJxqzCDIpFxVMCaGxoCo
+iBjYQEwqk6J2rBqchGPHXGFLOFeQgmSsA8dUVGwYKkIExH+YYINGoxrojAhhTTzp
+KURznCWh3I4LTFwiE+39g/+f+26YsCOYEoNhsGTZtKhFweSIIKZSnTGEZcMjJsGJ
+sXoQ7CTjdiwuNZVJAkvZJnhj9XL89V6ecLwsorpxM14n8BrXTSTDns7dnfCIO4FH
+fltEhMQSMxSKFDhJOx6TwrJgmq7tecqarGlIkxEqk2BXwnYgYnsMTScUIQ9NOJAS
+ljqTEZMBgHADIYsrqqoqUZ0ZiskUFrV0GTRD1ZHKOBCCkGopmGNiAo0aBtep5IXa
+IdKFZUX0yaq9PHZ1jLkNDkhNt25umeTzB32TcwPecvmCBVP/rFyW5mXppbbSK4ul
+Ldderd2rNkRqmztYYbb9/YW8sdCKzo8DLfMfVozkrz23Y/P2r0dDnalM5ev6nuKq
+ka5Fe3Kgm23c2PryW0Vdd+vqzP4NmbHe4iHU+jQVfNQcGBnc9CE4a7y/iAyuuH9o
+ctXAwrb26aWhx/WfLqhJ9hZ/KWgpnLnrRXY42Dh28tSD/vSTwLyOJeT7j66xCG2a
+8uawfmn2znlhemzR1p6nHYH0COjnSw68K9menrI183wglX+1pDcdOZXZ51hLzwSv
+d/Zm9zSOnhguvheM1xQuD805/ezI+HQGQ6v6nJVrlqyrXvbzs3vj9sGFQ/65C0q3
+lc4IXB7t8udeLPgFwa4+Tg==
+=fdAH
+-----END PGP MESSAGE-----
+
+And finally, I am proving ownership of this host by posting or
+appending to this document.
+
+View my publicly-auditable identity here: https://keybase.io/sabino
+
+==================================================================
