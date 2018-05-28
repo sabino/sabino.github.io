@@ -1,10 +1,19 @@
-excerpt_separator: ""
-pygments: true
-markdown: kramdown
-url: http://sabino.github.io
 title: sabino's
-email: fgsabino@gmail.com
-author: sabino
-description: my awesome blog
-paginate: 3
-google_analytics: UA-80800236-1
+email: felipe@sabino.pro
+description: >-
+  my awesome blog
+baseurl: ""
+url: "https://sabino.pro"
+twitter_username: fgsabino
+github_username:  sabino
+
+# Build settings
+markdown: kramdown
+remote_theme: chesterhow/tale
+
+permalink:      /:year-:month-:day/:title
+paginate:       5
+
+plugins:
+  - jekyll-paginate
+  - jekyll-remote-theme

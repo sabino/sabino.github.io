@@ -1,7 +1,9 @@
 ---
 published: true
-title: It's about time!
+title:  It's about time!
 layout: post
+date:   2016-07-18
+author: sabino
 ---
 Hi there. My name is Felipe but most of my friends call me **Sabino**, since that's my surname.
 
