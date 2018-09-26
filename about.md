@@ -7,7 +7,7 @@ permalink: /about/
 I am **Sabino**.
 ![sabino when 6 years old](/images/me.jpg)
 A software engineer based in São Paulo, Brazil currently working
-as data engineer at [Nubank](https://contaazul.com)
+as data engineer at [Nubank](https://nubank.com.br)
 
 When not working, I might be [blogging](https://sabino.github.io),
 hacking [opensource](https://github.com/sabino) software,
