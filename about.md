@@ -2,6 +2,7 @@
 layout: post
 title: About
 permalink: /about/
+author: sabino
 ---
 
 I am **Sabino**.
