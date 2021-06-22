@@ -7,8 +7,7 @@ author: sabino
 
 I am **Sabino**.
 ![sabino when 6 years old](/images/me.jpg)
-A software engineer based in Joinville, Brazil currently working
-as CTO at [ParcelaMais](https://parcelamais.com)
+A software engineer based in Joinville, Brazil currently working as a contractor.
 
 When not working, I might be [blogging](https://sabino.github.io),
 hacking [opensource](https://github.com/sabino) software,
