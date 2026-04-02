@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sabino One-Click Apps</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Custom CapRover one-click apps published by Sabino."
+    />
+    <style>
+      :root {
+        --page-bg: #0b1017;
+        --surface: #121926;
+        --surface-soft: #1a2231;
+        --text: #ecf3fb;
+        --muted: #b2c0d1;
+        --muted-soft: #7f90a8;
+        --border: rgba(148, 163, 184, 0.18);
+        --accent: #16c47f;
+        --accent-soft: rgba(22, 196, 127, 0.16);
+        --shadow: 0 18px 48px rgba(2, 6, 23, 0.35);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--page-bg);
+        color: var(--text);
+      }
+
+      body {
+        min-height: 100vh;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      header {
+        background: rgba(11, 16, 23, 0.92);
+        border-bottom: 1px solid var(--border);
+        backdrop-filter: blur(14px);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .container {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+      }
+
+      .navbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        min-height: 72px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--text);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+
+      .brand-mark {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        display: inline-grid;
+        place-items: center;
+        background: linear-gradient(135deg, var(--accent-soft), rgba(255, 255, 255, 0.02) 85%);
+        border: 1px solid var(--border);
+        color: var(--accent);
+        font-size: 0.95rem;
+        font-weight: 800;
+      }
+
+      .header-links {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .header-links a {
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      main {
+        padding: 24px 0 64px;
+      }
+
+      .content {
+        display: grid;
+        gap: 24px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 10px;
+      }
+
+      .eyebrow {
+        color: var(--muted-soft);
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 3vw, 2.4rem);
+        line-height: 1.08;
+        letter-spacing: -0.03em;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 860px;
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 0.98rem;
+      }
+
+      .setup {
+        overflow: hidden;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+      }
+
+      .panel-inner {
+        padding: 22px;
+      }
+
+      .setup-grid {
+        display: grid;
+        grid-template-columns: 1.6fr minmax(280px, 0.9fr);
+        gap: 20px;
+        align-items: center;
+      }
+
+      .summary-list {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+        line-height: 1.8;
+      }
+
+      .summary-list li + li {
+        margin-top: 4px;
+      }
+
+      .repo-box {
+        display: grid;
+        gap: 12px;
+      }
+
+      .repo-field {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface-soft);
+      }
+
+      .repo-field code {
+        word-break: break-all;
+        color: var(--text);
+        font-size: 0.94rem;
+      }
+
+      .copy-button {
+        border: 1px solid rgba(22, 196, 127, 0.35);
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-radius: 12px;
+        padding: 10px 14px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .copy-button:hover {
+        filter: brightness(1.06);
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: minmax(260px, 1.6fr) minmax(180px, 0.85fr);
+        gap: 14px;
+      }
+
+      .toolbar input,
+      .toolbar select {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--surface-soft);
+        color: var(--text);
+        border-radius: 12px;
+        padding: 14px 16px;
+        font: inherit;
+      }
+
+      .stats {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+
+      .stat {
+        padding: 10px 14px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 0.94rem;
+      }
+
+      .catalog {
+        display: grid;
+        gap: 18px;
+      }
+
+      .card {
+        display: grid;
+        gap: 16px;
+        padding: 22px;
+      }
+
+      .card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+
+      .card-heading {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .card-heading img {
+        width: 52px;
+        height: 52px;
+        object-fit: contain;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+      }
+
+      .card-heading h2 {
+        margin: 0;
+        font-size: 1.24rem;
+        letter-spacing: -0.02em;
+      }
+
+      .slug {
+        margin-top: 4px;
+        color: var(--muted-soft);
+        font-size: 0.92rem;
+      }
+
+      .service-pill {
+        white-space: nowrap;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+
+      .description {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .meta {
+        padding: 14px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+      }
+
+      .meta-label {
+        display: block;
+        color: var(--muted-soft);
+        font-size: 0.8rem;
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      .meta-value {
+        font-weight: 600;
+      }
+
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .tag {
+        padding: 8px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.02);
+        font-size: 0.84rem;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+
+      .status {
+        margin: 0;
+        color: var(--muted-soft);
+      }
+
+      .empty {
+        padding: 24px;
+        border: 1px dashed var(--border);
+        border-radius: 16px;
+        color: var(--muted);
+        background: var(--surface);
+      }
+
+      footer {
+        border-top: 1px solid var(--border);
+        color: var(--muted-soft);
+        background: var(--surface);
+      }
+
+      footer .container {
+        padding: 20px 0;
+      }
+
+      @media (max-width: 900px) {
+        .setup-grid,
+        .toolbar,
+        .meta-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .card-top {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .container {
+          width: min(100vw - 20px, 1180px);
+        }
+
+        .navbar {
+          padding: 12px 0;
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .header-links {
+          gap: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="container navbar">
+        <a class="brand" id="brand-link" href="/">
+          <span class="brand-mark">S</span>
+          <span>Sabino One-Click Apps</span>
+        </a>
+
+        <nav class="header-links" aria-label="External links">
+          <a href="https://github.com/sabino/oneclickapps">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="container">
+      <div class="content">
+        <section class="hero">
+          <div class="eyebrow">3rd Party Repository</div>
+          <h1>Apps</h1>
+          <p>
+            Supabase is a complex app and requires custom file generation. For a more updated and maintained
+            version, add this repository to your CapRover one-click apps and install it from there.
+          </p>
+        </section>
+
+        <section class="panel setup">
+          <div class="panel-inner setup-grid">
+            <div>
+              <h2 style="margin-top: 0">Use in CapRover</h2>
+              <ol class="summary-list">
+                <li>Open <strong>Apps</strong> in CapRover.</li>
+                <li>Open <strong>One Click Apps</strong>.</li>
+                <li>Scroll down to <strong>3rd party repositories</strong>.</li>
+                <li>Paste <code class="repo-url-inline">https://oneclickapps.sabino.pro</code> and click <strong>Connect New Repository</strong>.</li>
+              </ol>
+            </div>
+            <div class="repo-box">
+              <div class="repo-field">
+                <code id="repo-url">https://oneclickapps.sabino.pro</code>
+                <button id="copy-repo" class="copy-button" type="button">Copy</button>
+              </div>
+              <p class="status" id="copy-status">Use this exact repository URL in CapRover.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="toolbar" aria-label="Catalog filters">
+          <input id="search" type="search" placeholder="Search apps, tags, descriptions..." />
+          <select id="category">
+            <option value="all">All categories</option>
+          </select>
+        </section>
+
+        <section class="stats" aria-label="Catalog stats">
+          <div class="stat"><strong id="total-count">0</strong> published app(s)</div>
+          <div class="stat"><strong id="visible-count">0</strong> visible after filters</div>
+        </section>
+
+        <section id="catalog" class="catalog" aria-live="polite"></section>
+        <p id="status" class="status">Loading catalog…</p>
+      </div>
+    </main>
+
+    <footer>
+      <div class="container">Built for CapRover third-party repositories.</div>
+    </footer>
+
+    <template id="app-card-template">
+      <article class="panel card">
+        <div class="card-top">
+          <div class="card-heading">
+            <img alt="" />
+            <div>
+              <h2></h2>
+              <div class="slug"></div>
+            </div>
+          </div>
+          <div class="service-pill"></div>
+        </div>
+
+        <p class="description"></p>
+
+        <div class="meta-grid">
+          <div class="meta">
+            <span class="meta-label">Category</span>
+            <span class="meta-value category-value"></span>
+          </div>
+          <div class="meta">
+            <span class="meta-label">Variables</span>
+            <span class="meta-value variables-value"></span>
+          </div>
+          <div class="meta">
+            <span class="meta-label">Public service</span>
+            <span class="meta-value public-service-value"></span>
+          </div>
+        </div>
+
+        <div class="tags"></div>
+
+        <div class="actions">
+          <a class="docs-link" target="_blank" rel="noreferrer">Documentation</a>
+          <a class="source-link" target="_blank" rel="noreferrer">GitHub</a>
+        </div>
+      </article>
+    </template>
+
+    <script>
+      const state = { apps: [], filteredApps: [] };
+      const basePath = (() => {
+        const path = window.location.pathname;
+        return path.endsWith('/') ? path : `${path.slice(0, path.lastIndexOf('/') + 1)}`;
+      })();
+      const repositoryUrl = `${window.location.origin}${basePath.endsWith('/') && basePath !== '/' ? basePath.slice(0, -1) : basePath}`;
+
+      function withBasePath(path) {
+        if (/^https?:\/\//i.test(path)) return path;
+        return new URL(path.replace(/^\//, ''), `${window.location.origin}${basePath}`).toString();
+      }
+
+      const els = {
+        brandLink: document.getElementById('brand-link'),
+        search: document.getElementById('search'),
+        category: document.getElementById('category'),
+        catalog: document.getElementById('catalog'),
+        totalCount: document.getElementById('total-count'),
+        visibleCount: document.getElementById('visible-count'),
+        status: document.getElementById('status'),
+        cardTemplate: document.getElementById('app-card-template'),
+        copyRepo: document.getElementById('copy-repo'),
+        copyStatus: document.getElementById('copy-status'),
+        repoUrl: document.getElementById('repo-url'),
+        repoUrlInline: Array.from(document.querySelectorAll('.repo-url-inline')),
+      };
+
+      async function fetchJson(url) {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ${url}: ${response.status}`);
+        }
+        return response.json();
+      }
+
+      async function copyRepositoryUrl() {
+        const text = els.repoUrl.textContent.trim();
+        try {
+          if (!navigator.clipboard || !window.isSecureContext) {
+            throw new Error('Clipboard API unavailable');
+          }
+          await navigator.clipboard.writeText(text);
+          els.copyStatus.textContent = 'Repository URL copied.';
+        } catch (error) {
+          try {
+            const input = document.createElement('textarea');
+            input.value = text;
+            input.setAttribute('readonly', '');
+            input.style.position = 'fixed';
+            input.style.opacity = '0';
+            input.style.pointerEvents = 'none';
+            document.body.appendChild(input);
+            input.focus();
+            input.select();
+            input.setSelectionRange(0, input.value.length);
+            const copied = document.execCommand('copy');
+            document.body.removeChild(input);
+            if (!copied) {
+              throw new Error('execCommand copy failed');
+            }
+            els.copyStatus.textContent = 'Repository URL copied.';
+          } catch (fallbackError) {
+            console.error(error);
+            console.error(fallbackError);
+            els.copyStatus.textContent = 'Copy failed. Select the URL and copy it manually.';
+          }
+        }
+      }
+
+      function buildCategoryOptions(apps) {
+        const categories = Array.from(new Set(apps.map((app) => app.category).filter(Boolean))).sort((a, b) =>
+          a.localeCompare(b)
+        );
+
+        els.category.innerHTML = '<option value="all">All categories</option>';
+        for (const category of categories) {
+          const option = document.createElement('option');
+          option.value = category;
+          option.textContent = category;
+          els.category.appendChild(option);
+        }
+      }
+
+      function filterApps() {
+        const query = els.search.value.trim().toLowerCase();
+        const category = els.category.value;
+
+        state.filteredApps = state.apps.filter((app) => {
+          const haystack = [app.name, app.displayName, app.description, app.category, ...(app.tags || [])]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+
+          const matchesQuery = !query || haystack.includes(query);
+          const matchesCategory = category === 'all' || app.category === category;
+          return matchesQuery && matchesCategory;
+        });
+
+        renderApps();
+      }
+
+      function createTag(label) {
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = label;
+        return tag;
+      }
+
+      function renderApps() {
+        els.catalog.innerHTML = '';
+        els.totalCount.textContent = String(state.apps.length);
+        els.visibleCount.textContent = String(state.filteredApps.length);
+
+        if (!state.filteredApps.length) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = 'No apps match the current filters.';
+          els.catalog.appendChild(empty);
+          els.status.textContent = '';
+          return;
+        }
+
+        for (const app of state.filteredApps) {
+          const fragment = els.cardTemplate.content.cloneNode(true);
+          const root = fragment.querySelector('.card');
+          root.querySelector('img').src = app.logoUrl;
+          root.querySelector('img').alt = `${app.displayName} logo`;
+          root.querySelector('h2').textContent = app.displayName;
+          root.querySelector('.slug').textContent = app.name;
+          root.querySelector('.service-pill').textContent = `${app.serviceCount} service${app.serviceCount === 1 ? '' : 's'}`;
+          root.querySelector('.description').textContent = app.description;
+          root.querySelector('.category-value').textContent = app.category || 'Uncategorized';
+          root.querySelector('.variables-value').textContent = String(app.variableCount ?? '—');
+          root.querySelector('.public-service-value').textContent = app.publicService || '—';
+          const docsLink = root.querySelector('.docs-link');
+          docsLink.href = app.documentation || app.templateUrl;
+          docsLink.textContent = app.documentation ? 'Documentation' : 'Template details';
+
+          const sourceLink = root.querySelector('.source-link');
+          sourceLink.href = 'https://github.com/sabino/oneclickapps';
+
+          const tags = root.querySelector('.tags');
+          for (const tag of app.tags || []) {
+            tags.appendChild(createTag(tag));
+          }
+          if (app.isOfficial) {
+            tags.appendChild(createTag('Official-style metadata'));
+          }
+
+          els.catalog.appendChild(fragment);
+        }
+        els.status.textContent = '';
+      }
+
+      async function loadCatalog() {
+        try {
+          els.brandLink.href = withBasePath('');
+          els.repoUrl.textContent = repositoryUrl;
+          for (const node of els.repoUrlInline) {
+            node.textContent = repositoryUrl;
+          }
+          const [listData, metadata] = await Promise.all([
+            fetchJson(withBasePath('v4/list')),
+            fetchJson(withBasePath('catalog-metadata.json')).catch(() => ({})),
+          ]);
+
+          const apps = await Promise.all(
+            (listData.oneClickApps || []).map(async (summary) => {
+              const detail = await fetchJson(`/v4/apps/${summary.name}`);
+              const meta = metadata[summary.name] || {};
+              const services = detail.services || {};
+              const variables = detail.caproverOneClickApp?.variables || [];
+              const publicService = Object.entries(services).find(
+                ([, config]) => config.caproverExtra?.notExposeAsWebApp !== 'true'
+              )?.[0];
+
+              return {
+                ...summary,
+                ...meta,
+                templateUrl: withBasePath(`v4/apps/${summary.name}`),
+                logoUrl: meta.logoUrl ? withBasePath(meta.logoUrl) : withBasePath(`v4/logos/${summary.logoUrl}`),
+                documentation: meta.documentation || detail.caproverOneClickApp?.documentation || '',
+                serviceCount: Object.keys(services).length,
+                variableCount: variables.length,
+                publicService: publicService ? publicService.replace('$$cap_appname', summary.name) : '',
+              };
+            })
+          );
+
+          state.apps = apps.sort((a, b) => a.displayName.localeCompare(b.displayName));
+          buildCategoryOptions(state.apps);
+          filterApps();
+        } catch (error) {
+          console.error(error);
+          els.status.textContent = `Failed to load catalog: ${error.message}`;
+        }
+      }
+
+      els.search.addEventListener('input', filterApps);
+      els.category.addEventListener('change', filterApps);
+      els.copyRepo.addEventListener('click', copyRepositoryUrl);
+      loadCatalog();
+    </script>
+  </body>
+</html>
