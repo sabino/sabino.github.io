@@ -1,0 +1,16 @@
+{
+  "name": "Sabino Software Ltda",
+  "short_name": "Sabino Software",
+  "description": "Engineer-led data, AI, backend, and platform engineering.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080b0a",
+  "theme_color": "#0b0e0d",
+  "icons": [
+    {
+      "src": "/assets/images/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

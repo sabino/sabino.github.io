@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Sabino Software</title>
+  <rect width="64" height="64" rx="12" fill="#0b0e0d"/>
+  <path d="M16 17h29l-4.5 7H25.2l-3.7 5.8L43 40.2 38.7 47H15l4.5-7h13.2L11.4 29.8 16 17Z" fill="#d8ff4f"/>
+  <path d="M47 17h6L43 47h-6l10-30Z" fill="#5de4e7"/>
+</svg>
