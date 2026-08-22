@@ -627,6 +627,27 @@
     });
   };
 
+  const setupLogoMarquee = () => {
+    document.querySelectorAll('[data-logo-marquee]').forEach((marquee) => {
+      if (marquee.dataset.logoReady === 'true') return;
+      const track = marquee.querySelector('[data-logo-track]');
+      const group = track?.querySelector('.logo-marquee__group');
+      if (!track || !group) return;
+
+      const duplicate = group.cloneNode(true);
+      duplicate.removeAttribute('aria-labelledby');
+      duplicate.setAttribute('aria-hidden', 'true');
+      duplicate.querySelectorAll('[tabindex]').forEach((item) => item.setAttribute('tabindex', '-1'));
+      duplicate.querySelectorAll('img').forEach((image) => image.setAttribute('alt', ''));
+      track.append(duplicate);
+
+      const duration = Math.max(48, Math.min(72, group.scrollWidth / 42));
+      marquee.style.setProperty('--logo-duration', `${duration.toFixed(1)}s`);
+      marquee.dataset.logoReady = 'true';
+      marquee.classList.add('is-ready');
+    });
+  };
+
   const initializePage = () => {
     document.querySelectorAll('[data-year]').forEach((target) => {
       target.textContent = new Date().getFullYear();
@@ -641,6 +662,7 @@
     setupTerminal();
     setupMagneticButtons();
     setupHeroParallax();
+    setupLogoMarquee();
     setupContactForm();
   };
 

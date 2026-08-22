@@ -36,4 +36,5 @@ The example uses Cloudflare's official always-pass development keys. Production 
 
 - `hero-systems-topology.webp` was generated specifically for this site with OpenAI image generation, then optimized locally for web delivery.
 - Project screenshots come from the corresponding public repositories.
+- Current company marks come from the organizations' own public assets; discontinued identities were recovered from archived versions of their official sites.
 - Company marks are shown only as a factual representation of Felipe Sabino's career history; the site explicitly states that no endorsement is implied.
