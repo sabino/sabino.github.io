@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-labelledby="title">
+  <title id="title">Elastacloud</title>
+  <g fill="#3688d4">
+    <path d="M18 21h22v22H18z"/>
+    <path d="M41 44h24v23H41z"/>
+  </g>
+  <g fill="#ffffff">
+    <path d="M77 43h91v25H77z"/>
+    <path d="M39 93h113v24H65v29h103v24H39z"/>
+  </g>
+</svg>

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">OpenAPI FDW system map</title>
+  <desc id="desc">An OpenAPI service becomes live typed PostgreSQL tables through the native Rust foreign data wrapper.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0d1613"/><stop offset="1" stop-color="#08100e"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="960" height="540" rx="24" fill="url(#bg)"/>
+  <g opacity=".2" stroke="#5de4e7"><path d="M0 90h960M0 180h960M0 270h960M0 360h960M0 450h960"/><path d="M120 0v540M240 0v540M360 0v540M480 0v540M600 0v540M720 0v540M840 0v540"/></g>
+  <g font-family="ui-monospace, monospace">
+    <text x="54" y="70" fill="#d8ff4f" font-size="18">live request path // no copied data</text>
+    <g transform="translate(66 180)">
+      <rect width="206" height="160" rx="14" fill="#111b18" stroke="#5de4e7"/>
+      <text x="24" y="48" fill="#eff4ef" font-size="24" font-weight="700">OPENAPI</text>
+      <text x="24" y="82" fill="#9fb0a7" font-size="16">HTTP + JSON</text>
+      <path d="M24 111h158M24 130h104" stroke="#5de4e7" opacity=".6"/>
+    </g>
+    <g transform="translate(374 180)">
+      <rect width="212" height="160" rx="14" fill="#152019" stroke="#d8ff4f" filter="url(#glow)"/>
+      <text x="25" y="48" fill="#eff4ef" font-size="22" font-weight="700">openapi_fdw</text>
+      <text x="25" y="82" fill="#d8ff4f" font-size="16">native rust</text>
+      <text x="25" y="114" fill="#9fb0a7" font-size="14">typed · jsonb · writes</text>
+    </g>
+    <g transform="translate(688 180)">
+      <rect width="206" height="160" rx="14" fill="#111b18" stroke="#5de4e7"/>
+      <text x="23" y="48" fill="#eff4ef" font-size="23" font-weight="700">POSTGRESQL</text>
+      <text x="23" y="82" fill="#9fb0a7" font-size="16">ordinary tables</text>
+      <path d="M23 110h158M23 129h133" stroke="#5de4e7" opacity=".6"/>
+    </g>
+    <g fill="none" stroke="#d8ff4f" stroke-width="3">
+      <path d="M273 260h88"/><path d="m349 250 12 10-12 10"/>
+      <path d="M587 260h88"/><path d="m663 250 12 10-12 10"/>
+    </g>
+    <text x="66" y="454" fill="#9fb0a7" font-size="16">discover → preview SQL → apply transactionally → query live rows</text>
+  </g>
+</svg>

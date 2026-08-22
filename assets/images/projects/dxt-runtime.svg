@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">dxt native transformation engine</title>
+  <desc id="desc">A terminal-like view showing a dbt-shaped project compiled and run by the Zig-first dxt engine.</desc>
+  <rect width="960" height="540" rx="24" fill="#090d0b"/>
+  <path d="M0 54h960" stroke="#29352f"/>
+  <g font-family="ui-monospace, monospace">
+    <rect x="22" y="18" width="102" height="24" rx="4" fill="#d8ff4f"/>
+    <text x="38" y="35" fill="#08100e" font-size="13" font-weight="800">1:dxt</text>
+    <text x="142" y="35" fill="#8da097" font-size="13">2:graph</text>
+    <text x="54" y="112" fill="#d8ff4f" font-size="19">$</text>
+    <text x="84" y="112" fill="#eff4ef" font-size="19">dxt build --select +stg_customers</text>
+    <g font-size="16">
+      <text x="54" y="164" fill="#5de4e7">parse</text><text x="188" y="164" fill="#9fb0a7">12 models · 4 tests · 2 sources</text>
+      <text x="54" y="202" fill="#5de4e7">graph</text><text x="188" y="202" fill="#9fb0a7">selection resolved in 3 ms</text>
+      <text x="54" y="240" fill="#5de4e7">compile</text><text x="188" y="240" fill="#9fb0a7">artifact-compatible SQL + manifest</text>
+      <text x="54" y="278" fill="#5de4e7">run</text><text x="188" y="278" fill="#9fb0a7">DuckDB adapter boundary</text>
+    </g>
+    <g transform="translate(54 330)">
+      <rect width="852" height="118" rx="12" fill="#101713" stroke="#2e3c35"/>
+      <text x="24" y="38" fill="#d8ff4f" font-size="15">PASS</text><text x="96" y="38" fill="#c9d5ce" font-size="15">not_null_customers_customer_id</text>
+      <text x="24" y="72" fill="#d8ff4f" font-size="15">PASS</text><text x="96" y="72" fill="#c9d5ce" font-size="15">unique_customers_customer_id</text>
+      <text x="24" y="102" fill="#76877f" font-size="13">pre-alpha // compatibility before claims</text>
+    </g>
+    <text x="54" y="500" fill="#ffb454" font-size="14">Zig 0.16 · deterministic fixtures · not for production</text>
+  </g>
+</svg>

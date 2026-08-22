@@ -1,0 +1,48 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sabino-contact",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-22",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "routes": [
+    {
+      "pattern": "contact.sabino.pro",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "ALLOWED_ORIGINS": "https://sabino.pro,https://www.sabino.pro,https://feat-sabino-software-site.sabino-software-preview.pages.dev",
+    "ALLOWED_TURNSTILE_HOSTNAMES": "sabino.pro,www.sabino.pro,feat-sabino-software-site.sabino-software-preview.pages.dev",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAEYogkSxPrHVsTNA"
+  },
+  "d1_databases": [
+    {
+      "binding": "CONTACTS",
+      "database_name": "sabino-contact",
+      "database_id": "1d829d37-a43e-4729-b586-108e07782d86",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "CONTACT_RATE_LIMITER",
+      "namespace_id": "897113",
+      "simple": {
+        "limit": 4,
+        "period": 60
+      }
+    }
+  ],
+  "triggers": {
+    "crons": ["23 4 * * *"]
+  }
+}
