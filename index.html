@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Sabino Software | Data, AI &amp; Platform Engineering</title>
-    <meta name="description" content="Engineer-led software studio for data platforms, backend systems, applied AI, cloud infrastructure, and complex product engineering.">
+    <title>sabino software | systems that have to work</title>
+    <meta name="description" content="Hands-on engineering for data platforms, backend systems, applied AI, cloud infrastructure, and hardware-integrated products.">
     <meta name="theme-color" content="#0b0e0d">
     <meta name="color-scheme" content="dark">
     <meta name="author" content="Felipe Guilherme Sabino">
@@ -15,19 +15,19 @@
     <link rel="icon" href="/assets/images/favicon.svg" type="image/svg+xml">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="preload" href="/assets/images/hero-systems-topology.webp" as="image" type="image/webp">
-    <link rel="stylesheet" href="/assets/css/site.css?v=20260821.2">
+    <link rel="stylesheet" href="/assets/css/site.min.css?v=20260822.1">
     <meta property="og:type" content="website">
-    <meta property="og:site_name" content="Sabino Software">
-    <meta property="og:title" content="Sabino Software | Engineering the hard parts">
-    <meta property="og:description" content="Data platforms, backend systems, applied AI, cloud infrastructure, and complex product engineering—from ambiguity to production.">
+    <meta property="og:site_name" content="sabino software">
+    <meta property="og:title" content="sabino software | systems that have to work">
+    <meta property="og:description" content="Hands-on engineering for data platforms, backend systems, applied AI, cloud infrastructure, and hardware-integrated products.">
     <meta property="og:url" content="https://sabino.pro/">
     <meta property="og:image" content="https://sabino.pro/assets/images/social-card.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="A retro-futurist software and data systems topology">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Sabino Software | Engineering the hard parts">
-    <meta name="twitter:description" content="Engineer-led data, AI, backend, and platform engineering.">
+    <meta name="twitter:title" content="sabino software | systems that have to work">
+    <meta name="twitter:description" content="Hands-on data, AI, backend, cloud, and platform engineering.">
     <meta name="twitter:image" content="https://sabino.pro/assets/images/social-card.jpg">
     <script type="application/ld+json">
       {
@@ -39,7 +39,6 @@
             "name": "Sabino Software Ltda",
             "alternateName": "Sabino Software",
             "url": "https://sabino.pro/",
-            "email": "felipe@sabino.pro",
             "founder": { "@id": "https://sabino.pro/#felipe" },
             "areaServed": "Worldwide",
             "knowsAbout": [
@@ -76,7 +75,7 @@
 
     <header class="site-header" data-header>
       <div class="shell header-inner">
-        <a class="brand" href="#top" aria-label="Sabino Software home">
+        <a class="brand" href="#top">
           <span class="brand-mark" aria-hidden="true">S/</span>
           <span class="brand-copy">
             <strong>SABINO</strong>
@@ -93,8 +92,8 @@
           <a href="#impact">Impact</a>
           <a href="#lab">Systems lab</a>
           <a href="#about">About</a>
-          <a class="language-link" href="/pt/" lang="pt-BR" hreflang="pt-BR">PT</a>
-          <a class="nav-cta" href="mailto:felipe@sabino.pro?subject=Let%27s%20build%20something">Start a conversation</a>
+          <a class="language-link" href="/pt/" lang="pt-BR" hreflang="pt-BR" data-language-link>PT</a>
+          <a class="nav-cta" href="#contact">Start a conversation</a>
         </nav>
       </div>
     </header>
@@ -103,45 +102,59 @@
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-art" aria-hidden="true">
           <img src="/assets/images/hero-systems-topology.webp" alt="" width="1800" height="852">
+          <canvas class="pipeline-canvas" data-pipeline-canvas></canvas>
+          <div class="pipeline-legend"><span>agent mesh</span><span>verified delivery</span><span>live</span></div>
         </div>
 
         <div class="shell hero-grid">
           <div class="hero-copy" data-reveal>
-            <p class="eyebrow">Engineer-led studio · Joinville, Brazil · Worldwide</p>
-            <h1 id="hero-title">Engineering<br>the <span class="accent">hard parts.</span></h1>
+            <p class="eyebrow">hands-on software engineering · joinville, brazil · worldwide</p>
+            <h1 id="hero-title" data-kinetic>we build systems<br><span class="accent">that have to work.</span></h1>
             <p class="hero-lede">
-              <strong>Sabino Software turns ambiguous, high-consequence problems into systems that run.</strong>
-              Data platforms, backend engineering, applied AI, cloud infrastructure, and product systems—from architecture through implementation.
+              <strong><em class="name">Sabino Software</em> works where failure is expensive and complexity is slowing the team down.</strong>
+              We design and implement data platforms, backend systems, applied AI, cloud infrastructure, and hardware-integrated products. One engineer stays close to the problem from the first decision through production.
             </p>
             <div class="button-row">
-              <a class="button button-primary" href="mailto:felipe@sabino.pro?subject=Engineering%20with%20Sabino%20Software">Discuss a system</a>
-              <a class="button" href="#lab">Explore the lab</a>
+              <a class="button button-primary" href="#contact" data-magnetic>Tell me about the system</a>
+              <a class="button" href="#impact">See the work</a>
             </div>
-            <p class="availability">Available for focused consulting, fractional technical leadership, and longer-term engineering engagements.</p>
+            <p class="availability">Available for focused projects, embedded engineering, fractional technical leadership, and longer engagements.</p>
           </div>
 
-          <aside class="console-card" aria-label="Sabino Software delivery model" data-reveal>
-            <div class="console-top">
-              <span class="console-lights" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span>delivery.pipeline</span>
-              <span>v19.0</span>
+          <div class="console-card i3-terminal" data-reveal data-terminal>
+            <div class="i3-bar">
+              <span class="i3-workspaces"><b>1:system</b><span>2:pipeline</span><span>3:agents</span></span>
+              <span class="i3-clock" data-terminal-clock>--:--</span>
             </div>
-            <div class="console-body">
-              <p class="console-command"><span class="prompt">sabino@systems:~$</span> ship <span class="flag">--from</span> ambiguity <span class="flag">--to</span> production</p>
-              <ol class="console-list">
-                <li><span class="step">01</span><span>discover constraints</span><span class="ok">done</span></li>
-                <li><span class="step">02</span><span>design for change</span><span class="ok">done</span></li>
-                <li><span class="step">03</span><span>build the critical path</span><span class="ok">done</span></li>
-                <li><span class="step">04</span><span>leave it operable</span><span class="ok">done</span></li>
-              </ol>
-              <div class="console-status"><span>status</span><strong>production-minded</strong></div>
+            <div class="terminal-tiles">
+              <section class="terminal-pane terminal-shell">
+                <div class="terminal-title">delivery@prod:~</div>
+                <div class="terminal-content">
+                  <p class="console-command"><span class="prompt">$</span> sabino run engagement.toml</p>
+                  <ol class="console-list" data-terminal-steps>
+                    <li class="is-done"><span class="step">01</span><span>inspect the system</span><span class="ok">done</span></li>
+                    <li class="is-running"><span class="step">02</span><span>trace constraints</span><span class="ok">run</span></li>
+                    <li><span class="step">03</span><span>build critical path</span><span class="ok">wait</span></li>
+                    <li><span class="step">04</span><span>verify + transfer</span><span class="ok">wait</span></li>
+                  </ol>
+                </div>
+              </section>
+              <section class="terminal-pane terminal-agents">
+                <div class="terminal-title">agent.mesh</div>
+                <div class="agent-map"><span>brief</span><i></i><span>build</span><i></i><span>verify</span></div>
+              </section>
+              <section class="terminal-pane terminal-log">
+                <div class="terminal-title">events.log</div>
+                <p data-terminal-log><span>[ok]</span> context indexed</p>
+              </section>
             </div>
-          </aside>
+            <div class="i3-status"><span><b>●</b> production</span><span>async / hands-on</span></div>
+          </div>
 
           <ul class="hero-metrics" aria-label="Experience at a glance" data-reveal>
-            <li class="metric"><strong>19+</strong><span>years building software</span></li>
-            <li class="metric"><strong>10+</strong><span>years in data platforms</span></li>
-            <li class="metric"><strong>3</strong><span>major clouds · AWS / GCP / Azure</span></li>
+            <li class="metric"><strong data-count="19" data-suffix="+">19+</strong><span>years building software</span></li>
+            <li class="metric"><strong data-count="10" data-suffix="+">10+</strong><span>years in data platforms</span></li>
+            <li class="metric"><strong data-count="3">3</strong><span>major clouds · AWS / GCP / Azure</span></li>
             <li class="metric"><strong>E2E</strong><span>ownership from architecture to code</span></li>
           </ul>
         </div>
@@ -150,16 +163,16 @@
       <section class="experience-band" aria-labelledby="experience-title">
         <div class="shell">
           <div class="experience-heading">
-            <h2 id="experience-title">Experience built with teams at</h2>
-            <p>Organizations shown reflect Felipe Sabino's career history. Their names do not imply endorsement of Sabino Software.</p>
+            <h2 id="experience-title">experience from working with teams at</h2>
+            <p>Organizations shown reflect <strong class="name">Felipe Sabino's</strong> career history. Their names do not imply endorsement of <strong class="name">Sabino Software</strong>.</p>
           </div>
           <div class="logo-wall" data-reveal>
-            <div class="logo-item"><img class="logo-symbol" src="/assets/images/logos/nubank.svg" alt="Nubank"><span>NUBANK</span></div>
-            <div class="logo-item"><img src="/assets/images/logos/conta-azul.svg" alt="Conta Azul"><span>CONTA AZUL</span></div>
-            <div class="logo-item"><img src="/assets/images/logos/transfeera.svg" alt="Transfeera"><span>TRANSFEERA</span></div>
-            <div class="logo-item"><img class="logo-symbol" src="/assets/images/logos/accenture.svg" alt="Accenture"><span>ACCENTURE</span></div>
-            <div class="logo-item"><img src="/assets/images/logos/ntt-data.svg" alt="NTT DATA"><span>NTT DATA</span></div>
-            <div class="logo-item"><img class="logo-symbol" src="/assets/images/logos/totvs.svg" alt="TOTVS"><span>TOTVS</span></div>
+            <div class="logo-item"><img class="logo-symbol" src="/assets/images/logos/nubank.svg" alt="Nubank" width="33" height="33"><span>NUBANK</span></div>
+            <div class="logo-item"><img src="/assets/images/logos/conta-azul.svg" alt="Conta Azul" width="104" height="29"><span>CONTA AZUL</span></div>
+            <div class="logo-item"><img src="/assets/images/logos/transfeera.svg" alt="Transfeera" width="104" height="29"><span>TRANSFEERA</span></div>
+            <div class="logo-item"><img class="logo-symbol" src="/assets/images/logos/accenture.svg" alt="Accenture" width="33" height="33"><span>ACCENTURE</span></div>
+            <div class="logo-item"><img src="/assets/images/logos/ntt-data.svg" alt="NTT DATA" width="104" height="29"><span>NTT DATA</span></div>
+            <div class="logo-item"><img class="logo-symbol" src="/assets/images/logos/totvs.svg" alt="TOTVS" width="33" height="33"><span>TOTVS</span></div>
           </div>
         </div>
       </section>
@@ -168,11 +181,11 @@
         <div class="shell">
           <header class="section-header" data-reveal>
             <div>
-              <p class="kicker">01 / Capabilities</p>
-              <h2 class="section-title" id="capabilities-title">Deep systems.<br><span class="accent">Useful outcomes.</span></h2>
+              <p class="kicker">01 / what we do</p>
+              <h2 class="section-title" id="capabilities-title">what we can<br><span class="accent">build with you.</span></h2>
             </div>
             <p class="section-intro">
-              The studio is deliberately broad at the edges and deep at the core. <strong>Architecture is only valuable when it survives contact with production</strong>, so strategy, implementation, operations, and knowledge transfer stay connected.
+              You can bring Sabino Software into an architecture decision, an implementation, or a platform that needs to be recovered. <strong>The work stays connected:</strong> local development, production reliability, cost, documentation, and knowledge transfer all matter.
             </p>
           </header>
 
@@ -219,10 +232,10 @@
         <div class="shell">
           <header class="section-header" data-reveal>
             <div>
-              <p class="kicker">02 / Selected impact</p>
-              <h2 class="section-title" id="impact-title">The work,<br><span class="accent">not the title.</span></h2>
+              <p class="kicker">02 / production work</p>
+              <h2 class="section-title" id="impact-title">what changed<br>in <span class="accent">real systems.</span></h2>
             </div>
-            <p class="section-intro">Selected public examples from Felipe's career. These are not slide-deck abstractions: they are systems shaped through RFCs, experiments, migrations, production code, and direct collaboration.</p>
+            <p class="section-intro">These are public examples from Felipe's career. Each one involved hands-on investigation, architecture, production code, migration, and collaboration with the people responsible for the system afterward.</p>
           </header>
 
           <div class="work-stack">
@@ -230,7 +243,7 @@
               <div class="work-identity">
                 <span class="work-index">CASE_001 / DATA PLATFORM</span>
                 <div>
-                  <h3>Transfeera</h3>
+                  <h3 class="entity-name">Transfeera</h3>
                   <p class="work-role">Principal Data Software Engineer<br>2023—2025</p>
                 </div>
               </div>
@@ -251,7 +264,7 @@
               <div class="work-identity">
                 <span class="work-index">CASE_002 / REGULATED SCALE</span>
                 <div>
-                  <h3>Nubank</h3>
+                  <h3 class="entity-name">Nubank</h3>
                   <p class="work-role">Senior Software Engineer<br>2018—2020</p>
                 </div>
               </div>
@@ -272,7 +285,7 @@
               <div class="work-identity">
                 <span class="work-index">CASE_003 / DATA FOUNDATIONS</span>
                 <div>
-                  <h3>Conta Azul</h3>
+                  <h3 class="entity-name">Conta Azul</h3>
                   <p class="work-role">Data &amp; Software Engineer<br>2015—2018</p>
                 </div>
               </div>
@@ -291,9 +304,9 @@
 
             <article class="confidential-card" data-reveal>
               <div>
-                <p class="kicker">CONFIDENTIAL / BY DESIGN</p>
-                <h3>Some of the hardest work stays unnamed.</h3>
-                <p>Recent engagements include a consumer-platform overhaul, data and metadata infrastructure, production GenAI systems, and Linux / Android products integrated with real hardware. Deeper context and references are available where confidentiality permits.</p>
+                <p class="kicker">confidential / client names omitted</p>
+                <h3>recent work under confidentiality</h3>
+                <p>Recent engagements have covered a full consumer-platform modernization, governed data and metadata infrastructure, production GenAI systems, and Linux / Android software integrated with physical hardware. I can discuss the engineering decisions and outcomes where agreements allow.</p>
               </div>
               <ul class="confidential-list">
                 <li>Product &amp; platform modernization</li>
@@ -310,10 +323,10 @@
         <div class="shell">
           <header class="section-header" data-reveal>
             <div>
-              <p class="kicker">03 / Open systems lab</p>
-              <h2 class="section-title" id="lab-title">Curiosity,<br><span class="accent">compiled.</span></h2>
+              <p class="kicker">03 / open systems lab</p>
+              <h2 class="section-title" id="lab-title">open-source work<br><span class="accent">and experiments.</span></h2>
             </div>
-            <p class="section-intro">The lab is where modern platform ideas meet retro hardware, low-level constraints, developer tooling, and open-source collaboration. The point is not nostalgia alone—it is learning by making the system real.</p>
+            <p class="section-intro">These projects are how <strong class="name">Felipe</strong> explores retro hardware, low-level constraints, data tooling, runtimes, and open-source collaboration. They are small enough for free experimentation and real enough to make every tradeoff visible.</p>
           </header>
 
           <div class="lab-featured">
@@ -405,17 +418,17 @@
           </figure>
 
           <div class="about-copy" data-reveal>
-            <p class="kicker">04 / The engineer behind the studio</p>
-            <h2 id="about-title">Hands-on is not a phase of the career.</h2>
-            <p><strong>Felipe Guilherme Sabino founded Sabino Software to stay close to the difficult work:</strong> understanding an unclear system, shaping the architecture, writing the code, and helping a team own what comes next.</p>
-            <p>Across 19+ years in professional software engineering and roughly a decade in production data platforms, he has worked inside startups, scale-ups, consultancies, and large enterprises—including Nubank, Conta Azul, Transfeera, Accenture, NTT DATA, and TOTVS.</p>
-            <p>The through-line is systems thinking with practical range: distributed data, backend services, cloud platforms, developer experience, applied AI, and increasingly hardware-integrated software. Titles change. The commitment to build, explain, and improve the real thing does not.</p>
+            <p class="kicker">04 / the engineer behind the studio</p>
+            <h2 id="about-title">i still design,<br>code, and ship.</h2>
+            <p><strong>I founded <em class="name">Sabino Software</em> because I do my best work close to the system:</strong> understanding what is wrong, choosing an architecture, writing the code, and helping the team own it afterward.</p>
+            <p>Over 19+ years in professional software engineering and roughly a decade in production data platforms, I have worked inside startups, scale-ups, consultancies, and large enterprises, including <strong class="name">Nubank</strong>, <strong class="name">Conta Azul</strong>, <strong class="name">Transfeera</strong>, <strong class="name">Accenture</strong>, <strong class="name">NTT DATA</strong>, and <strong class="name">TOTVS</strong>.</p>
+            <p>My range now includes distributed data, backend services, cloud platforms, developer experience, applied AI, and hardware-integrated software. I still prefer the same working pattern: make the problem concrete, build the critical path, explain the decisions, and leave the system easier to operate.</p>
 
             <ul class="principles" aria-label="Working principles">
-              <li class="principle"><small>PRINCIPLE_01</small><h3>Code is part of the strategy</h3><p>The important trade-offs become visible when the design is executable.</p></li>
-              <li class="principle"><small>PRINCIPLE_02</small><h3>Make the system legible</h3><p>Documentation, observability, and local workflows are production features.</p></li>
-              <li class="principle"><small>PRINCIPLE_03</small><h3>Optimize for ownership</h3><p>The best handoff leaves capability, not dependency on a consultant.</p></li>
-              <li class="principle"><small>PRINCIPLE_04</small><h3>Question the inherited shape</h3><p>Modernization starts by understanding why the old system became hard.</p></li>
+              <li class="principle"><small>principle_01</small><h3>make decisions executable</h3><p>The important choices become clearer when the design can actually run.</p></li>
+              <li class="principle"><small>principle_02</small><h3>make the system understandable</h3><p>Documentation, observability, and a usable local workflow are production features.</p></li>
+              <li class="principle"><small>principle_03</small><h3>leave ownership with the team</h3><p>Good delivery creates capability instead of dependence on the consultant.</p></li>
+              <li class="principle"><small>principle_04</small><h3>understand before replacing</h3><p>Modernization starts by learning why the current system became difficult.</p></li>
             </ul>
 
             <div class="engagements">
@@ -430,13 +443,25 @@
         <div class="shell">
           <div class="contact-card" data-reveal>
             <div class="contact-inner">
-              <p class="eyebrow">Open channel · Human on the other side</p>
-              <h2 id="contact-title">Bring the complicated part.</h2>
-              <p>If the system is consequential, ambiguous, or stuck between diagrams and production, that is a useful place to start.</p>
-              <div class="button-row">
-                <a class="button button-primary" href="mailto:felipe@sabino.pro?subject=Let%27s%20talk%20about%20a%20system">felipe@sabino.pro</a>
-                <a class="button" href="https://www.linkedin.com/in/fgsabino" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+              <div class="contact-copy">
+                <p class="eyebrow">direct contact · <em class="name">Felipe</em> reads every message</p>
+                <h2 id="contact-title" data-kinetic>tell me what<br>has to work.</h2>
+                <p>No public inbox and no automated sales sequence. Give me enough context to understand the system, the constraint, and what a useful outcome looks like.</p>
+                <a class="contact-social" href="https://www.linkedin.com/in/fgsabino" target="_blank" rel="noopener noreferrer">or find me on LinkedIn ↗</a>
               </div>
+              <form class="contact-form" action="https://contact.sabino.pro/contact" method="post" data-contact-form data-endpoint="https://contact.sabino.pro">
+                <div class="form-grid">
+                  <label><span>your name</span><input type="text" name="name" autocomplete="name" maxlength="120" required></label>
+                  <label><span>reply address</span><input type="email" name="email" autocomplete="email" maxlength="254" required></label>
+                  <label class="form-span"><span>what needs to work?</span><textarea name="message" rows="7" minlength="30" maxlength="5000" required></textarea></label>
+                  <label class="contact-honeypot" aria-hidden="true"><span>company website</span><input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+                </div>
+                <div class="contact-form-footer">
+                  <div class="turnstile-slot" data-turnstile-slot><span>human check initializes here</span></div>
+                  <button class="button button-primary" type="submit" data-submit data-magnetic>send the context</button>
+                </div>
+                <p class="form-status" role="status" aria-live="polite" data-form-status>private by design · protected by Cloudflare Turnstile</p>
+              </form>
             </div>
           </div>
         </div>
@@ -447,15 +472,15 @@
       <div class="shell footer-grid">
         <p class="footer-copy">© <span data-year>2026</span> Sabino Software Ltda · Joinville, Brazil</p>
         <nav class="footer-links" aria-label="Footer navigation">
-          <a href="mailto:felipe@sabino.pro">Email</a>
+          <a href="#contact">Contact</a>
           <a href="https://github.com/sabino" target="_blank" rel="noopener noreferrer">GitHub</a>
           <a href="https://www.linkedin.com/in/fgsabino" target="_blank" rel="noopener noreferrer">LinkedIn</a>
-          <a href="/pt/" lang="pt-BR">Português</a>
+          <a href="/pt/" lang="pt-BR" hreflang="pt-BR" data-language-link>Português</a>
         </nav>
         <span class="footer-status">systems online</span>
       </div>
     </footer>
 
-    <script src="/assets/js/site.js?v=20260821.2" defer></script>
+    <script src="/assets/js/site.min.js?v=20260822.1" defer></script>
   </body>
 </html>

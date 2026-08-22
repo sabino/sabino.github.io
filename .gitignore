@@ -1,2 +1,6 @@
 .DS_Store
 *.log
+.wrangler/
+contact-worker/.dev.vars
+contact-worker/.wrangler/
+contact-worker/node_modules/
