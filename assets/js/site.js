@@ -85,6 +85,11 @@
     }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
 
     targets.forEach((target, index) => {
+      if (target.closest('.hero, .journal-hero')) {
+        target.classList.remove('reveal-pending');
+        target.classList.add('is-visible');
+        return;
+      }
       target.classList.remove('is-visible');
       target.classList.add('reveal-pending');
       target.style.transitionDelay = `${Math.min(index % 4, 3) * 55}ms`;
@@ -690,7 +695,7 @@
     overlay.className = 'language-transition';
     overlay.dataset.languageTransition = '';
     overlay.setAttribute('aria-hidden', 'true');
-    overlay.innerHTML = '<div class="language-transition__inner"><span class="language-transition__label">recompiling interface</span><strong class="language-transition__word">pt</strong></div>';
+    overlay.innerHTML = '<div class="language-transition__inner"><span class="language-transition__label">recompiling interface</span><strong class="language-transition__word">br</strong></div>';
     document.body.append(overlay);
     return overlay;
   };
@@ -744,7 +749,7 @@
     const word = overlay.querySelector('.language-transition__word');
     const label = overlay.querySelector('.language-transition__label');
     const targetIsPortuguese = destination.pathname.startsWith('/pt');
-    word.textContent = targetIsPortuguese ? 'pt' : 'en';
+    word.textContent = targetIsPortuguese ? 'br' : 'en';
     label.textContent = targetIsPortuguese ? 'recompilando interface' : 'recompiling interface';
     const position = pagePosition();
 
@@ -810,7 +815,7 @@
     if (event.key === 'Escape') closeMenu();
   });
   window.addEventListener('resize', () => {
-    if (window.innerWidth > 860) closeMenu();
+    if (window.innerWidth > 940) closeMenu();
     updateViewportState();
   }, { passive: true });
   window.addEventListener('scroll', updateViewportState, { passive: true });

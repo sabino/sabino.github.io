@@ -10,7 +10,7 @@ Readable CSS and JavaScript live in `assets/css/site.css` and `assets/js/site.js
 python3 -m http.server 4173
 ```
 
-Then open `http://localhost:4173/` for English or `http://localhost:4173/pt/` for Portuguese.
+Then open `http://localhost:4173/` for English or `http://localhost:4173/pt/` for Portuguese. The journal routes are available at `/blog/` and `/pt/blog/`.
 
 The contact form uses the separate Cloudflare Worker in `contact-worker/`. Its recipient, sender, and Turnstile secret are Cloudflare secrets and are never included in the static site or repository.
 
@@ -35,6 +35,8 @@ The example uses Cloudflare's official always-pass development keys. Production 
 ## Visual asset provenance
 
 - `hero-systems-topology.webp` was generated specifically for this site with OpenAI image generation, then optimized locally for web delivery.
-- Project screenshots come from the corresponding public repositories.
+- Project screenshots come from the corresponding public repositories, published project pages, and the Chrome Web Store listing for BigQuery Cost Estimator.
+- Workshop previews are derived from Felipe Sabino's public 2024 and 2025 workshop materials.
+- The founder portrait was provided directly by Felipe Sabino for this site.
 - Current company marks come from the organizations' own public assets; discontinued identities were recovered from archived versions of their official sites.
 - Company marks are shown only as a factual representation of Felipe Sabino's career history; the site explicitly states that no endorsement is implied.
