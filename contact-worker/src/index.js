@@ -23,13 +23,13 @@ export const validateContactPayload = (input) => {
     message: text(input?.message, 5000),
     website: text(input?.website, 500),
     language: text(input?.language, 16) || 'en',
-    turnstileToken: text(input?.turnstileToken, 4096),
+    turnstileToken: text(input?.turnstileToken, 2049),
   };
   const errors = [];
   if (payload.name.length < 2) errors.push('name');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) errors.push('email');
   if (payload.message.length < 30) errors.push('message');
-  if (!payload.turnstileToken) errors.push('turnstile');
+  if (!payload.turnstileToken || payload.turnstileToken.length > 2048) errors.push('turnstile');
   return { payload, errors };
 };
 
@@ -52,24 +52,41 @@ const digest = async (value) => {
   return [...new Uint8Array(hash)].slice(0, 12).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 };
 
-const verifyTurnstile = async (request, env, token) => {
+export const verifyTurnstile = async (request, env, token, fetchImpl = fetch) => {
   if (!env.TURNSTILE_SECRET_KEY) return { success: false, reason: 'not-configured' };
-  const body = new FormData();
+  const allowedHostnames = configuredValues(env.ALLOWED_TURNSTILE_HOSTNAMES);
+  if (!token || token.length > 2048 || allowedHostnames.size === 0) {
+    return { success: false, reason: 'not-configured' };
+  }
+
+  const body = new URLSearchParams();
   body.set('secret', env.TURNSTILE_SECRET_KEY);
   body.set('response', token);
   body.set('idempotency_key', crypto.randomUUID());
   const remoteAddress = request.headers.get('CF-Connecting-IP');
   if (remoteAddress) body.set('remoteip', remoteAddress);
 
-  const response = await fetch(TURNSTILE_VERIFY_URL, { method: 'POST', body });
-  if (!response.ok) return { success: false, reason: 'verification-unavailable' };
-  const result = await response.json();
-  if (!result.success) return { success: false, reason: 'challenge-failed' };
-  if (result.action && result.action !== 'contact') return { success: false, reason: 'action-mismatch' };
-  const allowedHostnames = configuredValues(env.ALLOWED_TURNSTILE_HOSTNAMES);
+  let result;
+  try {
+    const response = await fetchImpl(TURNSTILE_VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      signal: AbortSignal.timeout(10_000),
+      body,
+    });
+    if (!response.ok) return { success: false, reason: 'verification-unavailable' };
+    result = await response.json();
+  } catch {
+    return { success: false, reason: 'verification-unavailable' };
+  }
+
+  if (!result || typeof result !== 'object' || result.success !== true) {
+    return { success: false, reason: 'challenge-failed' };
+  }
+  if (result.action !== 'contact') return { success: false, reason: 'action-mismatch' };
   const officialTestResult = result.metadata?.result_with_testing_key === true
     && /^\d+x0{8,}/.test(env.TURNSTILE_SITE_KEY || '');
-  if (!officialTestResult && result.hostname && allowedHostnames.size && !allowedHostnames.has(result.hostname)) {
+  if (!officialTestResult && (!result.hostname || !allowedHostnames.has(result.hostname))) {
     return { success: false, reason: 'hostname-mismatch' };
   }
   return { success: true, hostname: result.hostname || '' };
@@ -100,7 +117,11 @@ const notify = async (env, submission) => {
     await env.CONTACTS.prepare(
       "UPDATE contact_messages SET notification_status = 'failed' WHERE id = ?",
     ).bind(submission.id).run();
-    console.error('contact notification failed', { id: submission.id, code: error?.code || 'unknown' });
+    console.error(JSON.stringify({
+      message: 'contact notification failed',
+      id: submission.id,
+      code: error?.code || 'unknown',
+    }));
   }
 };
 
@@ -122,7 +143,7 @@ const handleContact = async (request, env, context, origin) => {
   if (payload.website) return json({ ok: true }, 202, origin);
   if (errors.length) return json({ ok: false, error: 'invalid-fields', fields: errors }, 400, origin);
 
-  const actorKey = await digest(payload.email);
+  const actorKey = await digest(`${request.headers.get('CF-Connecting-IP') || 'unknown'}|${payload.email}`);
   const rate = await env.CONTACT_RATE_LIMITER.limit({ key: `contact:${actorKey}` });
   if (!rate.success) return json({ ok: false, error: 'rate-limited' }, 429, origin);
 
