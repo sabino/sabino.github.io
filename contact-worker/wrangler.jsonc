@@ -17,7 +17,7 @@
   "vars": {
     "ALLOWED_ORIGINS": "https://sabino.pro,https://www.sabino.pro,https://feat-sabino-software-site.sabino-software-preview.pages.dev",
     "ALLOWED_TURNSTILE_HOSTNAMES": "sabino.pro,www.sabino.pro,feat-sabino-software-site.sabino-software-preview.pages.dev",
-    "TURNSTILE_SITE_KEY": ""
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAEYogkSxPrHVsTNA"
   },
   "d1_databases": [
     {
