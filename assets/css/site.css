@@ -1124,8 +1124,8 @@ button {
 }
 
 .logo-item img.logo-teamculture {
-  width: 83px;
-  height: 45px;
+  width: 122px;
+  height: auto;
 }
 
 .logo-item:hover,
