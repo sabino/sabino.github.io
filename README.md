@@ -35,6 +35,7 @@ The example uses Cloudflare's official always-pass development keys. Production 
 ## Visual asset provenance
 
 - `hero-systems-topology.webp` was generated specifically for this site with OpenAI image generation, then optimized locally for web delivery.
+- `capability-systems-mesh.webp` was generated specifically for the capability grid with OpenAI image generation, using the hero artwork only as a visual-style reference, then optimized locally for web delivery.
 - Project screenshots come from the corresponding public repositories, published project pages, and the Chrome Web Store listing for BigQuery Cost Estimator.
 - Workshop previews are derived from Felipe Sabino's public 2024 and 2025 workshop materials.
 - The founder portrait was provided directly by Felipe Sabino for this site.
