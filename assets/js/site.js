@@ -21,15 +21,29 @@
     while (cleanupTasks.length) cleanupTasks.pop()?.();
   };
 
-  const closeMenu = () => {
+  const setMenuState = (isOpen, { restoreFocus = false, focusFirst = false } = {}) => {
     const header = document.querySelector('[data-header]');
     const button = document.querySelector('[data-menu-button]');
-    if (!header || !button) return;
-    header.classList.remove('is-open');
-    button.setAttribute('aria-expanded', 'false');
-    button.setAttribute('aria-label', button.dataset.openLabel || button.getAttribute('aria-label'));
-    document.body.style.removeProperty('overflow');
+    const nav = document.querySelector('[data-nav]');
+    if (!header || !button || !nav) return;
+    const mobile = window.innerWidth <= 1050;
+    const expanded = mobile && isOpen;
+    header.classList.toggle('is-open', expanded);
+    button.setAttribute('aria-expanded', String(expanded));
+    button.setAttribute('aria-label', expanded ? button.dataset.closeLabel : button.dataset.openLabel);
+    document.body.style.overflow = expanded ? 'hidden' : '';
+    if (mobile && !expanded) {
+      nav.setAttribute('inert', '');
+      nav.setAttribute('aria-hidden', 'true');
+    } else {
+      nav.removeAttribute('inert');
+      nav.removeAttribute('aria-hidden');
+    }
+    if (expanded && focusFirst) requestAnimationFrame(() => nav.querySelector('a')?.focus());
+    if (!expanded && restoreFocus) button.focus();
   };
+
+  const closeMenu = (options) => setMenuState(false, options);
 
   const updateViewportState = () => {
     const header = document.querySelector('[data-header]');
@@ -483,6 +497,84 @@
     });
   };
 
+  const setupDossiers = () => {
+    const tablist = document.querySelector('[data-dossier-tabs]');
+    const tabs = [...tablist?.querySelectorAll('[data-dossier-tab]') || []];
+    const panels = [...document.querySelectorAll('[data-dossier-panel]')];
+    const status = document.querySelector('[data-dossier-status]');
+    if (!tablist || !tabs.length || !panels.length) return;
+
+    const activate = (tab, { focus = false, announce = true } = {}) => {
+      const panelId = tab.getAttribute('aria-controls');
+      tabs.forEach((candidate) => {
+        const active = candidate === tab;
+        candidate.setAttribute('aria-selected', String(active));
+        candidate.setAttribute('tabindex', active ? '0' : '-1');
+      });
+      panels.forEach((panel) => {
+        panel.hidden = panel.id !== panelId;
+        panel.classList.toggle('is-active', panel.id === panelId);
+      });
+      if (focus) tab.focus();
+      if (tablist.scrollWidth > tablist.clientWidth) {
+        tab.scrollIntoView({ behavior: motionQuery.matches ? 'auto' : 'smooth', block: 'nearest', inline: 'center' });
+      }
+      if (announce && status) {
+        status.textContent = isPortuguese()
+          ? `Dossiê ${tab.textContent.trim()} selecionado`
+          : `${tab.textContent.trim()} dossier selected`;
+      }
+      if (announce) trackEvent('dossier-view', { dossier: panelId.replace('dossier-', '') });
+    };
+
+    const onClick = (event) => {
+      const tab = event.target.closest('[data-dossier-tab]');
+      if (tab) activate(tab);
+    };
+    const onKeydown = (event) => {
+      const current = event.target.closest('[data-dossier-tab]');
+      if (!current) return;
+      const index = tabs.indexOf(current);
+      let nextIndex;
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+      else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      activate(tabs[nextIndex], { focus: true });
+    };
+
+    tablist.addEventListener('click', onClick);
+    tablist.addEventListener('keydown', onKeydown);
+    activate(tabs.find((tab) => tab.getAttribute('aria-selected') === 'true') || tabs[0], { announce: false });
+    addCleanup(() => {
+      tablist.removeEventListener('click', onClick);
+      tablist.removeEventListener('keydown', onKeydown);
+    });
+  };
+
+  const setupLabArchive = () => {
+    const projects = document.querySelector('[data-lab-projects]');
+    const toggle = document.querySelector('[data-lab-toggle]');
+    if (!projects || !toggle) return;
+    const extras = [...projects.querySelectorAll('[data-lab-extra]')];
+    const setExpanded = (expanded) => {
+      projects.classList.toggle('is-expanded', expanded);
+      toggle.setAttribute('aria-expanded', String(expanded));
+      toggle.textContent = expanded ? toggle.dataset.lessLabel : toggle.dataset.moreLabel;
+      extras.forEach((extra) => extra.setAttribute('aria-hidden', String(!expanded)));
+    };
+    const onClick = () => {
+      const expanded = toggle.getAttribute('aria-expanded') !== 'true';
+      setExpanded(expanded);
+      trackEvent('lab-archive', { state: expanded ? 'expanded' : 'collapsed' });
+    };
+    setExpanded(false);
+    toggle.addEventListener('click', onClick);
+    addCleanup(() => toggle.removeEventListener('click', onClick));
+  };
+
   const loadTurnstileScript = () => {
     if (window.turnstile) return Promise.resolve(window.turnstile);
     if (turnstileScriptPromise) return turnstileScriptPromise;
@@ -504,23 +596,26 @@
     const status = form.querySelector('[data-form-status]');
     const submit = form.querySelector('[data-submit]');
     const slot = form.querySelector('[data-turnstile-slot]');
+    const recovery = form.querySelector('[data-contact-recovery]');
+    const retry = form.querySelector('[data-contact-retry]');
+    const linkedin = form.querySelector('[data-contact-linkedin]');
     const portuguese = isPortuguese();
     const copy = portuguese ? {
       loading: 'inicializando a verificação privada…',
       ready: 'verificação concluída · sua mensagem pode ser enviada',
-      unavailable: 'o formulário seguro ainda está entrando no ar · tente novamente em breve',
+      unavailable: 'o formulário seguro não está disponível agora · tente novamente ou continue pelo LinkedIn',
       verifying: 'conclua a verificação humana para enviar',
       sending: 'enviando com segurança…',
       success: 'contexto recebido · eu mesmo vou ler e responder',
-      error: 'não foi possível enviar agora · tente novamente em instantes',
+      error: 'não foi possível enviar agora · seus campos foram preservados',
     } : {
       loading: 'initializing the private check…',
       ready: 'verification complete · your message can be sent',
-      unavailable: 'the secure form is still coming online · please try again soon',
+      unavailable: 'the secure form is unavailable right now · retry or continue on LinkedIn',
       verifying: 'complete the human check before sending',
       sending: 'sending securely…',
       success: 'context received · I will read and reply personally',
-      error: 'the message could not be sent right now · please try again shortly',
+      error: 'the message could not be sent right now · your fields were preserved',
     };
     const baseEndpoint = localHostnames.has(location.hostname) ? 'http://127.0.0.1:8787' : form.dataset.endpoint;
     let widgetId;
@@ -535,7 +630,18 @@
       status.classList.toggle('is-error', state === 'error');
     };
 
+    const showRecovery = (visible) => {
+      if (recovery) recovery.hidden = !visible;
+    };
+
     const initialize = async () => {
+      token = '';
+      submit.disabled = true;
+      showRecovery(false);
+      if (widgetId !== undefined) {
+        window.turnstile?.remove(widgetId);
+        widgetId = undefined;
+      }
       setStatus(copy.loading);
       try {
         const response = await fetch(`${baseEndpoint}/config`, { headers: { Accept: 'application/json' } });
@@ -554,6 +660,7 @@
           callback: (value) => {
             token = value;
             submit.disabled = false;
+            showRecovery(false);
             if (!completed) setStatus(copy.ready, 'success');
             trackEvent('contact-verification', { state: 'ready' });
           },
@@ -567,12 +674,14 @@
             token = '';
             submit.disabled = true;
             setStatus(copy.unavailable, 'error');
+            showRecovery(true);
             trackEvent('contact-verification', { state: 'error' });
           },
         });
       } catch {
         if (!disposed) {
           setStatus(copy.unavailable, 'error');
+          showRecovery(true);
           trackEvent('contact-form', { state: 'unavailable' });
         }
       }
@@ -612,12 +721,14 @@
         completed = true;
         window.turnstile?.reset(widgetId);
         setStatus(copy.success, 'success');
+        showRecovery(false);
         trackEvent('contact-form', { state: 'success' });
       } catch {
         token = '';
         submit.disabled = true;
         window.turnstile?.reset(widgetId);
         setStatus(copy.error, 'error');
+        showRecovery(true);
         trackEvent('contact-form', { state: 'error' });
       }
     };
@@ -628,8 +739,16 @@
       if (token) setStatus(copy.ready, 'success');
     };
 
+    const onRetry = () => {
+      trackEvent('contact-recovery', { action: 'retry' });
+      initialize();
+    };
+    const onLinkedIn = () => trackEvent('contact-recovery', { action: 'linkedin' });
+
     form.addEventListener('submit', onSubmit);
     form.addEventListener('input', onInput);
+    retry?.addEventListener('click', onRetry);
+    linkedin?.addEventListener('click', onLinkedIn);
     const observer = new IntersectionObserver(([entry]) => {
       if (!entry.isIntersecting) return;
       observer.disconnect();
@@ -642,6 +761,8 @@
       observer.disconnect();
       form.removeEventListener('submit', onSubmit);
       form.removeEventListener('input', onInput);
+      retry?.removeEventListener('click', onRetry);
+      linkedin?.removeEventListener('click', onLinkedIn);
       if (widgetId !== undefined) window.turnstile?.remove(widgetId);
     });
   };
@@ -673,6 +794,7 @@
     });
     const menuButton = document.querySelector('[data-menu-button]');
     if (menuButton && !menuButton.dataset.openLabel) menuButton.dataset.openLabel = menuButton.getAttribute('aria-label');
+    setMenuState(false);
     document.querySelectorAll('[data-kinetic]').forEach(splitKineticText);
     setupReveals();
     setupCounters();
@@ -682,6 +804,8 @@
     setupMagneticButtons();
     setupHeroParallax();
     setupLogoMarquee();
+    setupDossiers();
+    setupLabArchive();
     setupContactForm();
   };
 
@@ -815,10 +939,8 @@
     const menuButton = event.target.closest('[data-menu-button]');
     if (menuButton) {
       const header = document.querySelector('[data-header]');
-      const isOpen = header.classList.toggle('is-open');
-      menuButton.setAttribute('aria-expanded', String(isOpen));
-      menuButton.setAttribute('aria-label', isOpen ? menuButton.dataset.closeLabel : menuButton.dataset.openLabel);
-      document.body.style.overflow = isOpen ? 'hidden' : '';
+      const isOpen = !header.classList.contains('is-open');
+      setMenuState(isOpen, { focusFirst: isOpen && event.detail === 0 });
       return;
     }
 
@@ -826,10 +948,12 @@
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeMenu();
+    if (event.key === 'Escape' && document.querySelector('[data-header]')?.classList.contains('is-open')) {
+      closeMenu({ restoreFocus: true });
+    }
   });
   window.addEventListener('resize', () => {
-    if (window.innerWidth > 1050) closeMenu();
+    setMenuState(document.querySelector('[data-header]')?.classList.contains('is-open'));
     updateViewportState();
   }, { passive: true });
   window.addEventListener('scroll', updateViewportState, { passive: true });
