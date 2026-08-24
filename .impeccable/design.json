@@ -1,0 +1,341 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-24T22:01:05Z",
+  "title": "Design System: Sabino Software Field Dossier",
+  "extensions": {
+    "colorMeta": {
+      "field": {
+        "role": "neutral",
+        "displayName": "Field Ink",
+        "tonalRamp": ["oklch(15% 0.006 174.3)", "oklch(25% 0.006 174.3)", "oklch(35% 0.006 174.3)", "oklch(45% 0.006 174.3)", "oklch(55% 0.006 174.3)", "oklch(65% 0.006 174.3)", "oklch(80% 0.006 174.3)", "oklch(95% 0.006 174.3)"]
+      },
+      "field-soft": {
+        "role": "neutral",
+        "displayName": "Soft Field",
+        "tonalRamp": ["oklch(15% 0.007 178.7)", "oklch(25% 0.007 178.7)", "oklch(35% 0.007 178.7)", "oklch(45% 0.007 178.7)", "oklch(55% 0.007 178.7)", "oklch(65% 0.007 178.7)", "oklch(80% 0.007 178.7)", "oklch(95% 0.007 178.7)"]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Dossier Panel",
+        "tonalRamp": ["oklch(15% 0.009 169.3)", "oklch(25% 0.009 169.3)", "oklch(35% 0.009 169.3)", "oklch(45% 0.009 169.3)", "oklch(55% 0.009 169.3)", "oklch(65% 0.009 169.3)", "oklch(80% 0.009 169.3)", "oklch(95% 0.009 169.3)"]
+      },
+      "panel-raised": {
+        "role": "neutral",
+        "displayName": "Raised Panel",
+        "tonalRamp": ["oklch(15% 0.011 163.8)", "oklch(25% 0.011 163.8)", "oklch(35% 0.011 163.8)", "oklch(45% 0.011 163.8)", "oklch(55% 0.011 163.8)", "oklch(65% 0.011 163.8)", "oklch(80% 0.011 163.8)", "oklch(95% 0.011 163.8)"]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Hairline Rule",
+        "tonalRamp": ["oklch(15% 0.013 159.9)", "oklch(25% 0.013 159.9)", "oklch(35% 0.013 159.9)", "oklch(45% 0.013 159.9)", "oklch(55% 0.013 159.9)", "oklch(65% 0.013 159.9)", "oklch(80% 0.013 159.9)", "oklch(95% 0.013 159.9)"]
+      },
+      "rule-strong": {
+        "role": "neutral",
+        "displayName": "Strong Rule",
+        "tonalRamp": ["oklch(15% 0.013 159.9)", "oklch(25% 0.013 159.9)", "oklch(35% 0.013 159.9)", "oklch(45% 0.013 159.9)", "oklch(55% 0.013 159.9)", "oklch(65% 0.013 159.9)", "oklch(80% 0.013 159.9)", "oklch(95% 0.013 159.9)"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Technical Paper",
+        "tonalRamp": ["oklch(15% 0.007 145.5)", "oklch(25% 0.007 145.5)", "oklch(35% 0.007 145.5)", "oklch(45% 0.007 145.5)", "oklch(55% 0.007 145.5)", "oklch(65% 0.007 145.5)", "oklch(80% 0.007 145.5)", "oklch(95% 0.007 145.5)"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Copy",
+        "tonalRamp": ["oklch(15% 0.017 162.6)", "oklch(25% 0.017 162.6)", "oklch(35% 0.017 162.6)", "oklch(45% 0.017 162.6)", "oklch(55% 0.017 162.6)", "oklch(65% 0.017 162.6)", "oklch(80% 0.017 162.6)", "oklch(95% 0.017 162.6)"]
+      },
+      "muted-strong": {
+        "role": "neutral",
+        "displayName": "Strong Muted Copy",
+        "tonalRamp": ["oklch(15% 0.014 159.9)", "oklch(25% 0.014 159.9)", "oklch(35% 0.014 159.9)", "oklch(45% 0.014 159.9)", "oklch(55% 0.014 159.9)", "oklch(65% 0.014 159.9)", "oklch(80% 0.014 159.9)", "oklch(95% 0.014 159.9)"]
+      },
+      "signal-lime": {
+        "role": "primary",
+        "displayName": "Signal Lime",
+        "tonalRamp": ["oklch(15% 0.198 121.3)", "oklch(25% 0.198 121.3)", "oklch(35% 0.198 121.3)", "oklch(45% 0.198 121.3)", "oklch(55% 0.198 121.3)", "oklch(65% 0.198 121.3)", "oklch(80% 0.198 121.3)", "oklch(95% 0.198 121.3)"]
+      },
+      "telemetry-cyan": {
+        "role": "secondary",
+        "displayName": "Telemetry Cyan",
+        "tonalRamp": ["oklch(15% 0.117 197.2)", "oklch(25% 0.117 197.2)", "oklch(35% 0.117 197.2)", "oklch(45% 0.117 197.2)", "oklch(55% 0.117 197.2)", "oklch(65% 0.117 197.2)", "oklch(80% 0.117 197.2)", "oklch(95% 0.117 197.2)"]
+      },
+      "warning-amber": {
+        "role": "tertiary",
+        "displayName": "Restricted Amber",
+        "tonalRamp": ["oklch(15% 0.141 70.2)", "oklch(25% 0.141 70.2)", "oklch(35% 0.141 70.2)", "oklch(45% 0.141 70.2)", "oklch(55% 0.141 70.2)", "oklch(65% 0.141 70.2)", "oklch(80% 0.141 70.2)", "oklch(95% 0.141 70.2)"]
+      },
+      "error-coral": {
+        "role": "tertiary",
+        "displayName": "Failure Coral",
+        "tonalRamp": ["oklch(15% 0.163 25.8)", "oklch(25% 0.163 25.8)", "oklch(35% 0.163 25.8)", "oklch(45% 0.163 25.8)", "oklch(55% 0.163 25.8)", "oklch(65% 0.163 25.8)", "oklch(80% 0.163 25.8)", "oklch(95% 0.163 25.8)"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Hero Display",
+        "purpose": "The homepage promise only; decisive, compressed, and deliberately line-broken."
+      },
+      "headline": {
+        "displayName": "Section Headline",
+        "purpose": "Major evidence sections and the founder or contact close."
+      },
+      "title": {
+        "displayName": "Evidence Title",
+        "purpose": "Dossier findings and other proof-bearing statements."
+      },
+      "body": {
+        "displayName": "Technical Prose",
+        "purpose": "Readable explanations, case evidence, and supporting product copy."
+      },
+      "label": {
+        "displayName": "Operational Label",
+        "purpose": "Navigation, dossier indices, controls, technology tags, dates, and telemetry."
+      }
+    },
+    "shadows": [
+      {
+        "name": "ambient-raised",
+        "value": "0 24px 80px rgba(0, 0, 0, 0.34)",
+        "purpose": "Mobile navigation and isolated raised panels."
+      },
+      {
+        "name": "operating-brief",
+        "value": "12px 18px 52px rgba(0, 0, 0, 0.38)",
+        "purpose": "Separates the operating brief from the hero topology."
+      },
+      {
+        "name": "contact-glass",
+        "value": "0 24px 72px rgba(0, 0, 0, 0.28)",
+        "purpose": "Anchors the protected form within the contact field."
+      },
+      {
+        "name": "signal-glow",
+        "value": "0 0 12px rgba(216, 255, 79, 0.65)",
+        "purpose": "Tiny live signals and the scroll trace only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "160ms ease",
+        "purpose": "Button, tab, border, and color response."
+      },
+      {
+        "name": "state-standard",
+        "value": "180ms ease",
+        "purpose": "Navigation, cards, and simple surface response."
+      },
+      {
+        "name": "expressive-ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Short physical movement without bounce."
+      },
+      {
+        "name": "dossier-enter",
+        "value": "320ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "One-open-file panel change."
+      },
+      {
+        "name": "content-reveal",
+        "value": "680ms ease / 760ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "One-time viewport fade, blur, and rise."
+      },
+      {
+        "name": "language-recompile",
+        "value": "440ms steps(2, end) / 520ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Decorative bilingual interface swap; removed under reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "hero-stack",
+        "value": "1080px"
+      },
+      {
+        "name": "mobile-navigation",
+        "value": "1050px"
+      },
+      {
+        "name": "dossier-stack",
+        "value": "850px"
+      },
+      {
+        "name": "compact",
+        "value": "620px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single high-priority conversation or submission action.",
+      "html": "<a class=\"ds-button-primary\" href=\"#\">start a conversation</a>",
+      "css": ".ds-button-primary { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; gap: 10px; padding: 12px 17px; border: 1px solid var(--signal); border-radius: 10px; color: var(--ink); background: var(--signal); font: 700 0.78rem/1.2 var(--font-mono); letter-spacing: 0.025em; text-decoration: none; transition: background 160ms ease, transform 160ms ease; } .ds-button-primary::after { content: '↗'; transition: transform 160ms ease; } .ds-button-primary:hover { background: #e4ff78; transform: translateY(-2px); } .ds-button-primary:hover::after { transform: translate(2px, -2px); } .ds-button-primary:active { transform: translateY(1px); } .ds-button-primary:focus-visible { outline: 3px solid var(--cyan); outline-offset: 4px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A lower-priority route to supporting proof or an external artifact.",
+      "html": "<a class=\"ds-button-secondary\" href=\"#\">see selected work</a>",
+      "css": ".ds-button-secondary { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; gap: 10px; padding: 12px 17px; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--paper); background: rgba(13, 17, 16, 0.72); font: 700 0.78rem/1.2 var(--font-mono); letter-spacing: 0.025em; text-decoration: none; transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; } .ds-button-secondary::after { content: '↗'; transition: transform 160ms ease; } .ds-button-secondary:hover { border-color: rgba(216, 255, 79, 0.6); background: var(--panel-raised); transform: translateY(-2px); } .ds-button-secondary:hover::after { transform: translate(2px, -2px); } .ds-button-secondary:active { transform: translateY(1px); } .ds-button-secondary:focus-visible { outline: 3px solid var(--cyan); outline-offset: 4px; }"
+    },
+    {
+      "name": "Compact Navigation",
+      "kind": "nav",
+      "description": "Monospaced proof routes with one lime conversation action.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Primary navigation\"><a href=\"#work\" aria-current=\"page\">work</a><a href=\"#lab\">systems lab</a><a class=\"ds-nav-language\" href=\"#\">BR</a><a class=\"ds-nav-cta\" href=\"#contact\">start a conversation</a></nav>",
+      "css": ".ds-nav { display: flex; align-items: center; gap: 3px; padding: 8px; border-bottom: 1px solid var(--line); background: rgba(8, 11, 10, 0.88); font-family: var(--font-mono); } .ds-nav a { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; padding: 9px 12px; border-radius: 8px; color: var(--muted-strong); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.04em; text-decoration: none; } .ds-nav a:hover, .ds-nav a[aria-current='page'] { color: var(--paper); background: rgba(255, 255, 255, 0.055); } .ds-nav .ds-nav-language { border: 1px solid var(--line); color: var(--cyan); } .ds-nav .ds-nav-cta { border: 1px solid rgba(216, 255, 79, 0.42); color: var(--ink); background: var(--signal); } .ds-nav a:focus-visible { outline: 3px solid var(--cyan); outline-offset: 2px; }"
+    },
+    {
+      "name": "Dossier Tab",
+      "kind": "button",
+      "refersTo": "dossier-tab",
+      "description": "An inactive evidence slot in the horizontally scrollable dossier rail.",
+      "html": "<button class=\"ds-dossier-tab\" type=\"button\" role=\"tab\" aria-selected=\"false\"><span>04</span>Consumer platform</button>",
+      "css": ".ds-dossier-tab { position: relative; display: grid; min-width: 156px; min-height: 58px; grid-template-columns: auto 1fr; gap: 10px; align-items: center; padding: 10px 15px; border: 0; border-right: 1px solid var(--line); color: var(--muted); background: rgba(7, 11, 9, 0.76); font: 650 0.72rem/1.2 var(--font-mono); text-align: left; cursor: pointer; transition: color 160ms ease, background 160ms ease; } .ds-dossier-tab span { color: var(--cyan); font-size: 0.58rem; } .ds-dossier-tab:hover { color: var(--paper); background: rgba(216, 255, 79, 0.05); } .ds-dossier-tab:focus-visible { outline: 2px solid var(--cyan); outline-offset: -3px; }"
+    },
+    {
+      "name": "Selected Dossier Tab",
+      "kind": "button",
+      "refersTo": "dossier-tab-selected",
+      "description": "The one selected dossier, marked by contrast and a lime trace.",
+      "html": "<button class=\"ds-dossier-tab-selected\" type=\"button\" role=\"tab\" aria-selected=\"true\"><span>01</span>Transfeera</button>",
+      "css": ".ds-dossier-tab-selected { position: relative; display: grid; min-width: 156px; min-height: 58px; grid-template-columns: auto 1fr; gap: 10px; align-items: center; padding: 10px 15px; border: 0; border-right: 1px solid var(--line); color: var(--paper); background: rgba(216, 255, 79, 0.05); font: 650 0.72rem/1.2 var(--font-mono); text-align: left; cursor: pointer; } .ds-dossier-tab-selected span { color: var(--cyan); font-size: 0.58rem; } .ds-dossier-tab-selected::after { position: absolute; right: 14px; bottom: -1px; left: 14px; height: 2px; background: var(--signal); content: ''; } .ds-dossier-tab-selected:focus-visible { outline: 2px solid var(--cyan); outline-offset: -3px; }"
+    },
+    {
+      "name": "Production Dossier Panel",
+      "kind": "card",
+      "refersTo": "dossier-panel",
+      "description": "The one-open-file split between identity and concrete engineering evidence.",
+      "html": "<article class=\"ds-dossier-panel\"><div class=\"ds-dossier-identity\"><small>CASE_001 / DATA PLATFORM</small><h3>Transfeera</h3><p>Principal Data Software Engineer</p></div><div class=\"ds-dossier-detail\"><h4>From a fragile pipeline to a declarative platform.</h4><p>Concrete engineering evidence belongs here, followed by bounded findings and technology tags.</p></div></article>",
+      "css": ".ds-dossier-panel { display: grid; grid-template-columns: 0.36fr 0.64fr; min-height: 360px; overflow: hidden; border: 1px solid var(--line); border-radius: 0 0 30px 30px; color: var(--paper); background: var(--panel); } .ds-dossier-identity { display: flex; flex-direction: column; justify-content: space-between; padding: 36px; border-right: 1px solid var(--line); background: radial-gradient(circle at 22% 76%, rgba(216, 255, 79, 0.1), transparent 48%), var(--ink-soft); } .ds-dossier-identity small { color: var(--cyan); font: 650 0.7rem/1.4 var(--font-mono); } .ds-dossier-identity h3 { margin: auto 0 12px; font: 620 3rem/0.95 var(--font-sans); letter-spacing: -0.06em; } .ds-dossier-identity p, .ds-dossier-detail p { margin: 0; color: var(--muted); } .ds-dossier-detail { display: flex; flex-direction: column; justify-content: center; padding: 46px; } .ds-dossier-detail h4 { margin: 0 0 24px; font: 580 2.4rem/1.07 var(--font-sans); letter-spacing: -0.05em; } .ds-dossier-panel:focus-visible { outline: 3px solid var(--cyan); outline-offset: 4px; }"
+    },
+    {
+      "name": "Evidence Tag",
+      "kind": "chip",
+      "description": "A compact technology, maturity, or clearance label.",
+      "html": "<span class=\"ds-evidence-tag\">OpenMetadata</span>",
+      "css": ".ds-evidence-tag { display: inline-flex; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted-strong); background: transparent; font: 400 0.58rem/1 var(--font-mono); }"
+    },
+    {
+      "name": "Contact Field",
+      "kind": "input",
+      "refersTo": "contact-field",
+      "description": "A square dark field with unmistakable cyan focus and coral invalid state.",
+      "html": "<label class=\"ds-field\"><span>reply address</span><input type=\"email\" placeholder=\"name@example.com\"></label>",
+      "css": ".ds-field { display: grid; gap: 7px; color: var(--muted); font: 400 0.63rem/1.4 var(--font-mono); letter-spacing: 0.035em; } .ds-field input { width: 100%; height: 47px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 0; outline: none; color: var(--paper); background: rgba(255, 255, 255, 0.025); caret-color: var(--signal); font: 0.88rem/1.5 var(--font-sans); transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease; } .ds-field input:focus { border-color: var(--cyan); background: rgba(93, 228, 231, 0.035); box-shadow: 0 0 0 3px rgba(93, 228, 231, 0.08); } .ds-field input:user-invalid { border-color: rgba(255, 123, 114, 0.7); }"
+    },
+    {
+      "name": "Operating Brief",
+      "kind": "custom",
+      "description": "A calm semantic status file that communicates engagement modes without fabricated metrics.",
+      "html": "<aside class=\"ds-operating-brief\"><header><strong>operating brief</strong><span><i></i> available</span></header><ul><li><b>consult</b><span>systems strategy and design</span></li><li><b>build</b><span>implementation and delivery</span></li><li><b>transfer</b><span>handover and enablement</span></li></ul><footer><code>$ frame → design → build → transfer</code></footer></aside>",
+      "css": ".ds-operating-brief { width: min(100%, 390px); overflow: hidden; border: 1px solid rgba(93, 228, 231, 0.34); border-radius: 14px; color: var(--muted-strong); background: rgba(6, 10, 8, 0.91); box-shadow: 12px 18px 52px rgba(0, 0, 0, 0.38); font-family: var(--font-mono); } .ds-operating-brief header { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px; border-bottom: 1px solid var(--line); } .ds-operating-brief header strong { color: var(--cyan); font-size: 0.78rem; letter-spacing: 0.075em; } .ds-operating-brief header span { display: inline-flex; align-items: center; gap: 7px; font-size: 0.75rem; } .ds-operating-brief header i { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 12px rgba(216, 255, 79, 0.72); } .ds-operating-brief ul { margin: 0; padding: 11px 18px 13px; list-style: none; } .ds-operating-brief li { display: grid; min-height: 44px; grid-template-columns: 88px 1fr; gap: 12px; align-items: center; border-bottom: 1px solid rgba(231, 241, 235, 0.08); } .ds-operating-brief li:last-child { border-bottom: 0; } .ds-operating-brief b { color: var(--paper); font-size: 0.78rem; } .ds-operating-brief li span { color: var(--muted); font-size: 0.75rem; } .ds-operating-brief footer { padding: 14px 18px 16px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.2); } .ds-operating-brief code { color: var(--signal); font-size: 0.75rem; }"
+    },
+    {
+      "name": "Contact Recovery",
+      "kind": "custom",
+      "description": "Colocated recovery actions shown when secure contact cannot initialize or submit.",
+      "html": "<div class=\"ds-contact-recovery\"><button type=\"button\">retry secure form</button><a href=\"#\">continue on LinkedIn ↗</a></div>",
+      "css": ".ds-contact-recovery { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; font: 650 0.68rem/1.3 var(--font-mono); } .ds-contact-recovery button, .ds-contact-recovery a { min-height: 44px; padding: 0; border: 0; color: var(--cyan); background: transparent; font: inherit; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; } .ds-contact-recovery button:hover, .ds-contact-recovery a:hover { color: var(--signal); } .ds-contact-recovery button:focus-visible, .ds-contact-recovery a:focus-visible { outline: 3px solid var(--cyan); outline-offset: 4px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Field Dossier",
+    "overview": "Sabino Software presents itself as a calm technical due-diligence file, not an agency brochure or generic SaaS dashboard. The interface lets a visitor understand the offer, inspect selected production evidence, see the operating method, and begin a high-context conversation. It is dense enough to reward technical scrutiny but disciplined enough to keep one unmistakable reading path.\n\nThe material world is a near-black matte systems field: precise hairline rules, faint engineering grids, restrained topology art, and i3-like terminal details. Off-white carries the argument. Acid lime marks action and selection; cyan marks telemetry, navigation, and focus. Glow is scarce and functional. The result should feel like an accountable engineer's working dossier rather than speculative futurism.\n\nLowercase editorial presentation is part of the identity, but it never overrides factual casing. Sabino Software, Sabino Software Ltda, Felipe Sabino, company names, AI, AWS, GCP, Azure, EC2, EKS, APIs, CDC, SQL, and other proper technical terms retain their official forms in both languages.",
+    "keyCharacteristics": [
+      "Evidence precedes service claims, and progressive disclosure keeps one technical file in focus.",
+      "Near-black matte surfaces, exact rules, low-contrast grids, and controlled signal glow create depth without visual noise.",
+      "Variable Archivo carries compressed, decisive display type; a system-monospace stack carries labels, controls, state, and telemetry.",
+      "Lime means action or selected proof; cyan means system state, navigation, or focus.",
+      "English and Brazilian Portuguese share one information architecture, interaction model, and level of care.",
+      "Real artifacts, explicit maturity labels, confidentiality boundaries, and recorded provenance carry every claim."
+    ],
+    "rules": [
+      {
+        "name": "The Two-Signal Rule",
+        "body": "Lime answers “what can I do or what is selected?” Cyan answers “where am I, what has focus, or what is the system reporting?” Do not swap their roles.",
+        "section": "colors"
+      },
+      {
+        "name": "The Dark-Field Rule",
+        "body": "Increase hierarchy with paper, muted copy, rules, and tonal layering before adding a brighter surface.",
+        "section": "colors"
+      },
+      {
+        "name": "The Functional-Color Rule",
+        "body": "Amber and coral appear only when the content carries warning, restriction, invalidity, or failure semantics.",
+        "section": "colors"
+      },
+      {
+        "name": "The Compressed-Not-Tiny Rule",
+        "body": "Create density with font stretch, weight, line height, and concise copy; never shrink essential labels into illegibility.",
+        "section": "typography"
+      },
+      {
+        "name": "The Casing-Is-Data Rule",
+        "body": "Lowercase the editorial interface where established, but preserve every official name, acronym, technology, and language-specific proper noun exactly.",
+        "section": "typography"
+      },
+      {
+        "name": "The One-Display-Voice Rule",
+        "body": "Archivo owns both display and body continuity. Monospace supports the dossier grammar; it does not replace prose.",
+        "section": "typography"
+      },
+      {
+        "name": "The Evidence-First Rule",
+        "body": "Production proof remains ahead of the capability menu. Do not turn the homepage back into a services-first brochure.",
+        "section": "layout"
+      },
+      {
+        "name": "The One-Open-File Rule",
+        "body": "A dossier rail may contain seven choices, but only one detailed dossier panel is visible at a time on every viewport.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat-by-Default Rule",
+        "body": "Static content surfaces use borders and tone. Shadows belong to overlays, the operating brief, or the protected contact layer.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Glow-Is-State Rule",
+        "body": "Glow must indicate activity, focus, or verified signal. Never wash whole sections in neon.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Enclosure-Has-a-Job Rule",
+        "body": "Curves identify a bounded object; square edges identify a rail, field, trace, or working surface.",
+        "section": "shapes"
+      },
+      {
+        "name": "The No-Soft-Card-Grid Rule",
+        "body": "Do not apply large rounded rectangles indiscriminately. Repeated evidence becomes a ledger, rail, or one-open file before it becomes a grid of cards.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "**Do** preserve the proof-first homepage sequence and the seven exact dossier slots.",
+      "**Do** keep exactly one dossier tab selected and one matching panel visible, with aligned tab IDs, `aria-controls`, panel IDs, and `aria-labelledby` values.",
+      "**Do** use lime for action/selection and cyan for telemetry/navigation/focus.",
+      "**Do** preserve skip links, semantic landmarks, heading order, visible focus, polite live status, 44px effective controls, and reduced-motion behavior.",
+      "**Do** keep English and Brazilian Portuguese structurally equivalent, with accurate `lang`, `hreflang`, metadata, control labels, and official casing.",
+      "**Do** update readable `assets/css/site.css` / `assets/js/site.js` and their checked-in minified counterparts together; the HTML loads the minified files.",
+      "**Do** preserve every asset's provenance record and the career-history no-endorsement statement.",
+      "**Do** keep public evidence, confidentiality labels, project maturity, and recovery copy factual and current.",
+      "**Do** verify responsive changes at the established 1080px, 1050px, 850px, and 620px transitions, with extra attention around the 1051/1050 navigation boundary."
+    ],
+    "donts": [
+      "**Don't** literalize fabricated status metrics, unsupported recency, tiny telemetry labels, or invented case copy from the direction comp.",
+      "**Don't** add testimonials, endorsements, benchmarks, client identities, certifications, pricing, revenue, or outcomes without approved evidence.",
+      "**Don't** turn the dossier into a generic dashboard, a bento archive, a full portfolio dump, or a services-first agency page.",
+      "**Don't** lowercase company names, personal names, acronyms, or technologies for aesthetic consistency.",
+      "**Don't** use glow as decoration, add purple cyberpunk saturation, introduce stock imagery, or place pseudo-text inside generated art.",
+      "**Don't** animate information that cannot be reached in reduced-motion mode or understood from semantic HTML.",
+      "**Don't** log or transmit contact-field contents through analytics, expose authentication state, or remove the Retry and LinkedIn recovery route.",
+      "**Don't** imply that career-history logos are Sabino Software clients or endorsers."
+    ]
+  }
+}

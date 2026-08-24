@@ -4,6 +4,10 @@ Static bilingual website for [sabino.pro](https://sabino.pro), designed to run d
 
 Readable CSS and JavaScript live in `assets/css/site.css` and `assets/js/site.js`; the HTML loads their checked-in minified counterparts so GitHub Pages remains build-free.
 
+The homepage follows a field-dossier structure: selected production evidence appears before the compact capability ledger, seven dossiers share one accessible tab panel, and deeper lab experiments stay behind an explicit progressive-disclosure control. English and Brazilian Portuguese use the same information architecture and interactions.
+
+Display typography uses a locally hosted subset of Archivo Variable. The font is distributed under the SIL Open Font License; the license text is checked in at `assets/fonts/OFL-Archivo.txt`.
+
 ## Local preview
 
 ```bash
@@ -28,7 +32,9 @@ The example uses Cloudflare's official always-pass development keys. Production 
 
 Umami provides privacy-focused pageview and interaction analytics through `umami.sabino.pro`. The tracker is restricted to the production `sabino.pro` hostname so local previews do not contaminate reports.
 
-`assets/js/analytics.js` classifies link and button interactions into navigation, contact, project, journal, social, language, and outbound events. Contact-form stages are tracked separately. Event data intentionally excludes form values, user identifiers, and URL query strings.
+`assets/js/analytics.js` classifies link and button interactions into navigation, contact, project, journal, social, language, and outbound events. Dossier selections, lab expansion, contact recovery, and contact-form stages are tracked separately. Event data intentionally excludes form values, user identifiers, and URL query strings.
+
+If the contact Worker or Turnstile cannot initialize, the form preserves entered fields and exposes colocated Retry and LinkedIn recovery actions.
 
 ## Deployment model
 
