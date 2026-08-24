@@ -829,7 +829,7 @@
     if (event.key === 'Escape') closeMenu();
   });
   window.addEventListener('resize', () => {
-    if (window.innerWidth > 940) closeMenu();
+    if (window.innerWidth > 1050) closeMenu();
     updateViewportState();
   }, { passive: true });
   window.addEventListener('scroll', updateViewportState, { passive: true });
