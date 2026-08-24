@@ -11,6 +11,7 @@
   const isPortuguese = () => document.documentElement.lang.toLowerCase().startsWith('pt');
   const localHostnames = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
   const wait = (duration) => new Promise((resolve) => window.setTimeout(resolve, duration));
+  const trackEvent = (eventName, data = {}) => window.sabinoAnalytics?.track(eventName, data);
 
   const addCleanup = (task) => cleanupTasks.push(task);
 
@@ -554,32 +555,43 @@
             token = value;
             submit.disabled = false;
             if (!completed) setStatus(copy.ready, 'success');
+            trackEvent('contact-verification', { state: 'ready' });
           },
           'expired-callback': () => {
             token = '';
             submit.disabled = true;
             setStatus(copy.verifying);
+            trackEvent('contact-verification', { state: 'expired' });
           },
           'error-callback': () => {
             token = '';
             submit.disabled = true;
             setStatus(copy.unavailable, 'error');
+            trackEvent('contact-verification', { state: 'error' });
           },
         });
       } catch {
-        if (!disposed) setStatus(copy.unavailable, 'error');
+        if (!disposed) {
+          setStatus(copy.unavailable, 'error');
+          trackEvent('contact-form', { state: 'unavailable' });
+        }
       }
     };
 
     const onSubmit = async (event) => {
       event.preventDefault();
-      if (!form.reportValidity()) return;
+      if (!form.reportValidity()) {
+        trackEvent('contact-form', { state: 'invalid' });
+        return;
+      }
       if (!token) {
         setStatus(copy.verifying, 'error');
+        trackEvent('contact-form', { state: 'verification-required' });
         return;
       }
       submit.disabled = true;
       setStatus(copy.sending);
+      trackEvent('contact-form', { state: 'attempt' });
       const fields = new FormData(form);
       try {
         const response = await fetch(`${baseEndpoint}/contact`, {
@@ -600,11 +612,13 @@
         completed = true;
         window.turnstile?.reset(widgetId);
         setStatus(copy.success, 'success');
+        trackEvent('contact-form', { state: 'success' });
       } catch {
         token = '';
         submit.disabled = true;
         window.turnstile?.reset(widgetId);
         setStatus(copy.error, 'error');
+        trackEvent('contact-form', { state: 'error' });
       }
     };
 

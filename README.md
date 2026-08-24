@@ -24,6 +24,12 @@ npm run dev
 
 The example uses Cloudflare's official always-pass development keys. Production accepts only the live domains configured in `wrangler.jsonc`; its real Turnstile secret and optional notification addresses remain Worker secrets.
 
+## Analytics
+
+Umami provides privacy-focused pageview and interaction analytics through `umami.sabino.pro`. The tracker is restricted to the production `sabino.pro` hostname so local previews do not contaminate reports.
+
+`assets/js/analytics.js` classifies link and button interactions into navigation, contact, project, journal, social, language, and outbound events. Contact-form stages are tracked separately. Event data intentionally excludes form values, user identifiers, and URL query strings.
+
 ## Deployment model
 
 - GitHub Pages serves the repository root.
