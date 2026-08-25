@@ -515,9 +515,18 @@
         panel.hidden = panel.id !== panelId;
         panel.classList.toggle('is-active', panel.id === panelId);
       });
-      if (focus) tab.focus();
+      if (focus) tab.focus({ preventScroll: true });
       if (tablist.scrollWidth > tablist.clientWidth) {
-        tab.scrollIntoView({ behavior: motionQuery.matches ? 'auto' : 'smooth', block: 'nearest', inline: 'center' });
+        const tabRect = tab.getBoundingClientRect();
+        const tablistRect = tablist.getBoundingClientRect();
+        const maxScrollLeft = tablist.scrollWidth - tablist.clientWidth;
+        const centeredScrollLeft = tablist.scrollLeft
+          + tabRect.left - tablistRect.left
+          - (tablist.clientWidth - tabRect.width) / 2;
+        tablist.scrollTo({
+          left: Math.max(0, Math.min(maxScrollLeft, centeredScrollLeft)),
+          behavior: motionQuery.matches ? 'auto' : 'smooth',
+        });
       }
       if (announce && status) {
         status.textContent = isPortuguese()
