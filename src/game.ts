@@ -351,6 +351,21 @@ function freshStats(): MissionStats {
   return { kills: 0, mends: 0, scans: 0, damage: 0, hostsLost: 0 };
 }
 
+/** Keep recoverable belongings; only the most recent empty marker is useful. */
+function compactEmptyDrops(entities: Entity[]): Entity[] {
+  let latestEmpty = -1;
+  for (let index = entities.length - 1; index >= 0; index--) {
+    if (entities[index]?.kind === 'drop' && entities[index].fragments === 0) {
+      latestEmpty = index;
+      break;
+    }
+  }
+  if (latestEmpty < 0) return entities;
+  return entities.filter(
+    (entity, index) => index === latestEmpty || entity?.kind !== 'drop' || entity.fragments !== 0,
+  );
+}
+
 function freshPlayer(vessel = 1, fragments = 2): PlayerState {
   return {
     ...SPAWN,
@@ -579,7 +594,9 @@ export class Game {
     } else if (p.moving) {
       const x = input.x / Math.max(1, magnitude),
         y = input.y / Math.max(1, magnitude);
-      p.facing = { x, y };
+      // Stick magnitude controls walking speed, never attack direction or dash
+      // distance. Keep the facing vector normalized even during a gentle tilt.
+      p.facing = { x: input.x / magnitude, y: input.y / magnitude };
       const speed = p.running ? 278 : 180;
       this.move(p, x * speed * dt, y * speed * ISO_Y * dt);
     }
@@ -1022,6 +1039,7 @@ export class Game {
       fragments: p.fragments,
       active: true,
     });
+    s.entities = compactEmptyDrops(s.entities);
     p.fragments = 0;
     p.dashing = 0;
     p.moving = false;
@@ -1242,6 +1260,9 @@ export class Game {
     )
       throw new Error('This saved crossing has an unsupported format.');
     const s = data.state as GameState;
+    // Earlier version 1 saves retained every empty grave marker. Compact those
+    // before the defensive entity cap so long-lived legitimate crossings resume.
+    if (Array.isArray(s?.entities)) s.entities = compactEmptyDrops(s.entities);
     const bounded = (value: unknown, min: number, max: number): value is number =>
       finite(value) && value >= min && value <= max;
     const integer = (value: unknown, min = 0, max = 1_000_000): value is number =>
@@ -1351,8 +1372,13 @@ export class Game {
       throw new Error('The saved host is invalid.');
     const entityIds = new Set<string>();
     for (const entity of s.entities) {
-      if (entity && coordinate(entity))
-        relocateLegacyPosition(entity, entity.kind === 'enemy' ? 13 : 0);
+      const mobileRadius =
+        entity &&
+        (entity.kind === 'enemy' || entity.kind === 'survivor') &&
+        bounded(entity.radius, 1, 200)
+          ? entity.radius * 0.65
+          : 0;
+      if (entity && coordinate(entity)) relocateLegacyPosition(entity, mobileRadius);
       if (
         !entity ||
         !textField(entity.id, 100) ||
@@ -1360,7 +1386,7 @@ export class Game {
         entityIds.has(entity.id) ||
         !['species', 'enemy', 'relay', 'survivor', 'drop', 'portal'].includes(entity.kind) ||
         !coordinate(entity) ||
-        !isWalkable(entity, 0) ||
+        !isWalkable(entity, mobileRadius) ||
         !bounded(entity.radius, 1, 200) ||
         (['subtype', 'name', 'state'] as const).some(
           (key) => entity[key] !== undefined && !textField(entity[key]),
@@ -1405,6 +1431,15 @@ export class Game {
         throw new Error('The saved witness is invalid.');
       if (entity.kind === 'drop' && !integer(entity.fragments))
         throw new Error('The saved belongings are invalid.');
+      if (entity.kind === 'drop') {
+        const sequence = /^drop-(\d+)$/.exec(entity.id);
+        if (
+          sequence &&
+          (!integer(Number(sequence[1]), 1, Number.MAX_SAFE_INTEGER - 1) ||
+            Number(sequence[1]) >= s.nextId)
+        )
+          throw new Error('The saved belongings counter is inconsistent.');
+      }
       if (
         entity.kind === 'portal' &&
         (entity.x !== PORTAL.x || entity.y !== PORTAL.y || !flag(entity.active))
@@ -1492,6 +1527,11 @@ export class Game {
     p.moving = false;
     p.running = false;
     p.dashing = 0;
+    const facingLength = Math.hypot(p.facing.x, p.facing.y);
+    p.facing =
+      facingLength > 0.00001
+        ? { x: p.facing.x / facingLength, y: p.facing.y / facingLength }
+        : { x: 1, y: 0 };
     p.invulnerable = Math.max(1.2, p.invulnerable);
     game.state = s;
     game.events = [];

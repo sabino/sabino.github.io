@@ -1279,3 +1279,167 @@ test('a pursuing sentinel rounds ruins and remains on ground while chasing a mov
     );
   }
 });
+
+test('analog movement strength changes walking speed but not dash distance or pulse range', () => {
+  const outcomes: { walking: number; dash: number; pulseSpeed: number }[] = [];
+  for (const strength of [1, 0.2]) {
+    const game = new Game('Analog host', 0x71a3);
+    tick(game, 0.1, { ...idle, x: strength });
+    const walking = distance(game.state.player, SPAWN);
+    assert.ok(
+      Math.abs(Math.hypot(game.state.player.facing.x, game.state.player.facing.y) - 1) < 0.00001,
+    );
+    const beforeDash = { x: game.state.player.x, y: game.state.player.y };
+    game.action('dash');
+    tick(game, 0.25);
+    const dash = distance(beforeDash, game.state.player);
+    game.action('pulse');
+    const projectile = game.state.projectiles[0];
+    const pulseSpeed = Math.hypot(projectile.vx, projectile.vy / ISO_Y);
+    outcomes.push({ walking, dash, pulseSpeed });
+  }
+  assert.ok(Math.abs(outcomes[1].walking / outcomes[0].walking - 0.2) < 0.00001);
+  assert.ok(Math.abs(outcomes[0].dash - outcomes[1].dash) < 0.00001);
+  assert.equal(outcomes[0].pulseSpeed, 620);
+  assert.equal(outcomes[1].pulseSpeed, 620);
+});
+
+test('old analog facing saves regain a full-strength direction without moving the host', () => {
+  const game = new Game();
+  const saved = game.serialize();
+  saved.state.player.facing = { x: 0.12, y: -0.16 };
+  const restored = Game.restore(saved);
+  assert.deepEqual({ x: restored.state.player.x, y: restored.state.player.y }, SPAWN);
+  assert.ok(Math.abs(restored.state.player.facing.x - 0.6) < 0.00001);
+  assert.ok(Math.abs(restored.state.player.facing.y + 0.8) < 0.00001);
+  restored.action('dash');
+  tick(restored, 0.25);
+  assert.ok(distance(restored.state.player, SPAWN) > 120);
+});
+
+test('a legacy witness inside the old cleft migrates with body clearance and can finish the rescue', () => {
+  const game = new Game();
+  toMission(game, 2);
+  const archivist = entities(game, 'survivor')[0];
+  at(game, archivist);
+  game.interact();
+  at(game, SPAWN);
+  const saved = game.serialize();
+  Object.assign(saved.state.entities.find((entity) => entity.kind === 'survivor')!, {
+    x: 825,
+    y: 702,
+  });
+  const restored = Game.restore(saved);
+  const witness = entities(restored, 'survivor')[0];
+  assert.ok(isWalkable(witness, witness.radius * 0.65));
+  const before = { x: witness.x, y: witness.y };
+  tick(restored, 3);
+  assert.ok(
+    distance(before, witness) > 80,
+    'the migrated witness must be able to move away from the cleft',
+  );
+  walkTo(restored, PORTAL, 35);
+  tick(restored, 3);
+  assert.equal(restored.state.rescued, true);
+  assert.equal(restored.interact(), true);
+  assert.equal(restored.state.phase, 'reveal');
+});
+
+test('a corrupt save counter cannot reuse an existing belongings ID on the next host loss', () => {
+  const game = new Game();
+  const enemy = entities(game, 'enemy')[0];
+  enemy.x = SPAWN.x + 35;
+  enemy.y = SPAWN.y;
+  enemy.active = true;
+  enemy.state = 'windup';
+  enemy.timer = 0.01;
+  game.state.player.hp = 1;
+  game.state.player.invulnerable = 0;
+  tick(game, 0.1);
+  assert.equal(game.state.phase, 'dead');
+  assert.equal(entities(game, 'drop').length, 1);
+  const valid = game.serialize();
+  assert.doesNotThrow(() => Game.restore(valid));
+  valid.state.nextId = 1;
+  assert.throws(() => Game.restore(valid), /belongings counter is inconsistent/);
+});
+
+test('hundreds of empty host losses retain valuable belongings and remain restorable', () => {
+  const game = new Game();
+  let firstDropId = '';
+  for (let life = 1; life <= 220; life++) {
+    at(game, SPAWN);
+    const enemy = entities(game, 'enemy')[0];
+    enemy.x = SPAWN.x + 35;
+    enemy.y = SPAWN.y;
+    enemy.active = true;
+    enemy.state = 'windup';
+    enemy.timer = 0.001;
+    game.state.player.hp = 1;
+    game.state.player.invulnerable = 0;
+    tick(game, 0.05);
+    assert.equal(game.state.phase, 'dead');
+    const drops = entities(game, 'drop');
+    if (life === 1) firstDropId = drops[0].id;
+    assert.equal(drops.find((drop) => drop.id === firstDropId)?.fragments, 2);
+    assert.ok(drops.filter((drop) => drop.fragments === 0).length <= 1);
+    assert.doesNotThrow(
+      () => Game.restore(game.serialize()),
+      `life ${life} produced an invalid save`,
+    );
+    game.reincarnate();
+  }
+  assert.equal(entities(game, 'drop').length, 2);
+  const valuable = entities(game, 'drop').find((drop) => drop.id === firstDropId)!;
+  at(game, valuable);
+  // A co-located recent empty marker may be selected first; both remain ordinary interactions.
+  game.interact();
+  if (game.state.player.fragments === 0) game.interact();
+  assert.equal(game.state.player.fragments, 2);
+});
+
+test('old saves with more than two hundred empty graves compact without losing valuable drops', () => {
+  const game = new Game();
+  const saved = game.serialize();
+  const valuable = [
+    {
+      id: 'drop-501',
+      kind: 'drop' as const,
+      x: 800,
+      y: 500,
+      radius: 18,
+      fragments: 7,
+      active: true,
+    },
+    {
+      id: 'drop-502',
+      kind: 'drop' as const,
+      x: 820,
+      y: 500,
+      radius: 18,
+      fragments: 3,
+      active: true,
+    },
+  ];
+  saved.state.entities.push(...valuable);
+  for (let index = 0; index < 250; index++)
+    saved.state.entities.push({
+      id: `drop-${1000 + index}`,
+      kind: 'drop',
+      x: 850,
+      y: 500,
+      radius: 18,
+      fragments: 0,
+      active: true,
+    });
+  saved.state.nextId = 2000;
+  const restored = Game.restore(saved);
+  const drops = entities(restored, 'drop');
+  assert.equal(drops.length, 3);
+  assert.deepEqual(
+    drops.filter((drop) => drop.fragments! > 0),
+    valuable,
+  );
+  assert.equal(drops.find((drop) => drop.fragments === 0)?.id, 'drop-1249');
+  assert.doesNotThrow(() => Game.restore(restored.serialize()));
+});
