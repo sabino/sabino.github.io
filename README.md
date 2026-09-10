@@ -61,6 +61,8 @@ Touch devices have a movement joystick and on-screen action buttons. The pause m
 
 Standard-mapped gamepads are supported, using Xbox-style button labels: **left stick / D-pad** moves, **right stick** aims, **X** uses the blade, **B** fires a pulse, **A** dashes, **Y** interacts, **LB** runs, and **RB** mends. **Start** pauses and **View** opens the journal. In menus, use the left stick or D-pad to select, **A** to confirm, and **B** to go back. Press a button once to let the browser detect the controller. The title supplies “Traveler” when a controller connects; a keyboard can change the name or seed. Hardware mappings vary; controller polling and menu behavior have synthetic browser coverage, while physical controllers still need a hardware playtest.
 
+If controller-only play leaves browser audio blocked, **Click for sound** appears beside the audio control. One click enables sound; a keyboard press or a click on the world also unlocks it.
+
 ## Offline play
 
 Production builds include a service worker and app manifest. Open the production preview (or an HTTPS deployment) once while online and allow its assets to cache. That installed version can then reload and resume local saves offline. Updates wait for existing sessions to close, so a new build never forcibly reloads a run. Development mode does not register the worker.
@@ -90,6 +92,8 @@ node scripts/browser-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174
 ```
 
 The script exercises the chapter through mouse, keyboard, and touch events. It writes screenshots and detailed results to the ignored `.dream-loop/qa/` directory and a readable report to [docs/QA.md](docs/QA.md). The report states the tested viewports, results, and remaining gaps; passing the scripted route does not establish audio fidelity or every possible combat outcome.
+
+Additional repeatable checks cover [save files and offline play](docs/STORAGE-QA.md), [controller integration](docs/GAMEPAD-QA.md), and [long-session simulation and host recovery](docs/ROBUSTNESS.md). Production startup and service-worker registration were also verified under a nested `/games/verso/` URL, with every runtime asset resolving inside that path.
 
 ## Project layout
 

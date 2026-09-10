@@ -168,6 +168,13 @@ export class Renderer {
         Math.min(0, this.width / 2 - s.player.x * this.scale),
       );
     }
+    // Very wide displays expose less than the island's walkable height.
+    // Follow vertically there so the southern cliff never hides the vessel.
+    if (this.height / this.scale < 650)
+      this.offsetY = Math.max(
+        this.height - WORLD_H * this.scale,
+        Math.min(0, this.height / 2 - s.player.y * this.scale),
+      );
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.fillStyle = '#031b24';
     c.fillRect(0, 0, this.width, this.height);
@@ -194,10 +201,10 @@ export class Renderer {
     for (const trail of this.dashTrail)
       actors.push({ y: trail.y, draw: () => this.drawTrail(trail) });
     actors.push({ y: s.player.y, draw: () => this.drawPlayer(s) });
-    for (const pillar of [0, 1])
-      actors.push({ y: pillar === 0 ? 606 : 590, draw: () => this.drawOcclusion(pillar) });
+    for (const [index, depth] of [606, 590, 582, 572].entries())
+      actors.push({ y: depth, draw: () => this.drawOcclusion(index) });
     actors.sort((a, b) => a.y - b.y).forEach((a) => a.draw());
-    // Foreground pillars participate in the same depth order as the actors.
+    // Foreground masonry participates in the same depth order as the actors.
     this.drawProjectiles(s);
     this.drawEffects(s);
     this.drawParticles(dt, paused);
@@ -217,7 +224,7 @@ export class Renderer {
       t = this.clock;
     for (const p of this.ambient) {
       const x = p.x + Math.sin(t * 0.18 + p.phase) * 14;
-      const y = (p.y - t * p.speed + 2000) % 1000;
+      const y = (((p.y - t * p.speed) % WORLD_H) + WORLD_H) % WORLD_H;
       c.globalAlpha = 0.25 + Math.sin(t * 0.7 + p.phase) * 0.18;
       c.fillStyle = p.y < 720 && p.y > 350 ? '#dcebac' : '#8cffff';
       c.fillRect(Math.round(x), Math.round(y), p.size, p.size);
@@ -665,6 +672,55 @@ export class Renderer {
           [949, 580],
         ],
       },
+      {
+        x: 1127,
+        y: 582,
+        polygon: [
+          [1080, 466],
+          [1108, 448],
+          [1122, 454],
+          [1122, 440],
+          [1142, 427],
+          [1164, 436],
+          [1164, 550],
+          [1175, 553],
+          [1168, 564],
+          [1136, 574],
+          [1118, 584],
+          [1084, 579],
+        ],
+        // Leave the visible passage open; only the arch's stone frame occludes.
+        opening: [
+          [1117, 504],
+          [1125, 485],
+          [1136, 474],
+          [1146, 467],
+          [1146, 549],
+          [1132, 556],
+          [1132, 574],
+          [1116, 581],
+        ],
+      },
+      {
+        x: 1064,
+        y: 572,
+        polygon: [
+          [1038, 480],
+          [1050, 470],
+          [1068, 477],
+          [1068, 465],
+          [1085, 456],
+          [1097, 465],
+          [1095, 540],
+          [1086, 545],
+          [1086, 565],
+          [1072, 573],
+          [1064, 564],
+          [1048, 566],
+          [1048, 532],
+          [1038, 525],
+        ],
+      },
     ];
     for (const oc of [pillars[index]]) {
       {
@@ -672,7 +728,11 @@ export class Renderer {
         c.beginPath();
         oc.polygon.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
         c.closePath();
-        c.clip();
+        if (oc.opening) {
+          oc.opening.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+          c.closePath();
+        }
+        c.clip('evenodd');
         c.drawImage(this.biomes[this.selectedBiome], 0, 0, 1600, 1000);
         c.restore();
       }
