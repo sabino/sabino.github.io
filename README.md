@@ -36,7 +36,9 @@ The opening chapter contains three assignments across three visual worlds:
 2. **The Violet Archive — adjustment.** Synchronize the three relays in the order supplied by the briefing, then extract.
 3. **The Last Witness — retrieval.** Find the archivist, establish contact, and escort them to the gate.
 
-Completing the chapter reveals who commissions these interventions and offers a choice: preserve the evidence and leave, or continue into seeded expeditions. Further expeditions reuse the assignment types with seeded encounter variation and bounded increases in danger.
+Completing the chapter reveals who commissions these interventions and offers a choice: preserve the evidence and leave, or continue into seeded expeditions. Further expeditions reuse the assignment types with seeded encounter variation and bounded increases in danger. Each world also assigns a deterministic sabre, cleaver, or rapier kit with balanced damage, recovery, and pulse-range differences. Inspect the kit in your field journal.
+
+Expand **Choose a world seed** on the title screen to enter a number, hexadecimal seed, or a name. The same seed reproduces the starting conditions and equipment; your later choices still affect the next crossing. The pause menu can copy your starting seed.
 
 Combat, mending, and host loss affect your record. If a host dies, another can continue the assignment and recover the fragments left behind. Debriefings and the field journal record species, assignment outcomes, world integrity, and lives ended.
 
@@ -56,6 +58,10 @@ Combat, mending, and host loss affect your record. If a host dies, another can c
 | **M**               | Toggle audio                                   |
 
 Touch devices have a movement joystick and on-screen action buttons. The pause menu includes the control reference. Leaving the game tab or moving focus to another window pauses play.
+
+## Offline play
+
+Production builds include a service worker and app manifest. Open the production preview (or an HTTPS deployment) once while online and allow its assets to cache. That installed version can then reload and resume local saves offline. Updates wait for existing sessions to close, so a new build never forcibly reloads a run. Development mode does not register the worker.
 
 ## Saves
 
@@ -91,6 +97,8 @@ src/
   render.ts     Canvas world, actors, animation, lighting, particles
   main.ts       Input, HUD, terminal panels, persistence, game loop
   audio.ts      Seeded Web Audio score and synthesized effects
+  seed.ts       Reproducible numeric and named world seeds
+  offline.ts    Production-only offline registration
   style.css     Responsive interface and touch layout
 public/art/     Original generated environments and sprite assets
 tests/          Engine regression tests
@@ -98,10 +106,10 @@ scripts/        Real-input browser acceptance check
 docs/           Source brief, design notes, asset prompts, QA report
 ```
 
-See [visual direction](docs/DESIGN.md), [biome prompts](docs/BIOMES.md), [sprite atlas notes](docs/EXPLORER-ATLAS.md), and [audio design](docs/AUDIO.md) for the implementation's art and sound decisions.
+See [visual direction](docs/DESIGN.md), [biome prompts](docs/BIOMES.md), [sprite atlas notes](docs/EXPLORER-ATLAS.md), [archivist atlas notes](docs/ARCHIVIST-ATLAS.md), and [audio design](docs/AUDIO.md) for the implementation's art and sound decisions.
 
 ## Scope and next milestones
 
-This is a compact single-player chapter with repeatable expeditions. Its three biome plates are **authored generated environments sharing a fixed collision layout**. Encounter details and the adaptive soundtrack use seeds; the terrain geometry is not generated procedurally at runtime.
+This is a compact single-player chapter with repeatable expeditions. Its three biome plates are **authored generated environments sharing a fixed collision layout**. Encounter details, vessel equipment, and the adaptive soundtrack use seeds; the terrain geometry is not generated procedurally at runtime.
 
-The original concept's 15-hour campaign, multiplayer, infinite terrain generation, broad procedural equipment and character systems, persistent skill progression, and machine-learning adaptation remain future work. The browser slice uses a dash rather than a full jumping/ladder system. It does not yet provide gamepad controls, cloud saves, or a production content pipeline.
+The original concept's 15-hour campaign, multiplayer, infinite terrain generation, inventory and broad procedural character systems, persistent skill progression, and machine-learning adaptation remain future work. The browser slice uses a dash rather than a full jumping/ladder system. It does not yet provide gamepad controls, cloud saves, or a production content pipeline.

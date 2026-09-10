@@ -23,6 +23,18 @@ export class Renderer {
   private selectedBiome = 0;
   private creatures = new Image();
   private hero = new Image();
+  private archivist = new Image();
+  private npcPosition = { x: 0, y: 0 };
+  private npcFacing = { x: 1, y: 0 };
+  private dashTrail: {
+    x: number;
+    y: number;
+    row: number;
+    col: number;
+    flip: boolean;
+    life: number;
+  }[] = [];
+  private trailClock = 0;
   private heroReady = false;
   private particles: Particle[] = [];
   private width = 1600;
@@ -54,6 +66,7 @@ export class Renderer {
     this.ready = Promise.all([
       this.load(this.background, './art/verge.png'),
       this.load(this.creatures, './art/species.png'),
+      this.load(this.archivist, './art/archivist.png'),
       this.load(this.biomes[1], './art/archive.png'),
       this.load(this.biomes[2], './art/witness.png'),
     ]).then(() => {
@@ -174,9 +187,12 @@ export class Renderer {
     const travel = Math.hypot(s.player.x - this.lastPosition.x, s.player.y - this.lastPosition.y);
     this.moving = travel > 0.05 ? 1 : 0;
     this.lastPosition = { x: s.player.x, y: s.player.y };
+    this.updateTrail(s, dt, paused);
     const actors: { y: number; draw: () => void }[] = s.entities
       .filter((e) => e.kind !== 'portal')
       .map((e) => ({ y: e.y, draw: () => this.drawEntity(e, s) }));
+    for (const trail of this.dashTrail)
+      actors.push({ y: trail.y, draw: () => this.drawTrail(trail) });
     actors.push({ y: s.player.y, draw: () => this.drawPlayer(s) });
     for (const pillar of [0, 1])
       actors.push({ y: pillar === 0 ? 606 : 590, draw: () => this.drawOcclusion(pillar) });
@@ -368,24 +384,42 @@ export class Renderer {
       c.fillText(['I', 'II', 'III'][(e.order ?? 0) % 3], e.x, e.y - 75);
       this.marker(e.x, e.y - 90, !!active);
     } else if (e.kind === 'survivor') {
-      this.shadow(e.x, e.y, 16, 6, 0.25);
+      this.shadow(e.x, e.y, 19, 7, 0.3);
+      const dx = e.x - this.npcPosition.x,
+        dy = e.y - this.npcPosition.y;
+      const moving = Math.hypot(dx, dy) > 0.15 && Math.hypot(dx, dy) < 40;
+      if (moving) this.npcFacing = { x: dx, y: dy };
+      this.npcPosition = { x: e.x, y: e.y };
+      const col = moving ? Math.floor(t * 7) % 2 : 0,
+        row = this.npcFacing.y < -0.1 ? 1 : 0;
+      const anchors = [
+        [326, 590],
+        [333.5, 590],
+        [320, 546],
+        [337.5, 552],
+      ];
+      const anchor = anchors[row * 2 + col],
+        size = 98;
       c.save();
-      c.translate(e.x, e.y);
-      c.globalAlpha = 0.85;
-      c.fillStyle = '#122f42';
-      c.fillRect(-9, -36, 18, 29);
-      c.fillStyle = '#a4bfd4';
-      c.fillRect(-7, -50, 14, 14);
-      c.fillStyle = '#e0e2cf';
-      c.fillRect(-6, -43, 12, 10);
-      c.fillStyle = '#d3a285';
-      c.fillRect(-6, -29, 12, 5);
-      c.fillStyle = '#0b1925';
-      c.fillRect(-8, -9, 6, 9);
-      c.fillRect(3, -9, 6, 9);
+      c.translate(Math.round(e.x), Math.round(e.y));
+      if (this.npcFacing.x < 0) c.scale(-1, 1);
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = 'high';
+      c.drawImage(
+        this.archivist,
+        col * 627,
+        row * 627,
+        627,
+        627,
+        (-anchor[0] / 627) * size,
+        (-anchor[1] / 627) * size,
+        size,
+        size,
+      );
+      c.imageSmoothingEnabled = false;
       c.restore();
-      this.glow(e.x, e.y - 20, 35, '#a8d6ff', 0.1);
-      this.marker(e.x, e.y - 66, !!e.active);
+      this.glow(e.x + 5, e.y - 40, 25, '#a8eaff', 0.13);
+      this.marker(e.x, e.y - 93, !!e.active);
     } else if (e.kind === 'drop') {
       this.glow(e.x, e.y - 10, 32, '#efb468', 0.2);
       c.fillStyle = '#eeb865';
@@ -436,6 +470,8 @@ export class Renderer {
     const flip = p.facing.x < -0.1;
     c.translate(Math.round(p.x), Math.round(p.y));
     if (flip) c.scale(-1, 1);
+    if (p.weaponCharge > 0 && !this.reducedMotion)
+      c.rotate(Math.sin(p.weaponCharge * Math.PI) * 0.035);
     if (this.heroReady) {
       const col = this.moving ? 1 + (Math.floor(t * 9) % 2) : 0;
       const row = p.facing.y < -0.1 ? 1 : 0;
@@ -541,7 +577,64 @@ export class Renderer {
       c.stroke();
     }
     c.restore();
-    this.glow(p.x + 23, p.y - 16, 25, '#9cf9ef', 0.06);
+    this.glow(p.x + (p.facing.x < 0 ? -23 : 23), p.y - 16, 25, s.weapon.color, 0.09);
+  }
+
+  private updateTrail(s: GameState, dt: number, paused: boolean) {
+    if (paused) return;
+    this.trailClock += dt;
+    for (const trail of this.dashTrail) trail.life -= dt;
+    this.dashTrail = this.dashTrail.filter((trail) => trail.life > 0);
+    if (s.player.dashing > 0 && this.trailClock > 0.025 && !this.reducedMotion) {
+      this.trailClock = 0;
+      this.dashTrail.push({
+        x: s.player.x,
+        y: s.player.y,
+        row: s.player.facing.y < -0.1 ? 1 : 0,
+        col: 1 + (Math.floor(this.clock * 9) % 2),
+        flip: s.player.facing.x < -0.1,
+        life: 0.22,
+      });
+    }
+  }
+
+  private drawTrail(trail: {
+    x: number;
+    y: number;
+    row: number;
+    col: number;
+    flip: boolean;
+    life: number;
+  }) {
+    if (!this.heroReady) return;
+    const c = this.ctx,
+      anchors = [
+        [282, 459],
+        [265, 459],
+        [268, 459],
+        [270, 430],
+        [263, 430],
+        [251, 434],
+      ],
+      anchor = anchors[trail.row * 3 + trail.col],
+      size = 104;
+    c.save();
+    c.translate(trail.x, trail.y);
+    if (trail.flip) c.scale(-1, 1);
+    c.globalAlpha = (trail.life / 0.22) * 0.24;
+    c.globalCompositeOperation = 'screen';
+    c.drawImage(
+      this.hero,
+      trail.col * 512,
+      trail.row * 512,
+      512,
+      512,
+      (-anchor[0] / 512) * size,
+      (-anchor[1] / 512) * size,
+      size,
+      size,
+    );
+    c.restore();
   }
 
   private drawOcclusion(index: number) {
@@ -589,7 +682,7 @@ export class Renderer {
   private drawProjectiles(s: GameState) {
     const c = this.ctx;
     for (const p of s.projectiles) {
-      const color = p.owner === 'player' ? '#acffff' : '#ff906d';
+      const color = p.owner === 'player' ? s.weapon.color : '#ff906d';
       this.glow(p.x, p.y - 16, 22, color, 0.3);
       c.strokeStyle = color;
       c.lineWidth = 3;

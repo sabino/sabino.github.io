@@ -2072,3 +2072,7 @@ kbd {
   color: #7f9d94;
   margin: 13px 0;
 }
+
+.title-screen {
+  align-items: safe center;
+}

@@ -736,11 +736,12 @@ window.addEventListener('keydown', (e) => {
   if (key === 'tab' && modal) {
     const focusable = Array.from(
       el('modal-layer').querySelectorAll<HTMLElement>(
-        'button:not([disabled]),input:not([hidden]),[tabindex="0"]',
+        'button:not([disabled]),input:not([hidden]),summary,[tabindex="0"]',
       ),
     );
-    const first = focusable[0],
-      last = focusable.at(-1);
+    const visibleFocusable = focusable.filter((node) => node.getClientRects().length > 0);
+    const first = visibleFocusable[0],
+      last = visibleFocusable.at(-1);
     if (e.shiftKey && document.activeElement === first) {
       e.preventDefault();
       last?.focus();
@@ -751,7 +752,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
-  if (target.tagName === 'BUTTON' && (key === ' ' || key === 'enter')) return;
+  if (['BUTTON', 'SUMMARY'].includes(target.tagName) && (key === ' ' || key === 'enter')) return;
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) e.preventDefault();
   if (e.repeat) {
     if (!modal) keys.add(key);

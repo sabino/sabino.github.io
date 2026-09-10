@@ -36,7 +36,7 @@ function extract(game: Game): void {
   assert.equal(game.interact(), true);
 }
 /** Drive real movement through a coarse navigation graph; do not teleport the host. */
-function walkTo(game: Game, target: Vec2, reach = 65): void {
+function walkTo(game: Game, target: Vec2, reach = 65, running = false): void {
   const origin = { x: game.state.player.x, y: game.state.player.y };
   const nodes = [{ x: origin.x, y: origin.y, parent: -1, gridX: 0, gridY: 0 }];
   const visited = new Set(['0,0']);
@@ -85,10 +85,11 @@ function walkTo(game: Game, target: Vec2, reach = 65): void {
       const range = distance(game.state.player, waypoint);
       const input = {
         ...idle,
+        running,
         x: (waypoint.x - game.state.player.x) / range,
         y: (waypoint.y - game.state.player.y) / ISO_Y / range,
       };
-      game.update(Math.min(1 / 60, range / 180), input);
+      game.update(Math.min(1 / 60, range / (running ? 278 : 180)), input);
       assert.equal(game.state.phase, 'playing', 'host was lost during the movement-only route');
     }
     assert.ok(distance(game.state.player, waypoint) < 3, 'movement stalled on a waypoint');
@@ -1127,4 +1128,154 @@ test('present but forged or corrupt equipment profiles cannot enter the simulati
   }
   const restored = Game.restore(game.serialize());
   assert.deepEqual(restored.state.weapon, game.state.weapon);
+});
+
+test('the archivist follows legitimate detours around both pillar sides and the southern cleft', () => {
+  const routes: [string, Vec2[]][] = [
+    [
+      'west pillar clockwise',
+      [
+        { x: 1010, y: 620 },
+        { x: 880, y: 630 },
+        { x: 705, y: 630 },
+        { x: 555, y: 600 },
+        { x: 550, y: 500 },
+        { x: 700, y: 490 },
+        { x: 720, y: 580 },
+      ],
+    ],
+    [
+      'west pillar counterclockwise',
+      [
+        { x: 1010, y: 600 },
+        { x: 880, y: 480 },
+        { x: 700, y: 490 },
+        { x: 550, y: 500 },
+        { x: 550, y: 610 },
+        { x: 700, y: 630 },
+      ],
+    ],
+    [
+      'east arch clockwise',
+      [
+        { x: 1280, y: 560 },
+        { x: 1270, y: 460 },
+        { x: 1130, y: 430 },
+        { x: 1090, y: 560 },
+        { x: 1240, y: 590 },
+      ],
+    ],
+    [
+      'east arch counterclockwise',
+      [
+        { x: 1090, y: 560 },
+        { x: 1120, y: 440 },
+        { x: 1280, y: 470 },
+        { x: 1270, y: 580 },
+      ],
+    ],
+    [
+      'southern cleft east to west',
+      [
+        { x: 910, y: 700 },
+        { x: 900, y: 620 },
+        { x: 760, y: 620 },
+        { x: 720, y: 695 },
+      ],
+    ],
+    [
+      'southern cleft west to east',
+      [
+        { x: 950, y: 620 },
+        { x: 760, y: 620 },
+        { x: 720, y: 695 },
+        { x: 760, y: 620 },
+        { x: 900, y: 620 },
+        { x: 930, y: 700 },
+      ],
+    ],
+  ];
+  for (const [name, route] of routes) {
+    const game = new Game();
+    toMission(game, 2);
+    // Isolate steering here; the complete-campaign route test retains live combat.
+    for (const enemy of entities(game, 'enemy')) {
+      enemy.hp = 0;
+      enemy.state = 'dead';
+    }
+    const archivist = entities(game, 'survivor')[0];
+    walkTo(game, archivist, 45);
+    assert.equal(game.interact(), true);
+    for (const waypoint of route) {
+      assert.ok(isWalkable(waypoint), `${name} requests an invalid player waypoint`);
+      walkTo(game, waypoint, 12, true);
+      assert.ok(isWalkable(archivist, archivist.radius * 0.65), `${name}: witness clipped scenery`);
+    }
+    tick(game, 12);
+    assert.ok(
+      distance(game.state.player, archivist) < 55,
+      `${name}: witness stalled at ${archivist.x},${archivist.y}, ${distance(game.state.player, archivist)}px from player`,
+    );
+    walkTo(game, PORTAL, 35);
+    tick(game, 3);
+    assert.equal(game.state.rescued, true, `${name}: witness did not reach the gate`);
+  }
+});
+
+test('the witness can catch up after a dash-assisted crossing above the southern cleft', () => {
+  const game = new Game();
+  toMission(game, 2);
+  for (const enemy of entities(game, 'enemy')) {
+    enemy.hp = 0;
+    enemy.state = 'dead';
+  }
+  const archivist = entities(game, 'survivor')[0];
+  walkTo(game, archivist, 45);
+  game.interact();
+  walkTo(game, { x: 900, y: 615 }, 12);
+  walkTo(game, { x: 740, y: 615 }, 12);
+  walkTo(game, { x: 725, y: 700 }, 20);
+  tick(game, 3);
+  walkTo(game, { x: 760, y: 620 }, 20, true);
+  game.action('dash', { x: 920, y: 620 });
+  tick(game, 0.2);
+  walkTo(game, { x: 925, y: 700 }, 20, true);
+  tick(game, 15);
+  assert.ok(
+    distance(game.state.player, archivist) < 55,
+    `witness stuck after dash detour at ${archivist.x},${archivist.y}, range ${distance(game.state.player, archivist)}`,
+  );
+  walkTo(game, PORTAL, 35);
+  tick(game, 3);
+  assert.equal(game.state.rescued, true);
+});
+
+test('a pursuing sentinel rounds ruins and remains on ground while chasing a moving host', () => {
+  const game = new Game();
+  const enemy = entities(game, 'enemy')[0];
+  const route = [
+    { x: 1280, y: 485 },
+    { x: 1090, y: 465 },
+    { x: 1050, y: 610 },
+    { x: 875, y: 620 },
+    { x: 720, y: 610 },
+    { x: 565, y: 580 },
+    { x: 570, y: 480 },
+    { x: 700, y: 525 },
+  ];
+  for (const target of route) {
+    game.state.player.invulnerable = 30;
+    walkTo(game, target, 12, true);
+    for (let frame = 0; frame < 480 && distance(enemy, game.state.player) > 70; frame++) {
+      game.update(1 / 60, idle);
+      assert.ok(
+        isWalkable(enemy, enemy.radius * 0.65),
+        'sentinel clipped through scenery while chasing',
+      );
+    }
+    assert.ok(
+      distance(enemy, game.state.player) <= 77,
+      `sentinel stalled at ${enemy.x},${enemy.y} while pursuing ${JSON.stringify(target)}`,
+    );
+  }
 });
