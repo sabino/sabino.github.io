@@ -103,7 +103,11 @@ export class AudioDirector {
       this.nextNote = this.context.currentTime + 0.2;
       const multipliers = [0.5, 0.75, 1];
       this.droneVoices.forEach((voice, index) => {
-        voice.frequency.setTargetAtTime(this.tonic * multipliers[index], this.context!.currentTime, 1.6);
+        voice.frequency.setTargetAtTime(
+          this.tonic * multipliers[index],
+          this.context!.currentTime,
+          1.6,
+        );
       });
     }
     this.updateLevels();
@@ -113,12 +117,27 @@ export class AudioDirector {
   play(event: string): void {
     const context = this.context;
     const bus = this.effects;
-    if (!context || !bus || context.state !== 'running' || this.paused || this.muted || this.disposed) return;
+    if (
+      !context ||
+      !bus ||
+      context.state !== 'running' ||
+      this.paused ||
+      this.muted ||
+      this.disposed
+    )
+      return;
 
     const now = context.currentTime;
     const limits: Record<string, number> = {
-      step: 0.17, blade: 0.13, pulse: 0.12, dash: 0.2, hurt: 0.23,
-      scan: 0.35, scanned: 0.5, relay: 0.35, click: 0.065,
+      step: 0.17,
+      blade: 0.13,
+      pulse: 0.12,
+      dash: 0.2,
+      hurt: 0.23,
+      scan: 0.35,
+      scanned: 0.5,
+      relay: 0.35,
+      click: 0.065,
     };
     if (now - (this.lastEvents.get(event) ?? -100) < (limits[event] ?? 0.08)) return;
     this.lastEvents.set(event, now);
@@ -128,10 +147,20 @@ export class AudioDirector {
     switch (event) {
       case 'blade':
         this.noise(now, 0.16, 0.17, 1700, 'bandpass', pan);
-        this.tone(320 * jitter, now, 0.13, 0.07, bus, { endHz: 115, cutoff: 1050, shape: 'triangle', pan });
+        this.tone(320 * jitter, now, 0.13, 0.07, bus, {
+          endHz: 115,
+          cutoff: 1050,
+          shape: 'triangle',
+          pan,
+        });
         break;
       case 'pulse':
-        this.tone(690 * jitter, now, 0.23, 0.095, bus, { endHz: 175, cutoff: 1900, shape: 'triangle', pan });
+        this.tone(690 * jitter, now, 0.23, 0.095, bus, {
+          endHz: 175,
+          cutoff: 1900,
+          shape: 'triangle',
+          pan,
+        });
         this.tone(1120 * jitter, now, 0.11, 0.035, bus, { endHz: 620, pan });
         break;
       case 'dash':
@@ -140,23 +169,34 @@ export class AudioDirector {
         break;
       case 'scan':
         [0, 7, 12].forEach((interval, index) => {
-          this.tone(this.tonic * 2 * ratio(interval), now + index * 0.09, 0.35, 0.045, bus,
-            { attack: 0.025, pan: (index - 1) * 0.35 });
+          this.tone(this.tonic * 2 * ratio(interval), now + index * 0.09, 0.35, 0.045, bus, {
+            attack: 0.025,
+            pan: (index - 1) * 0.35,
+          });
         });
         break;
       case 'scanned':
         this.chime([0, 7, 12, 15], now, 0.11, 0.075);
         break;
       case 'hurt':
-        this.tone(130 * jitter, now, 0.23, 0.12, bus, { endHz: 52, shape: 'triangle', cutoff: 600 });
+        this.tone(130 * jitter, now, 0.23, 0.12, bus, {
+          endHz: 52,
+          shape: 'triangle',
+          cutoff: 600,
+        });
         this.noise(now, 0.12, 0.12, 490, 'lowpass', 0);
         break;
       case 'heal':
         this.chime([0, 5, 7, 12], now, 0.13, 0.055);
         break;
       case 'enemy-death':
-        this.tone(290 * jitter, now, 0.4, 0.065, bus, { endHz: 68, shape: 'triangle', cutoff: 750, pan });
-        this.noise(now, 0.28, 0.10, 800, 'lowpass', pan);
+        this.tone(290 * jitter, now, 0.4, 0.065, bus, {
+          endHz: 68,
+          shape: 'triangle',
+          cutoff: 750,
+          pan,
+        });
+        this.noise(now, 0.28, 0.1, 800, 'lowpass', pan);
         break;
       case 'relay':
         this.chime([0, 7, 10, 19], now, 0.115, 0.07);
@@ -165,8 +205,11 @@ export class AudioDirector {
       case 'portal':
         this.noise(now, 1.3, 0.15, 740, 'bandpass', 0, 0.25);
         [0, 7, 12].forEach((interval, index) => {
-          this.tone(this.tonic * ratio(interval), now + index * 0.05, 1.7, 0.052, bus,
-            { endHz: this.tonic * ratio(interval + 12), attack: 0.28, pan: (index - 1) * 0.5 });
+          this.tone(this.tonic * ratio(interval), now + index * 0.05, 1.7, 0.052, bus, {
+            endHz: this.tonic * ratio(interval + 12),
+            attack: 0.28,
+            pan: (index - 1) * 0.5,
+          });
         });
         break;
       case 'complete':
@@ -177,10 +220,12 @@ export class AudioDirector {
         break;
       case 'death':
         [12, 7, 3, 0].forEach((interval, index) => {
-          this.tone(this.tonic * ratio(interval), now + index * 0.2, 1.5, 0.055, bus,
-            { endHz: this.tonic * ratio(interval) * 0.7, attack: 0.06 });
+          this.tone(this.tonic * ratio(interval), now + index * 0.2, 1.5, 0.055, bus, {
+            endHz: this.tonic * ratio(interval) * 0.7,
+            attack: 0.06,
+          });
         });
-        this.noise(now, 0.85, 0.10, 420, 'lowpass', 0, 0.04);
+        this.noise(now, 0.85, 0.1, 420, 'lowpass', 0, 0.04);
         break;
       case 'click':
         this.tone(680, now, 0.055, 0.037, bus, { endHz: 550 });
@@ -204,13 +249,16 @@ export class AudioDirector {
       this.suspendTimer = setTimeout(() => {
         this.suspendTimer = null;
         if (this.paused && context.state === 'running') {
-          void context.suspend().then(() => {
-            // An unpause can arrive while suspend() is waiting for the next
-            // audio render quantum; honor the latest state after it settles.
-            if (!this.paused && !this.disposed && this.context === context) {
-              return context.resume();
-            }
-          }).catch(() => undefined);
+          void context
+            .suspend()
+            .then(() => {
+              // An unpause can arrive while suspend() is waiting for the next
+              // audio render quantum; honor the latest state after it settles.
+              if (!this.paused && !this.disposed && this.context === context) {
+                return context.resume();
+              }
+            })
+            .catch(() => undefined);
         }
       }, 180);
     } else {
@@ -335,19 +383,30 @@ export class AudioDirector {
         const octave = step >= 16 ? 2 : 1;
         const note = this.tonic * ratio(this.pentatonic[degree]) * octave;
         const pan = (this.musicRandom() - 0.5) * 1.1;
-        this.tone(note, this.nextNote, 1.35, 0.035 + this.intensity * 0.009, bus,
-          { shape: 'triangle', attack: 0.065, cutoff: 1600, pan });
+        this.tone(note, this.nextNote, 1.35, 0.035 + this.intensity * 0.009, bus, {
+          shape: 'triangle',
+          attack: 0.065,
+          cutoff: 1600,
+          pan,
+        });
         // A very faint near-octave partial is the motif's glassy signature.
-        this.tone(note * 2.003, this.nextNote + 0.008, 0.62, 0.008, bus,
-          { attack: 0.035, pan: -pan });
+        this.tone(note * 2.003, this.nextNote + 0.008, 0.62, 0.008, bus, {
+          attack: 0.035,
+          pan: -pan,
+        });
       }
       if (step % 8 === 0 && this.intensity > 0.16) {
-        this.tone(this.tonic / 2, this.nextNote, 0.32, 0.014 + this.intensity * 0.045, bus,
-          { endHz: this.tonic / 3, attack: 0.012, cutoff: 380 });
+        this.tone(this.tonic / 2, this.nextNote, 0.32, 0.014 + this.intensity * 0.045, bus, {
+          endHz: this.tonic / 3,
+          attack: 0.012,
+          cutoff: 380,
+        });
       }
       if (step === 30 && this.musicRandom() > 0.48) {
-        this.tone(this.tonic * 4, this.nextNote, 2.2, 0.015, bus,
-          { attack: 0.08, pan: this.musicRandom() > 0.5 ? 0.55 : -0.55 });
+        this.tone(this.tonic * 4, this.nextNote, 2.2, 0.015, bus, {
+          attack: 0.08,
+          pan: this.musicRandom() > 0.5 ? 0.55 : -0.55,
+        });
       }
       this.phraseStep++;
       this.nextNote += this.beatLength * (1 - this.intensity * 0.12);
@@ -363,7 +422,11 @@ export class AudioDirector {
     this.music?.gain.setTargetAtTime(0.78 - this.intensity * 0.11, now, 0.6);
     this.droneLevel?.gain.setTargetAtTime(0.11 + this.intensity * 0.028, now, 1.1);
     this.droneFilter?.frequency.setTargetAtTime(560 + this.intensity * 380, now, 1.3);
-    this.windFilter?.frequency.setTargetAtTime(480 + (this.mission % 3) * 90 + this.intensity * 330, now, 1.8);
+    this.windFilter?.frequency.setTargetAtTime(
+      480 + (this.mission % 3) * 90 + this.intensity * 330,
+      now,
+      1.8,
+    );
     this.windLevel?.gain.setTargetAtTime(0.085 + this.intensity * 0.03, now, 1.1);
   }
 
@@ -373,17 +436,28 @@ export class AudioDirector {
       const note = this.tonic * 2 * ratio(interval);
       const pan = (index / Math.max(1, intervals.length - 1) - 0.5) * 0.6;
       this.tone(note, time + index * spacing, 1.1, volume, this.effects!, { attack: 0.008, pan });
-      this.tone(note * 2.007, time + index * spacing, 0.3, volume * 0.12, this.effects!, { attack: 0.005, pan });
+      this.tone(note * 2.007, time + index * spacing, 0.3, volume * 0.12, this.effects!, {
+        attack: 0.005,
+        pan,
+      });
     });
   }
 
-  private tone(hz: number, time: number, duration: number, volume: number, bus: AudioNode, options: ToneOptions = {}): void {
+  private tone(
+    hz: number,
+    time: number,
+    duration: number,
+    volume: number,
+    bus: AudioNode,
+    options: ToneOptions = {},
+  ): void {
     const context = this.context;
     if (!context || this.voices.size >= 56) return;
     const oscillator = context.createOscillator();
     oscillator.type = options.shape ?? 'sine';
     oscillator.frequency.setValueAtTime(hz, time);
-    if (options.endHz) oscillator.frequency.exponentialRampToValueAtTime(options.endHz, time + duration);
+    if (options.endHz)
+      oscillator.frequency.exponentialRampToValueAtTime(options.endHz, time + duration);
     const filter = context.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = options.cutoff ?? 5500;
@@ -401,8 +475,15 @@ export class AudioDirector {
     oscillator.stop(time + duration + 0.04);
   }
 
-  private noise(time: number, duration: number, volume: number, cutoff: number,
-    filterType: BiquadFilterType, pan: number, attack = 0.007): void {
+  private noise(
+    time: number,
+    duration: number,
+    volume: number,
+    cutoff: number,
+    filterType: BiquadFilterType,
+    pan: number,
+    attack = 0.007,
+  ): void {
     const context = this.context;
     if (!context || !this.noiseBuffer || !this.effects || this.voices.size >= 56) return;
     const source = context.createBufferSource();
@@ -440,7 +521,11 @@ export class AudioDirector {
 
   private disposeGraph(): void {
     [...this.permanentSources, ...this.voices].forEach((source) => {
-      try { source.stop(); } catch { /* The source may have ended already. */ }
+      try {
+        source.stop();
+      } catch {
+        /* The source may have ended already. */
+      }
       source.disconnect();
     });
     this.permanentSources = [];

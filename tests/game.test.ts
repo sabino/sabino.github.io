@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game, ISO_Y, OBSTACLES, PORTAL, SPAWN, distance, isWalkable } from '../src/game.ts';
-import type { Entity, InputState, Vec2 } from '../src/game.ts';
+import type { Entity, InputState, SavedGame, Vec2 } from '../src/game.ts';
 
 const idle: InputState = { x: 0, y: 0, running: false, aim: { x: 1000, y: 500 } };
 function tick(game: Game, seconds: number, input: InputState = idle): void {
@@ -376,6 +376,15 @@ test('malformed or incomplete saves fail safely', () => {
   assert.throws(() => Game.restore(missingSpecies), /missing required entities/);
   const invalidEntity = game.serialize(); invalidEntity.state.entities[0].x = Infinity;
   assert.throws(() => Game.restore(invalidEntity), /invalid entities/);
+  const completed = new Game(); scanAll(completed); extract(completed);
+  const invalidRecord = completed.serialize(); invalidRecord.state.history[0].title = 14 as never;
+  assert.throws(() => Game.restore(invalidRecord), /field record is invalid/);
+  const invalidStats = game.serialize(); invalidStats.state.missionStats = {} as never;
+  assert.throws(() => Game.restore(invalidStats), /incomplete/);
+  const invalidName = game.serialize(); invalidName.state.entities[0].subtype = 14 as never;
+  assert.throws(() => Game.restore(invalidName), /invalid entities/);
+  const invalidFacing = game.serialize(); invalidFacing.state.player.facing.x = 1e200;
+  assert.throws(() => Game.restore(invalidFacing), /host is invalid/);
 });
 
 test('dead and completed crossings can be saved and resumed without losing their phase', () => {
@@ -447,4 +456,139 @@ test('an ordinary movement route can align the lattice and escort the witness wi
   assert.equal(game.interact(), true);
   assert.equal(game.state.phase, 'reveal');
   assert.equal(game.state.kills, 0);
+});
+
+test('the southern abyss is not ground, and ordinary movement stops at its moss lip', () => {
+  const game = new Game();
+  assert.equal(isWalkable({ x: 795, y: 699.6 }), false);
+  assert.equal(isWalkable({ x: 825, y: 702 }), false);
+  tick(game, 5, { ...idle, y: 1 });
+  assert.ok(game.state.player.y <= 665, `host crossed the cleft lip at ${game.state.player.y}`);
+  assert.ok(isWalkable(game.state.player));
+  game.state.player.stamina = 100;
+  game.action('dash', { x: 795, y: 760 });
+  tick(game, 0.4);
+  assert.ok(game.state.player.y <= 665, 'dash crossed the southern cleft');
+});
+
+test('saves from before the southern cleft fix relocate the host and belongings to solid ground', () => {
+  const game = new Game();
+  const saved = game.serialize();
+  saved.state.player.x = 795; saved.state.player.y = 699.6;
+  saved.state.entities.push({ id: 'drop-legacy', kind: 'drop', x: 825, y: 702, radius: 18, fragments: 3, active: true });
+  const restored = Game.restore(saved);
+  assert.ok(isWalkable(restored.state.player));
+  assert.ok(distance(restored.state.player, { x: 795, y: 699.6 }) < 100);
+  const drop = entities(restored, 'drop')[0];
+  assert.ok(isWalkable(drop, 0));
+  assert.equal(drop.fragments, 3);
+  assert.ok(restored.drainEvents().some(event => event.text?.includes('solid ground')));
+  walkTo(restored, entities(restored, 'species')[0]);
+  assert.equal(restored.interact(), true, 'the migrated host must be able to continue its assignment');
+});
+
+test('previous valid species anchor positions remain compatible with saved crossings', () => {
+  const game = new Game();
+  const saved = game.serialize();
+  const old = [{ x: 435, y: 625 }, { x: 1090, y: 660 }, { x: 490, y: 497 }];
+  saved.state.entities.filter(entity => entity.kind === 'species').forEach((entity, index) => Object.assign(entity, old[index]));
+  const restored = Game.restore(saved);
+  assert.deepEqual(entities(restored, 'species').map(entity => ({ x: entity.x, y: entity.y })), old);
+  scanAll(restored); extract(restored);
+  assert.equal(restored.state.phase, 'complete');
+});
+
+test('corrupt save fields that could break rendering, movement, or objectives are rejected', () => {
+  const game = new Game();
+  const corruptions: [string, (save: SavedGame) => void][] = [
+    ['unsupported version', save => { (save as unknown as {version:number}).version = 999; }],
+    ['huge entity list', save => { save.state.entities = Array(201).fill(save.state.entities[0]); }],
+    ['duplicate IDs', save => { save.state.entities[1].id = save.state.entities[0].id; }],
+    ['duplicate species', save => { save.state.entities[1].subtype = save.state.entities[0].subtype; }],
+    ['species coordinate outside world', save => { save.state.entities[0].x = -1; }],
+    ['species coordinate in ruin', save => { Object.assign(save.state.entities[0], OBSTACLES[0]); }],
+    ['negative radius', save => { save.state.entities[0].radius = -1; }],
+    ['enormous radius', save => { save.state.entities[0].radius = 1e100; }],
+    ['invalid species hp', save => { save.state.entities[0].hp = 61; }],
+    ['dead species with live state', save => { save.state.entities[0].hp = 0; }],
+    ['invalid boolean', save => { save.state.entities[0].scanned = 'yes' as never; }],
+    ['missing species health', save => { delete save.state.entities[0].maxHp; }],
+    ['missing enemy health', save => { delete save.state.entities.find(entity => entity.kind === 'enemy')!.hp; }],
+    ['missing enemy home', save => { delete save.state.entities.find(entity => entity.kind === 'enemy')!.homeX; }],
+    ['invalid enemy state', save => { save.state.entities.find(entity => entity.kind === 'enemy')!.state = 'broken'; }],
+    ['invalid enemy timer', save => { save.state.entities.find(entity => entity.kind === 'enemy')!.timer = 1e99; }],
+    ['displaced portal', save => { save.state.entities.find(entity => entity.kind === 'portal')!.x = 700; }],
+    ['unscanned catalog entry', save => { save.state.catalog.push(save.state.entities[0].id); }],
+    ['oversized catalog', save => { save.state.catalog = Array(2000).fill('x'); }],
+    ['false relay progress', save => { save.state.relays = [0]; }],
+    ['invalid player health', save => { save.state.player.hp = 101; }],
+    ['negative player health', save => { save.state.player.hp = -5; }],
+    ['dead host without death phase', save => { save.state.player.hp = 0; }],
+    ['invalid player max health', save => { save.state.player.maxHp = 0; }],
+    ['invalid player energy', save => { save.state.player.stamina = 500; }],
+    ['invalid player cooldown', save => { save.state.player.cooldowns.blade = 1e100; }],
+    ['invalid player fragments', save => { save.state.player.fragments = -1; }],
+    ['huge facing vector', save => { save.state.player.facing.x = 1e100; }],
+    ['excessive elapsed time', save => { save.state.time = 1e100; }],
+    ['unbounded mission index', save => { save.state.mission = 1e100; }],
+    ['invalid integrity', save => { save.state.integrity = 101; }],
+    ['incomplete finished phase', save => { save.state.phase = 'complete'; }],
+    ['missing transient arrays', save => { save.state.effects = null as never; }],
+    ['malformed projectile', save => { save.state.projectiles.push({ x: NaN } as never); }],
+    ['malformed effect', save => { save.state.effects.push({ x: 800, y: 500, radius: 1e100 } as never); }],
+    ['extra future history', save => { save.state.history.push({ title: 'Impossible future' } as never); }],
+  ];
+  for (const [label, corrupt] of corruptions) {
+    const saved = game.serialize(); corrupt(saved);
+    assert.throws(() => Game.restore(saved), undefined, label);
+  }
+  assert.throws(() => Game.restore(' '.repeat(1_000_001)), /too large/);
+  assert.throws(() => Game.restore({ version: 1, state: { padding: 'x'.repeat(1_000_001) } }), /too large/);
+});
+
+test('duplicate or impossible relay/witness progress cannot restore a softlocked assignment', () => {
+  const game = new Game(); toMission(game, 1);
+  const duplicate = game.serialize();
+  const relays = duplicate.state.entities.filter(entity => entity.kind === 'relay');
+  relays[1].order = relays[0].order;
+  assert.throws(() => Game.restore(duplicate));
+  const outOfOrder = game.serialize();
+  outOfOrder.state.entities.filter(entity => entity.kind === 'relay')[2].active = true;
+  outOfOrder.state.relays = [2];
+  assert.throws(() => Game.restore(outOfOrder), /progress is inconsistent/);
+  toMission(game, 2);
+  const impossibleRescue = game.serialize(); impossibleRescue.state.rescued = true;
+  assert.throws(() => Game.restore(impossibleRescue), /progress is inconsistent/);
+  const missingWitness = game.serialize(); missingWitness.state.entities = missingWitness.state.entities.filter(entity => entity.kind !== 'survivor');
+  assert.throws(() => Game.restore(missingWitness), /missing required entities/);
+});
+
+test('legitimate saves survive movement, live combat effects, every mission phase, and endless progression', () => {
+  const game = new Game('Compatibility', 0xffffffff);
+  const roundTrip = () => {
+    const restored = Game.restore(game.serialize());
+    assert.equal(restored.state.phase, game.state.phase);
+    assert.equal(restored.state.mission, game.state.mission);
+    assert.equal(restored.state.player.hp, game.state.player.hp);
+    assert.equal(restored.state.integrity, game.state.integrity);
+  };
+  roundTrip();
+  tick(game, 0.2, { ...idle, x: 0.4, y: -0.2 }); roundTrip();
+  game.action('pulse', { x: 1000, y: 490 }); roundTrip();
+  game.action('dash', { x: 780, y: 490 }); roundTrip();
+  game.state.player.hp = 40; game.state.integrity = 92;
+  game.action('mend'); roundTrip();
+  tick(game, 0.5);
+  scanAll(game); roundTrip(); extract(game); roundTrip();
+  game.nextMission(); roundTrip();
+  for (const relay of entities(game, 'relay')) {
+    at(game, relay); game.interact(); roundTrip();
+  }
+  extract(game); roundTrip(); game.nextMission(); roundTrip();
+  const archivist = entities(game, 'survivor')[0];
+  at(game, archivist); game.interact(); roundTrip();
+  archivist.x = PORTAL.x + 40; archivist.y = PORTAL.y;
+  at(game, PORTAL); tick(game, 0.1); roundTrip();
+  extract(game); roundTrip(); game.nextMission(); roundTrip();
+  assert.equal(game.state.endless, true);
 });

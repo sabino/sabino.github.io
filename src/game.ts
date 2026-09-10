@@ -136,6 +136,13 @@ export const SPAWN: Vec2 = { x: 795, y: 525 };
 export const PORTAL: Vec2 = { x: 1030, y: 366 };
 export const WALKABLE: Vec2[] = [
   [320, 380], [760, 275], [1060, 340], [1360, 480], [1390, 640],
+  [1090, 760], [870, 715], [855, 675], [810, 655], [785, 690], [755, 718],
+  [610, 745], [300, 625], [260, 510],
+].map(([x, y]) => ({ x, y }));
+// Saves made before the visible southern cleft received accurate collision can
+// contain a host on its former ground polygon. Restore gently relocates those.
+const LEGACY_WALKABLE: Vec2[] = [
+  [320, 380], [760, 275], [1060, 340], [1360, 480], [1390, 640],
   [1090, 760], [860, 720], [610, 745], [300, 625], [260, 510],
 ].map(([x, y]) => ({ x, y }));
 export const OBSTACLES = [
@@ -163,10 +170,10 @@ function direction(a: Vec2, b: Vec2): Vec2 {
   return length > 0.001 ? { x: (b.x - a.x) / length, y: (b.y - a.y) / ISO_Y / length } : { x: 1, y: 0 };
 }
 
-function pointInPolygon(point: Vec2): boolean {
+function pointInPolygon(point: Vec2, polygon = WALKABLE): boolean {
   let inside = false;
-  for (let i = 0, j = WALKABLE.length - 1; i < WALKABLE.length; j = i++) {
-    const a = WALKABLE[i], b = WALKABLE[j];
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i], b = polygon[j];
     if ((a.y > point.y) !== (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
   }
   return inside;
@@ -179,6 +186,23 @@ export function isWalkable(point: Vec2, radius = 12): boolean {
     if (!pointInPolygon({ x: point.x + offset.x, y: point.y + offset.y })) return false;
   }
   return OBSTACLES.every(obstacle => distance(point, obstacle) >= obstacle.radius + radius);
+}
+
+function relocateLegacyPosition(point: Vec2, radius: number): boolean {
+  if (isWalkable(point, radius)) return false;
+  if (!pointInPolygon(point, LEGACY_WALKABLE) || OBSTACLES.some(obstacle => distance(point, obstacle) < obstacle.radius)) return false;
+  let nearest = SPAWN, best = Infinity;
+  // This narrow migration is bounded to the old island; wildly invalid save
+  // coordinates still fail validation rather than being silently accepted.
+  for (let x = point.x - 100; x <= point.x + 100; x += 4) {
+    for (let y = point.y - 60; y <= point.y + 60; y += 4) {
+      const candidate = { x, y };
+      const d = distance(point, candidate);
+      if (d < best && isWalkable(candidate, radius)) { nearest = candidate; best = d; }
+    }
+  }
+  point.x = nearest.x; point.y = nearest.y;
+  return true;
 }
 
 function hash(seed: number, value: number): number {
@@ -243,9 +267,9 @@ export class Game {
       return isWalkable(candidate, 8) ? candidate : base;
     };
     const species = [
-      { subtype: 'mushroom', name: 'Lumen cap', x: 435, y: 625 },
-      { subtype: 'crystal', name: 'Glass fern', x: 1090, y: 660 },
-      { subtype: 'deer', name: 'Prism stag', x: 490, y: 497 },
+      { subtype: 'mushroom', name: 'Lumen cap', x: 410, y: 650 },
+      { subtype: 'crystal', name: 'Glass fern', x: 1090, y: 710 },
+      { subtype: 'deer', name: 'Prism stag', x: 470, y: 528 },
     ];
     for (const item of species) {
       const position = shifted(item);
@@ -264,7 +288,7 @@ export class Game {
         radius: 15, active: false, state: 'waiting', hp: 100, maxHp: 100, timer: 0 });
     }
     const enemyCount = s.mission === 0 ? 1 : Math.min(4, 2 + Math.floor(s.mission / 6));
-    const positions = [{ x: 1330, y: 500 }, { x: 1160, y: 640 }, { x: 590, y: 400 }, { x: 390, y: 550 }];
+    const positions = [{ x: 1340, y: 505 }, { x: 1160, y: 640 }, { x: 590, y: 400 }, { x: 390, y: 550 }];
     for (let index = 0; index < enemyCount; index++) {
       const position = shifted(positions[index], 18);
       const maxHp = 84 + Math.min(42, Math.floor(s.mission / 3) * 6);
@@ -737,33 +761,93 @@ export class Game {
   serialize(): SavedGame { return { version: 1, state: copy(this.state) }; }
 
   static restore(data: unknown): Game {
-    if (typeof data === 'string') {
-      try { data = JSON.parse(data); } catch { throw new Error('The saved crossing is not valid JSON.'); }
-    }
+    // Bound both file imports and local-storage restores before cloning or visiting
+    // nested records. A malformed save must never become live renderer input.
+    let encoded: string;
+    try { encoded = typeof data === 'string' ? data : JSON.stringify(data); }
+    catch { throw new Error('The saved crossing is not valid JSON.'); }
+    if (typeof encoded !== 'string' || encoded.length > 1_000_000) throw new Error('The saved crossing is too large or empty.');
+    try { data = JSON.parse(encoded); } catch { throw new Error('The saved crossing is not valid JSON.'); }
     if (!data || typeof data !== 'object' || !('version' in data) || data.version !== 1 || !('state' in data)) throw new Error('This saved crossing has an unsupported format.');
-    const s = copy(data.state) as GameState;
-    const numberFields = ['mission', 'seed', 'worldSeed', 'time', 'levelTime', 'integrity', 'kills', 'mends', 'relayErrors', 'nextId'] as const;
-    if (!s || typeof s !== 'object' || numberFields.some(key => !finite(s[key])) || !Number.isInteger(s.mission) || s.mission < 0 || s.mission > 100000
-      || !['playing', 'dead', 'complete', 'reveal'].includes(s.phase) || typeof s.name !== 'string'
-      || !Array.isArray(s.entities) || s.entities.length > 200 || !Array.isArray(s.catalog) || !Array.isArray(s.relays)
-      || !Array.isArray(s.history) || !Array.isArray(s.projectiles) || !Array.isArray(s.effects) || !s.missionStats) throw new Error('This saved crossing is incomplete.');
+    const s = data.state as GameState;
+    const bounded = (value: unknown, min: number, max: number): value is number => finite(value) && value >= min && value <= max;
+    const integer = (value: unknown, min = 0, max = 1_000_000): value is number => bounded(value, min, max) && Number.isInteger(value);
+    const textField = (value: unknown, max = 200): value is string => typeof value === 'string' && value.length <= max;
+    const flag = (value: unknown): value is boolean => typeof value === 'boolean';
+    const coordinate = (point: Vec2): boolean => !!point && bounded(point.x, 0, WORLD_WIDTH) && bounded(point.y, 0, WORLD_HEIGHT);
+    const health = (entity: { hp?: number; maxHp?: number }): boolean => bounded(entity.maxHp, 1, 1000) && bounded(entity.hp, 0, entity.maxHp);
+    const seed = (value: unknown): boolean => integer(value, 0, 0xffffffff);
+    const finished = s?.phase === 'complete' || s?.phase === 'reveal';
+    if (!s || typeof s !== 'object' || !integer(s.mission, 0, 100000) || !seed(s.seed) || !seed(s.worldSeed)
+      || !bounded(s.time, 0, 1e12) || !bounded(s.levelTime, 0, s.time + 0.001) || !bounded(s.integrity, 0, 100)
+      || !integer(s.kills) || !integer(s.mends) || !integer(s.relayErrors) || !integer(s.nextId, 1, Number.MAX_SAFE_INTEGER)
+      || !['playing', 'dead', 'complete', 'reveal'].includes(s.phase) || !textField(s.name, 24) || !s.name.trim() || !textField(s.missionTitle)
+      || !flag(s.rescued) || !flag(s.endless) || s.endless !== (s.mission >= 3)
+      || !Array.isArray(s.entities) || s.entities.length > 200 || !Array.isArray(s.catalog) || s.catalog.length > 3
+      || !Array.isArray(s.relays) || s.relays.length > 3 || !Array.isArray(s.history) || s.history.length !== s.mission + (finished ? 1 : 0)
+      || !Array.isArray(s.projectiles) || s.projectiles.length > 100 || !Array.isArray(s.effects) || s.effects.length > 100
+      || !s.missionStats || ['kills', 'mends', 'scans', 'damage', 'hostsLost'].some(key => !integer(s.missionStats[key as keyof MissionStats]))) throw new Error('This saved crossing is incomplete.');
+    if (s.history.some((entry, index) => !entry || !textField(entry.title) || !textField(entry.report, 2000) || entry.mission !== index
+      || !bounded(entry.integrity, 0, 100) || !integer(entry.kills) || !integer(entry.mends) || !integer(entry.vessel, 1)
+      || !seed(entry.worldSeed) || !bounded(entry.time, 0, s.time + 0.001))) throw new Error('The saved field record is invalid.');
     const p = s.player;
-    if (!p || ['x', 'y', 'hp', 'maxHp', 'stamina', 'maxStamina', 'vessel', 'fragments', 'dashing', 'invulnerable', 'weaponCharge'].some(key => !finite(p[key as keyof PlayerState]))
-      || !p.facing || !finite(p.facing.x) || !finite(p.facing.y) || !p.cooldowns
-      || (['blade', 'pulse', 'dash', 'scan', 'mend'] as ActionKind[]).some(kind => !finite(p.cooldowns[kind]))
-      || p.maxHp <= 0 || p.maxStamina <= 0 || !isWalkable(p, 0)) throw new Error('The saved host is invalid.');
-    if (s.entities.some(entity => !entity || typeof entity.id !== 'string' || !['species', 'enemy', 'relay', 'survivor', 'drop', 'portal'].includes(entity.kind)
-      || !finite(entity.x) || !finite(entity.y) || !finite(entity.radius))) throw new Error('The saved world contains invalid entities.');
-    if (s.entities.filter(entity => entity.kind === 'species').length !== 3 || s.entities.filter(entity => entity.kind === 'portal').length !== 1
-      || (s.mission % 3 === 1 && s.entities.filter(entity => entity.kind === 'relay').length !== 3)
-      || (s.mission % 3 === 2 && s.entities.filter(entity => entity.kind === 'survivor').length !== 1)) throw new Error('The saved assignment is missing required entities.');
+    const relocated = !!p && coordinate(p) && relocateLegacyPosition(p, 12);
+    if (!p || !coordinate(p) || !isWalkable(p, 12) || !health(p) || !bounded(p.maxStamina, 1, 1000) || !bounded(p.stamina, 0, p.maxStamina)
+      || !integer(p.vessel, 1) || !integer(p.fragments) || !bounded(p.dashing, 0, 0.2) || !bounded(p.invulnerable, 0, 30)
+      || !bounded(p.weaponCharge, 0, 1) || !flag(p.moving) || !flag(p.running)
+      || !p.facing || !finite(p.facing.x) || !finite(p.facing.y) || Math.hypot(p.facing.x, p.facing.y) > 1.01
+      || !p.cooldowns || (['blade', 'pulse', 'dash', 'scan', 'mend'] as ActionKind[]).some(kind => !bounded(p.cooldowns[kind], 0, 10))
+      || (s.phase === 'dead') !== (p.hp === 0)) throw new Error('The saved host is invalid.');
+    const entityIds = new Set<string>();
+    for (const entity of s.entities) {
+      if (entity && coordinate(entity)) relocateLegacyPosition(entity, entity.kind === 'enemy' ? 13 : 0);
+      if (!entity || !textField(entity.id, 100) || !entity.id || entityIds.has(entity.id)
+        || !['species', 'enemy', 'relay', 'survivor', 'drop', 'portal'].includes(entity.kind)
+        || !coordinate(entity) || !isWalkable(entity, 0) || !bounded(entity.radius, 1, 200)
+        || (['subtype', 'name', 'state'] as const).some(key => entity[key] !== undefined && !textField(entity[key]))
+        || (['scanned', 'active', 'rewarded'] as const).some(key => entity[key] !== undefined && !flag(entity[key]))
+        || (['hp', 'maxHp', 'phase', 'timer', 'homeX', 'homeY', 'fragments'] as const).some(key => entity[key] !== undefined && !bounded(entity[key], 0, 1_000_000))) throw new Error('The saved world contains invalid entities.');
+      entityIds.add(entity.id);
+      if (entity.kind === 'species' || entity.kind === 'enemy' || entity.kind === 'survivor') {
+        if (!health(entity) || !flag(entity.active)) throw new Error('The saved world contains invalid entities.');
+      }
+      if (entity.kind === 'species' && (!['mushroom', 'crystal', 'deer'].includes(entity.subtype!) || !flag(entity.scanned)
+        || !['idle', 'dead'].includes(entity.state!) || (entity.state === 'dead') !== (entity.hp === 0))) throw new Error('The saved species record is invalid.');
+      if (entity.kind === 'enemy' && (!['idle', 'pursuing', 'windup', 'recovering', 'dead'].includes(entity.state!)
+        || (entity.state === 'dead') !== (entity.hp === 0) || !bounded(entity.timer, 0, 10)
+        || !coordinate({ x: entity.homeX!, y: entity.homeY! }) || !isWalkable({ x: entity.homeX!, y: entity.homeY! }, 0))) throw new Error('The saved sentinel is invalid.');
+      if (entity.kind === 'relay' && (!integer(entity.order, 0, 2) || !flag(entity.active))) throw new Error('The saved relay sequence is invalid.');
+      if (entity.kind === 'survivor' && (!['waiting', 'following', 'rescued'].includes(entity.state!)
+        || entity.active !== (entity.state !== 'waiting'))) throw new Error('The saved witness is invalid.');
+      if (entity.kind === 'drop' && !integer(entity.fragments)) throw new Error('The saved belongings are invalid.');
+      if (entity.kind === 'portal' && (entity.x !== PORTAL.x || entity.y !== PORTAL.y || !flag(entity.active))) throw new Error('The saved gate is invalid.');
+    }
+    const species = s.entities.filter(entity => entity.kind === 'species');
+    const relays = s.entities.filter(entity => entity.kind === 'relay');
+    const survivor = s.entities.filter(entity => entity.kind === 'survivor');
+    const enemies = s.entities.filter(entity => entity.kind === 'enemy');
+    if (species.length !== 3 || new Set(species.map(entity => entity.subtype)).size !== 3 || s.entities.filter(entity => entity.kind === 'portal').length !== 1
+      || relays.length !== (s.mission % 3 === 1 ? 3 : 0) || new Set(relays.map(entity => entity.order)).size !== relays.length
+      || survivor.length !== (s.mission % 3 === 2 ? 1 : 0) || enemies.length < 1 || enemies.length > 4) throw new Error('The saved assignment is missing required entities.');
+    const scannedIds = species.filter(entity => entity.scanned).map(entity => entity.id);
+    const activeRelays = relays.filter(entity => entity.active).map(entity => entity.order!).sort((a, b) => a - b);
+    if (s.catalog.some(id => typeof id !== 'string' || !scannedIds.includes(id)) || new Set(s.catalog).size !== s.catalog.length
+      || s.catalog.length !== scannedIds.length || s.relays.some((order, index) => order !== index || order !== activeRelays[index])
+      || s.relays.length !== activeRelays.length || activeRelays.some((order, index) => order !== index)
+      || s.rescued !== (survivor[0]?.state === 'rescued')) throw new Error('The saved assignment progress is inconsistent.');
+    if (s.projectiles.some(projectile => !projectile || !coordinate(projectile) || !textField(projectile.id, 100)
+      || !bounded(projectile.vx, -10000, 10000) || !bounded(projectile.vy, -10000, 10000)
+      || !bounded(projectile.life, 0, 30) || !bounded(projectile.damage, 0, 1000) || !bounded(projectile.radius, 1, 100)
+      || !['player', 'enemy'].includes(projectile.owner))) throw new Error('The saved projectiles are invalid.');
+    if (s.effects.some(effect => !effect || !coordinate(effect) || !textField(effect.id, 100) || !textField(effect.kind, 100)
+      || !bounded(effect.maxLife, 0.001, 30) || !bounded(effect.life, 0, effect.maxLife) || !bounded(effect.radius, 0, 1000)
+      || (effect.angle !== undefined && !bounded(effect.angle, -Math.PI * 2, Math.PI * 2))
+      || (effect.text !== undefined && !textField(effect.text, 200)))) throw new Error('The saved effects are invalid.');
+    const ready = s.mission % 3 === 0 ? scannedIds.length === 3 : s.mission % 3 === 1 ? activeRelays.length === 3 : s.rescued;
+    if ((finished && !ready) || (s.phase === 'reveal' && s.mission !== 2) || (s.phase === 'complete' && s.mission === 2)) throw new Error('The saved crossing has an invalid completion state.');
     const game = new Game(s.name, s.seed);
-    s.integrity = clamp(s.integrity, 0, 100);
-    p.hp = clamp(p.hp, 0, p.maxHp);
-    p.stamina = clamp(p.stamina, 0, p.maxStamina);
-    p.fragments = Math.max(0, Math.floor(p.fragments));
-    s.catalog = s.entities.filter(entity => entity.kind === 'species' && entity.scanned).map(entity => entity.id);
-    s.relays = s.entities.filter(entity => entity.kind === 'relay' && entity.active).map(entity => entity.order!).sort((a, b) => a - b);
+    s.catalog = scannedIds;
+    s.relays = activeRelays;
     // Ephemeral animations do not belong across browser sessions.
     s.effects = []; s.projectiles = [];
     p.moving = false; p.running = false; p.dashing = 0;
@@ -771,7 +855,7 @@ export class Game {
     game.state = s;
     game.events = [];
     game.refreshPortal();
-    game.emit('resume', 'Crossing restored. This world remembers your last visit.');
+    game.emit('resume', relocated ? 'The island shifted. Your host has been returned to solid ground.' : 'Crossing restored. This world remembers your last visit.');
     return game;
   }
 

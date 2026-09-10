@@ -1,6 +1,6 @@
 # Explorer atlas
 
-`public/art/explorer-alpha.png` is the selected production sprite atlas, generated with the built-in image generation tool. It is a 1536 × 1024 **RGBA** PNG, with 3 columns and 2 rows of 512 × 512 cells. Preserve its generated alpha channel. The original `explorer.png` remains unchanged.
+`public/art/explorer-alpha.png` is the selected production sprite atlas, generated with the built-in image generation tool. It is a 1536 × 1024 **RGBA** PNG, with 3 columns and 2 rows of 512 × 512 cells. Preserve its generated alpha channel. The rejected original remains unchanged in the ignored `.dream-loop/explorer-rejected.png`.
 
 The top row is front/right idle, walk A, walk B. The bottom row is rear/right idle, walk A, walk B. For left-facing movement, mirror the selected sprite in the renderer.
 
