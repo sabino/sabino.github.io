@@ -1,0 +1,450 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Game, ISO_Y, OBSTACLES, PORTAL, SPAWN, distance, isWalkable } from '../src/game.ts';
+import type { Entity, InputState, Vec2 } from '../src/game.ts';
+
+const idle: InputState = { x: 0, y: 0, running: false, aim: { x: 1000, y: 500 } };
+function tick(game: Game, seconds: number, input: InputState = idle): void {
+  for (let elapsed = 0; elapsed < seconds - 0.000001; elapsed += 1 / 60) game.update(Math.min(1 / 60, seconds - elapsed), input);
+}
+function at(game: Game, point: Vec2): void { game.state.player.x = point.x; game.state.player.y = point.y; }
+function entities(game: Game, kind: Entity['kind']): Entity[] { return game.state.entities.filter(entity => entity.kind === kind); }
+function scanAll(game: Game): void {
+  for (const species of entities(game, 'species')) {
+    at(game, { x: species.x + 45, y: species.y });
+    tick(game, 0.6);
+    assert.equal(game.action('scan'), true);
+  }
+}
+function extract(game: Game): void { at(game, PORTAL); assert.equal(game.interact(), true); }
+/** Drive real movement through a coarse navigation graph; do not teleport the host. */
+function walkTo(game: Game, target: Vec2, reach = 65): void {
+  const origin = { x: game.state.player.x, y: game.state.player.y };
+  const nodes = [{ x: origin.x, y: origin.y, parent: -1, gridX: 0, gridY: 0 }];
+  const visited = new Set(['0,0']);
+  let end = -1;
+  for (let head = 0; head < nodes.length && head < 10000; head++) {
+    const node = nodes[head];
+    if (distance(node, target) < reach) { end = head; break; }
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+      const gridX = node.gridX + dx, gridY = node.gridY + dy;
+      const key = `${gridX},${gridY}`;
+      const next = { x: origin.x + gridX * 20, y: origin.y + gridY * 12, parent: head, gridX, gridY };
+      if (!visited.has(key) && isWalkable(next, 18) && isWalkable({ x: (next.x + node.x) / 2, y: (next.y + node.y) / 2 }, 18)) {
+        visited.add(key); nodes.push(next);
+      }
+    }
+  }
+  assert.notEqual(end, -1, `no route from ${JSON.stringify(origin)} to ${JSON.stringify(target)}`);
+  const route: Vec2[] = [];
+  for (let index = end; index !== -1; index = nodes[index].parent) route.unshift(nodes[index]);
+  for (const waypoint of route.slice(1)) {
+    for (let step = 0; distance(game.state.player, waypoint) > 2 && step < 180; step++) {
+      const range = distance(game.state.player, waypoint);
+      const input = { ...idle, x: (waypoint.x - game.state.player.x) / range, y: (waypoint.y - game.state.player.y) / ISO_Y / range };
+      game.update(Math.min(1 / 60, range / 180), input);
+      assert.equal(game.state.phase, 'playing', 'host was lost during the movement-only route');
+    }
+    assert.ok(distance(game.state.player, waypoint) < 3, 'movement stalled on a waypoint');
+  }
+}
+function toMission(game: Game, mission: number): void {
+  while (game.state.mission < mission) {
+    if (game.state.mission % 3 === 0) scanAll(game);
+    else if (game.state.mission % 3 === 1) {
+      for (const relay of entities(game, 'relay')) { at(game, { x: relay.x - 45, y: relay.y }); assert.equal(game.interact(), true); }
+    } else {
+      const archivist = entities(game, 'survivor')[0];
+      at(game, archivist); assert.equal(game.interact(), true);
+      at(game, PORTAL); archivist.x = PORTAL.x + 40; archivist.y = PORTAL.y;
+      tick(game, 0.1);
+    }
+    extract(game);
+    assert.equal(game.nextMission(), true);
+  }
+}
+
+test('the opening deployment is a peaceful, deterministic three-species survey', () => {
+  const a = new Game('Sabino', 12345), b = new Game('Sabino', 12345);
+  assert.deepEqual(a.serialize(), b.serialize());
+  assert.equal(a.state.name, 'Sabino');
+  assert.equal(a.state.entities.filter(entity => entity.kind === 'species').length, 3);
+  assert.equal(a.state.entities.filter(entity => entity.kind === 'enemy').length, 1);
+  assert.equal(a.state.entities.find(entity => entity.kind === 'enemy')?.active, false);
+  assert.deepEqual({ x: a.state.player.x, y: a.state.player.y }, SPAWN);
+  tick(a, 20);
+  assert.equal(a.state.player.hp, 100);
+  assert.equal(a.state.integrity, 100);
+  assert.equal(a.state.kills, 0);
+});
+
+test('movement is diagonal-normalized on the isometric ground plane', () => {
+  const a = new Game(), b = new Game();
+  tick(a, 0.3, { ...idle, x: 1 });
+  tick(b, 0.3, { ...idle, x: 1, y: -1 });
+  assert.ok(Math.abs(distance(a.state.player, SPAWN) - 54) < 0.01);
+  assert.ok(Math.abs(distance(a.state.player, SPAWN) - distance(b.state.player, SPAWN)) < 0.01);
+  assert.ok(b.state.player.y < SPAWN.y);
+});
+
+test('running is faster, drains energy, and recovers while stationary', () => {
+  const game = new Game();
+  tick(game, 0.3, { ...idle, x: 1, running: true });
+  assert.ok(distance(game.state.player, SPAWN) > 80);
+  assert.ok(game.state.player.stamina < 94);
+  tick(game, 1);
+  assert.equal(game.state.player.stamina, 100);
+});
+
+test('movement and dash cannot leave the island or tunnel through ruins', () => {
+  const game = new Game();
+  for (let i = 0; i < 1600; i++) {
+    const angle = Math.floor(i / 100) * Math.PI / 4;
+    const input = { ...idle, x: Math.cos(angle), y: Math.sin(angle), running: true };
+    if (i % 60 === 0) game.action('dash');
+    game.update(1 / 60, input);
+    assert.ok(isWalkable(game.state.player), `player left valid ground at frame ${i}`);
+  }
+  at(game, { x: 560, y: 553 });
+  game.state.player.stamina = 100;
+  game.state.player.cooldowns.dash = 0;
+  game.action('dash', { x: 700, y: 553 });
+  tick(game, 0.25);
+  assert.ok(game.state.player.x < 590, 'dash must stop at the west side of the pillar');
+  assert.ok(distance(game.state.player, OBSTACLES[0]) >= OBSTACLES[0].radius + 12);
+});
+
+test('a long or invalid frame does not fast-forward the game', () => {
+  const game = new Game();
+  game.update(Infinity, idle); game.update(NaN, idle); game.update(-1, idle);
+  assert.equal(game.state.time, 0);
+  game.update(60, idle);
+  assert.ok(Math.abs(game.state.time - 0.25) < 0.000001);
+  game.update(0.1, { x: NaN, y: Infinity, running: false, aim: { x: NaN, y: NaN } });
+  assert.ok(Number.isFinite(game.state.player.x));
+});
+
+test('scanning requires proximity and each lifeform grants only one catalog entry', () => {
+  const game = new Game();
+  assert.equal(game.action('scan'), false);
+  const species = entities(game, 'species')[0];
+  at(game, species);
+  const before = game.state.player.fragments;
+  assert.equal(game.action('scan'), true);
+  assert.equal(game.state.catalog.length, 1);
+  assert.equal(game.state.player.fragments, before + 1);
+  tick(game, 1);
+  assert.equal(game.action('scan'), false);
+  assert.equal(game.state.catalog.length, 1);
+  assert.equal(game.state.integrity, 100);
+});
+
+test('the survey can be completed without combat and requires extraction at the gate', () => {
+  const game = new Game();
+  at(game, PORTAL);
+  assert.equal(game.interact(), false);
+  scanAll(game);
+  assert.equal(game.state.phase, 'playing');
+  assert.equal(entities(game, 'portal')[0].active, true);
+  assert.equal(game.state.kills, 0);
+  assert.equal(game.state.integrity, 100);
+  extract(game);
+  assert.equal(game.state.phase, 'complete');
+  assert.equal(game.state.history.length, 1);
+  assert.equal(game.getDebrief().rating, 'LIGHT FOOTPRINT');
+  assert.ok(game.getObjective().tasks.every(task => task.done));
+  assert.equal(game.interact(), false);
+});
+
+test('relay puzzle rejects incorrect order, resets progress, and cannot farm shards', () => {
+  const game = new Game(); toMission(game, 1);
+  const relays = entities(game, 'relay');
+  at(game, relays[1]);
+  assert.equal(game.interact(), false);
+  assert.equal(game.state.integrity, 98);
+  assert.equal(game.state.relayErrors, 1);
+  const before = game.state.player.fragments;
+  at(game, relays[0]); assert.equal(game.interact(), true);
+  assert.equal(game.state.player.fragments, before + 1);
+  assert.ok(entities(game, 'enemy').every(entity => entity.active));
+  at(game, relays[2]); assert.equal(game.interact(), false);
+  assert.deepEqual(game.state.relays, []);
+  at(game, relays[0]); assert.equal(game.interact(), true);
+  assert.equal(game.state.player.fragments, before + 1);
+  at(game, relays[1]); assert.equal(game.interact(), true);
+  at(game, relays[2]); assert.equal(game.interact(), true);
+  assert.deepEqual(game.state.relays, [0, 1, 2]);
+  assert.equal(entities(game, 'portal')[0].active, true);
+  extract(game);
+  assert.equal(game.state.phase, 'complete');
+});
+
+test('rescue requires contact and escort, then unlocks the corporate revelation', () => {
+  const game = new Game(); toMission(game, 2);
+  const archivist = entities(game, 'survivor')[0];
+  at(game, PORTAL); assert.equal(game.interact(), false);
+  at(game, archivist); assert.equal(game.interact(), true);
+  assert.equal(archivist.state, 'following');
+  const before = { x: archivist.x, y: archivist.y };
+  at(game, { x: archivist.x - 150, y: archivist.y - 20 });
+  tick(game, 0.3);
+  assert.ok(distance(archivist, before) > 20);
+  at(game, PORTAL);
+  assert.equal(game.interact(), false, 'the player alone cannot extract a distant survivor');
+  archivist.x = PORTAL.x + 40; archivist.y = PORTAL.y;
+  tick(game, 0.1);
+  assert.equal(game.state.rescued, true);
+  extract(game);
+  assert.equal(game.state.phase, 'reveal');
+  assert.equal(game.state.history.length, 3);
+  assert.match(game.getDebrief().summary, /auctions changes/);
+  assert.ok(game.drainEvents().some(event => event.type === 'reveal'));
+});
+
+test('after the revelation the player can continue through seeded endless assignments', () => {
+  const game = new Game('Traveler', 584); toMission(game, 3);
+  assert.equal(game.state.endless, true);
+  assert.equal(game.state.mission, 3);
+  assert.match(game.state.missionTitle, /Unlicensed crossing/);
+  assert.equal(game.state.catalog.length, 0);
+  assert.equal(game.state.integrity, 100);
+  assert.equal(game.state.phase, 'playing');
+  assert.equal(game.nextMission(), false, 'cannot skip an unfinished assignment');
+  toMission(game, 5);
+  assert.equal(game.state.mission, 5);
+  assert.equal(entities(game, 'survivor').length, 1);
+});
+
+test('the next world seed remembers the previous intervention footprint', () => {
+  const a = new Game('A', 120), b = new Game('A', 120);
+  scanAll(a); scanAll(b);
+  b.state.integrity = 67;
+  extract(a); extract(b); a.nextMission(); b.nextMission();
+  assert.notEqual(a.state.worldSeed, b.state.worldSeed);
+  assert.notDeepEqual(entities(a, 'species').map(entity => [entity.x, entity.y]), entities(b, 'species').map(entity => [entity.x, entity.y]));
+});
+
+test('blade attacks respect range, direction, cooldown, energy, and world consequences', () => {
+  const game = new Game();
+  const enemy = entities(game, 'enemy')[0];
+  enemy.x = 850; enemy.y = 525;
+  assert.equal(game.action('blade', enemy), true);
+  assert.equal(enemy.hp, 50);
+  assert.equal(game.action('blade', enemy), false);
+  tick(game, 0.4);
+  assert.equal(game.action('blade', { x: 500, y: 525 }), true);
+  assert.equal(enemy.hp, 50, 'attacks behind the host must miss');
+  tick(game, 0.4);
+  game.action('blade', enemy);
+  tick(game, 0.4);
+  game.action('blade', enemy);
+  assert.equal(enemy.state, 'dead');
+  assert.equal(game.state.kills, 1);
+  assert.equal(game.state.integrity, 88);
+  tick(game, 1);
+  game.state.player.stamina = 0;
+  assert.equal(game.action('blade', enemy), false);
+  assert.equal(game.action('pulse', enemy), false);
+  assert.equal(game.action('dash'), false);
+});
+
+test('pulse projectiles can hit distant enemies and are removed on impact', () => {
+  const game = new Game();
+  const enemy = entities(game, 'enemy')[0];
+  enemy.x = 990; enemy.y = 525;
+  const health = enemy.hp!;
+  assert.equal(game.action('pulse', enemy), true);
+  assert.equal(game.state.projectiles.length, 1);
+  tick(game, 0.4);
+  assert.equal(enemy.hp, health - 27);
+  assert.equal(game.state.projectiles.length, 0);
+});
+
+test('ancient ruins block pulse shots', () => {
+  const game = new Game();
+  at(game, { x: 540, y: 553 });
+  const enemy = entities(game, 'enemy')[0];
+  enemy.x = 710; enemy.y = 553;
+  const health = enemy.hp!;
+  game.action('pulse', enemy);
+  tick(game, 0.2);
+  assert.equal(enemy.hp, health);
+  assert.equal(game.state.projectiles.length, 0);
+});
+
+test('destroying a survey lifeform is consequential but leaves a catalogable specimen', () => {
+  const game = new Game();
+  const species = entities(game, 'species')[0];
+  at(game, { x: species.x - 55, y: species.y });
+  game.action('blade', species); tick(game, 0.4); game.action('blade', species);
+  assert.equal(species.state, 'dead');
+  assert.equal(game.state.integrity, 80);
+  assert.equal(game.action('scan'), true);
+  assert.ok(game.state.catalog.includes(species.id));
+  assert.ok(game.drainEvents().some(event => event.text?.includes('from remains')));
+});
+
+test('enemy attacks telegraph before damage and dash provides evasion', () => {
+  const game = new Game();
+  const enemy = entities(game, 'enemy')[0];
+  enemy.x = game.state.player.x + 45; enemy.y = game.state.player.y;
+  enemy.timer = 0; game.state.player.invulnerable = 0;
+  tick(game, 0.1);
+  assert.equal(enemy.state, 'windup');
+  assert.equal(game.state.player.hp, 100);
+  game.action('dash', { x: 650, y: 525 });
+  tick(game, 0.7);
+  assert.equal(game.state.player.hp, 100);
+  assert.ok(distance(game.state.player, enemy) > 70);
+});
+
+test('host death leaves belongings and reincarnation preserves the assignment and consequences', () => {
+  const game = new Game();
+  const species = entities(game, 'species')[0];
+  at(game, species); game.action('scan');
+  at(game, SPAWN);
+  const enemy = entities(game, 'enemy')[0];
+  enemy.x = SPAWN.x + 35; enemy.y = SPAWN.y; enemy.active = true;
+  enemy.state = 'windup'; enemy.timer = 0.01;
+  game.state.player.hp = 5; game.state.player.invulnerable = 0;
+  const shards = game.state.player.fragments;
+  tick(game, 0.1);
+  assert.equal(game.state.phase, 'dead');
+  assert.equal(game.state.integrity, 92);
+  assert.equal(game.state.player.fragments, 0);
+  const drop = entities(game, 'drop')[0];
+  assert.equal(drop.fragments, shards);
+  const time = game.state.time;
+  tick(game, 1);
+  assert.equal(game.state.time, time, 'death pauses simulation');
+  assert.equal(game.reincarnate(), true);
+  assert.equal(game.state.player.vessel, 2);
+  assert.equal(game.state.player.hp, 100);
+  assert.equal(game.state.player.fragments, 0);
+  assert.ok(game.state.catalog.includes(species.id));
+  assert.equal(game.state.integrity, 92);
+  at(game, drop); assert.equal(game.interact(), true);
+  assert.equal(game.state.player.fragments, shards);
+  assert.equal(entities(game, 'drop').length, 0);
+  assert.equal(game.reincarnate(), false);
+});
+
+test('mending spends a finite memory shard and cannot exceed health or integrity caps', () => {
+  const game = new Game();
+  assert.equal(game.action('mend'), false, 'no cost when already whole');
+  assert.equal(game.state.player.fragments, 2);
+  game.state.player.hp = 83; game.state.integrity = 99;
+  assert.equal(game.action('mend'), true);
+  assert.equal(game.state.player.hp, 100);
+  assert.equal(game.state.integrity, 100);
+  assert.equal(game.state.player.fragments, 1);
+  assert.equal(game.state.mends, 1);
+  game.state.player.hp = 40;
+  assert.equal(game.action('mend'), false, 'mend cooldown applies');
+  tick(game, 3);
+  assert.equal(game.action('mend'), true);
+  assert.equal(game.state.player.hp, 68);
+  assert.equal(game.state.player.fragments, 0);
+  tick(game, 3);
+  assert.equal(game.action('mend'), false);
+});
+
+test('save data is detached, restores progress, and resets transient simulation effects', () => {
+  const game = new Game('Sabino', 42); scanAll(game);
+  const saved = game.serialize();
+  saved.state.player.hp = 77;
+  assert.equal(game.state.player.hp, 100, 'saved data is not a mutable reference');
+  const restored = Game.restore(JSON.stringify(saved));
+  assert.equal(restored.state.name, 'Sabino');
+  assert.equal(restored.state.player.hp, 77);
+  assert.equal(restored.state.catalog.length, 3);
+  assert.equal(restored.state.effects.length, 0);
+  assert.equal(restored.state.projectiles.length, 0);
+  assert.equal(entities(restored, 'portal')[0].active, true);
+  extract(restored);
+  assert.equal(restored.state.phase, 'complete');
+});
+
+test('malformed or incomplete saves fail safely', () => {
+  for (const value of [undefined, null, '', 'broken-json', {}, { version: 2 }, { version: 1, state: {} }]) {
+    assert.throws(() => Game.restore(value));
+  }
+  const game = new Game();
+  const invalidPosition = game.serialize(); invalidPosition.state.player.x = -99999;
+  assert.throws(() => Game.restore(invalidPosition), /host is invalid/);
+  const missingSpecies = game.serialize(); missingSpecies.state.entities = missingSpecies.state.entities.filter(entity => entity.kind !== 'species');
+  assert.throws(() => Game.restore(missingSpecies), /missing required entities/);
+  const invalidEntity = game.serialize(); invalidEntity.state.entities[0].x = Infinity;
+  assert.throws(() => Game.restore(invalidEntity), /invalid entities/);
+});
+
+test('dead and completed crossings can be saved and resumed without losing their phase', () => {
+  const game = new Game(); scanAll(game); extract(game);
+  const restored = Game.restore(game.serialize());
+  assert.equal(restored.state.phase, 'complete');
+  assert.equal(restored.nextMission(), true);
+  restored.state.phase = 'dead'; restored.state.player.hp = 0;
+  const dead = Game.restore(restored.serialize());
+  assert.equal(dead.state.phase, 'dead');
+  assert.equal(dead.reincarnate(), true);
+});
+
+test('all objective locations have a route from the spawn on the collision mesh', () => {
+  const game = new Game(); toMission(game, 2);
+  const targets = [...entities(game, 'species'), ...entities(game, 'survivor'), ...entities(game, 'portal'),
+    { x: 650, y: 410 }, { x: 875, y: 590 }, { x: 1230, y: 565 }];
+  const step = 20;
+  const key = (point: Vec2) => `${point.x},${point.y}`;
+  const queue: Vec2[] = [{ x: 800, y: 520 }];
+  const visited = new Set([key(queue[0])]);
+  for (let head = 0; head < queue.length; head++) {
+    const point = queue[head];
+    for (const [dx, dy] of [[step, 0], [-step, 0], [0, step * ISO_Y], [0, -step * ISO_Y]]) {
+      const next = { x: Math.round(point.x + dx), y: Math.round(point.y + dy) };
+      if (!visited.has(key(next)) && isWalkable(next, 14)) { visited.add(key(next)); queue.push(next); }
+    }
+  }
+  for (const target of targets) assert.ok(queue.some(point => distance(point, target) < 85), `no navigable interaction approach for ${JSON.stringify(target)}`);
+});
+
+test('event queues drain once and repeated status messages are throttled', () => {
+  const game = new Game();
+  assert.ok(game.drainEvents().some(event => event.type === 'deploy'));
+  assert.deepEqual(game.drainEvents(), []);
+  for (let i = 0; i < 100; i++) game.action('scan');
+  assert.equal(game.drainEvents().filter(event => event.type === 'message').length, 1);
+});
+
+test('the full opening survey is walkable with ordinary movement and no damage', () => {
+  const game = new Game();
+  for (const species of entities(game, 'species')) {
+    walkTo(game, species);
+    assert.equal(game.interact(), true);
+  }
+  walkTo(game, PORTAL);
+  assert.equal(game.interact(), true);
+  assert.equal(game.state.phase, 'complete');
+  assert.equal(game.state.integrity, 100);
+  assert.equal(game.state.player.hp, 100);
+  assert.equal(game.state.kills, 0);
+});
+
+test('an ordinary movement route can align the lattice and escort the witness without kills', () => {
+  const game = new Game(); toMission(game, 1);
+  for (const relay of entities(game, 'relay')) {
+    walkTo(game, relay);
+    assert.equal(game.interact(), true);
+  }
+  walkTo(game, PORTAL);
+  assert.equal(game.interact(), true);
+  game.nextMission();
+  const archivist = entities(game, 'survivor')[0];
+  walkTo(game, archivist);
+  assert.equal(game.interact(), true);
+  walkTo(game, PORTAL, 35);
+  tick(game, 2);
+  assert.equal(game.state.rescued, true, `archivist stalled at ${archivist.x},${archivist.y}`);
+  assert.equal(game.interact(), true);
+  assert.equal(game.state.phase, 'reveal');
+  assert.equal(game.state.kills, 0);
+});

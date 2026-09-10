@@ -1,0 +1,6 @@
+{
+  "name": "verso", "version": "0.1.0", "private": true, "type": "module",
+  "description": "An isometric multiverse adventure about species, consequences, and borrowed lives.",
+  "scripts": {"dev": "vite --host 0.0.0.0", "build": "tsc --noEmit && vite build", "preview": "vite preview --host 0.0.0.0", "test": "node --experimental-strip-types --test tests/*.test.ts", "check": "npm test && npm run build"},
+  "devDependencies": {"typescript": "^5.9.3", "vite": "^7.1.5"}
+}
