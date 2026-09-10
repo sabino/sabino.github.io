@@ -1,7 +1,7 @@
 /**
  * Storage, accessibility, phase-modal, and offline acceptance checks.
  * Node 22.18+; use ONLY an isolated Agent Workspace Chromium CDP endpoint.
- * node scripts/browser-storage-check.mjs http://127.0.0.1:PORT http://localhost:4174
+ * node scripts/browser-storage-check.mjs http://127.0.0.1:PORT http://localhost:4174/?study=1
  * Phase fixtures are generated offline and imported using the game's file UI.
  * The separate real-input campaign is scripts/browser-check.mjs.
  */
@@ -12,7 +12,9 @@ import { Game } from '../src/game.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const endpoint = process.argv[2],
-  baseUrl = process.argv[3] || 'http://localhost:4174';
+  studyUrl = new URL(process.argv[3] || 'http://localhost:4174');
+studyUrl.searchParams.set('study', '1');
+const baseUrl = studyUrl.href;
 if (!endpoint || !['127.0.0.1', 'localhost'].includes(new URL(endpoint).hostname))
   throw new Error('Pass the workspace-owned loopback CDP endpoint.');
 if (new URL(baseUrl).hostname !== 'localhost')

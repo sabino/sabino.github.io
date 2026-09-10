@@ -1,6 +1,6 @@
 /**
  * Real-input browser acceptance check. Node 22.18+; no test-only game mutations.
- * Usage: node scripts/browser-check.mjs http://127.0.0.1:PORT [http://localhost:4174]
+ * Usage: node scripts/browser-check.mjs http://127.0.0.1:PORT [http://localhost:4174/?study=1] [expected-bundle.js]
  * The endpoint MUST belong to an isolated Agent Workspace Chromium.
  * A new localhost-origin tab protects a developer's 127.0.0.1-origin save.
  */
@@ -11,7 +11,10 @@ import { isWalkable, distance, ISO_Y } from '../src/game.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const endpoint = process.argv[2];
-const baseUrl = process.argv[3] || 'http://localhost:4174';
+const studyUrl = new URL(process.argv[3] || 'http://localhost:4174');
+studyUrl.searchParams.set('study', '1');
+const baseUrl = studyUrl.href;
+const expectedBundle = process.argv[4];
 if (!endpoint) throw new Error('Pass the isolated Agent Workspace loopback CDP endpoint.');
 if (!['localhost', '127.0.0.1'].includes(new URL(endpoint).hostname))
   throw new Error('CDP must be loopback.');
@@ -26,7 +29,7 @@ const results = [],
   shots = [],
   findings = [];
 const started = new Date();
-let browser, page, targetId;
+let browser, page, targetId, loadedScripts, fpsSample, ultrawideSample;
 const held = new Set();
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (name, details = '') => {
@@ -98,9 +101,26 @@ async function waitFor(expression, label, timeout = 15000) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 async function click(selector) {
-  const point = await evaluate(
-    `(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw new Error('Missing selector');const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`,
+  let rect;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    rect = await evaluate(
+      `(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw new Error(${JSON.stringify('Missing selector: ' + selector)});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,width:innerWidth,height:innerHeight};})()`,
+    );
+    if (rect.y >= 8 && rect.y < rect.height - 8) break;
+    await page.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x: Math.max(8, Math.min(rect.width - 8, rect.x)),
+      y: rect.height / 2,
+      deltaX: 0,
+      deltaY: rect.y < 8 ? -rect.height * 0.65 : rect.height * 0.65,
+    });
+    await delay(180);
+  }
+  assert(
+    rect.x > 0 && rect.x < rect.width && rect.y >= 8 && rect.y < rect.height - 8,
+    `Click target is outside the visible viewport: ${selector}`,
   );
+  const point = { x: rect.x, y: rect.y };
   await page.send('Input.dispatchMouseEvent', {
     type: 'mousePressed',
     button: 'left',
@@ -310,6 +330,8 @@ try {
   await page.send('Runtime.enable');
   await page.send('Log.enable');
   await page.send('Page.enable');
+  await page.send('Network.enable');
+  await page.send('Network.setBypassServiceWorker', { bypass: true });
   await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   await viewport(1600, 1000);
   await page.send('Page.navigate', { url: baseUrl });
@@ -318,6 +340,12 @@ try {
     'title and assets',
     30000,
   );
+  loadedScripts = await evaluate('Array.from(document.scripts).map(s=>s.src).filter(Boolean)');
+  assert(
+    !expectedBundle || loadedScripts.some((url) => url.endsWith('/' + expectedBundle)),
+    'Loaded production bundle differs from expected: ' + loadedScripts.join(', '),
+  );
+  log('Current production bundle loaded with service worker bypassed', loadedScripts.join(', '));
   await screenshot('01-title');
   await click('#start-form button[type=submit]');
   assert(await evaluate('window.verso.modal === "title"'), 'Empty name should not deploy');
@@ -347,6 +375,14 @@ try {
   await deploy();
   await screenshot('03-game');
   log('Deployment');
+  fpsSample = await evaluate(
+    'new Promise(resolve=>{const times=[],reported=[];const start=performance.now();const foreground=!document.hidden&&document.hasFocus();function frame(t){times.push(t);if(times.length%15===0)reported.push(window.verso.fps);if(t-start>=2000){const elapsed=times.at(-1)-times[0];resolve({foreground,frames:times.length,elapsedMs:elapsed,rafFps:(times.length-1)*1000/elapsed,diagnosticFps:reported});}else requestAnimationFrame(frame);}requestAnimationFrame(frame);})',
+  );
+  assert(fpsSample.foreground, 'FPS sample was not taken in the foreground');
+  log(
+    'Foreground desktop frame-rate sample',
+    `${fpsSample.rafFps.toFixed(1)} FPS over ${(fpsSample.elapsedMs / 1000).toFixed(2)} s at 1600 × 1000; diagnostic ${fpsSample.diagnosticFps.join(', ')}`,
+  );
 
   await tap('Escape');
   await waitFor('window.verso.modal === "pause"', 'pause');
@@ -422,6 +458,38 @@ try {
   await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   assert(distance(beforeTouch, (await state()).player) > 20, 'Touch joystick did not move player');
   log('Touch joystick moves player');
+  await viewport(2560, 720);
+  const beforeSouth = (await state()).player;
+  await screenshot('07b-ultrawide-before-south');
+  await setKeys(['s']);
+  await delay(700);
+  await setKeys([]);
+  await delay(180);
+  const afterSouth = (await state()).player;
+  ultrawideSample = await evaluate(
+    '({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight,player:window.verso.state.player,screen:window.verso.worldToScreen(window.verso.state.player)})',
+  );
+  ultrawideSample.southDistance = distance(beforeSouth, afterSouth);
+  assert(
+    afterSouth.y > beforeSouth.y + 30,
+    'Ultrawide southern movement did not advance the player',
+  );
+  assert(
+    ultrawideSample.scrollWidth === 2560 && ultrawideSample.scrollHeight === 720,
+    'Ultrawide viewport overflowed',
+  );
+  assert(
+    ultrawideSample.screen.x > 40 &&
+      ultrawideSample.screen.x < 2520 &&
+      ultrawideSample.screen.y > 80 &&
+      ultrawideSample.screen.y < 670,
+    'Ultrawide camera clipped the moving player: ' + JSON.stringify(ultrawideSample.screen),
+  );
+  await screenshot('07c-ultrawide-after-south');
+  log(
+    'Ultrawide southern movement keeps player visible',
+    `2560 × 720; ${ultrawideSample.southDistance.toFixed(1)} ground units; player screen (${ultrawideSample.screen.x.toFixed(1)}, ${ultrawideSample.screen.y.toFixed(1)})`,
+  );
   await viewport(1600, 1000);
 
   for (const subtype of ['deer', 'mushroom', 'crystal']) {
@@ -608,6 +676,10 @@ try {
         endpoint,
         baseUrl,
         targetId,
+        loadedScripts,
+        expectedBundle,
+        fpsSample,
+        ultrawideSample,
         results,
         errors,
         findings,
@@ -623,6 +695,10 @@ try {
     path.join(root, 'docs/QA.md'),
     report
       .replace(
+        'Desktop 1600 × 1000; mobile 390 × 844 and 844 × 390.',
+        'Desktop 1600 × 1000; ultrawide 2560 × 720; mobile 390 × 844 and 844 × 390. FPS is a foreground observation in this isolated Chromium session, not a hardware benchmark.',
+      )
+      .replace(
         '**PASS** — complete',
         findings.length ? '**CAMPAIGN PASS, findings remain** — complete' : '**PASS** — complete',
       )
@@ -636,8 +712,10 @@ try {
       endpoint +
       ' ' +
       baseUrl +
+      (expectedBundle ? ' ' + expectedBundle : '') +
       '\n```\n\nThe browser endpoint is ephemeral; replace it with the active workspace endpoint. The script creates and closes its own tab.\n',
   );
+  if (page) await page.send('Network.setBypassServiceWorker', { bypass: false }).catch(() => {});
   if (browser && targetId) await browser.send('Target.closeTarget', { targetId }).catch(() => {});
   page?.close();
   browser?.close();

@@ -1,5 +1,5 @@
 /** Synthetic Gamepad API acceptance checks; physical controller hardware is not tested.
- * node scripts/browser-gamepad-check.mjs http://127.0.0.1:PORT http://127.0.0.1:4174
+ * node scripts/browser-gamepad-check.mjs http://127.0.0.1:PORT http://127.0.0.1:4174/?study=1
  * CDP must belong to an isolated Agent Workspace Chromium. No window.verso mutation.
  */
 import fs from 'node:fs';
@@ -9,7 +9,9 @@ import { distance, ISO_Y, isWalkable } from '../src/game.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const endpoint = process.argv[2],
-  baseUrl = process.argv[3] || 'http://127.0.0.1:4174';
+  studyUrl = new URL(process.argv[3] || 'http://127.0.0.1:4174');
+studyUrl.searchParams.set('study', '1');
+const baseUrl = studyUrl.href;
 if (!endpoint || !['127.0.0.1', 'localhost'].includes(new URL(endpoint).hostname))
   throw new Error('Pass the isolated workspace loopback CDP endpoint.');
 if (

@@ -99,6 +99,6 @@ src/procedural/
 src/entry.ts   Default procedural entry; ?study=1 opens the earlier study
 ```
 
-[Procedural motion research](docs/research/PROCEDURAL-MOTION.md) records the primary sources and mathematics behind the approach. The next substantial systems are broader body and behavior grammars, persistent terrain contacts, physical object construction, causal ecology and mission planning, and procedural progression and narrative.
+[Systems research](docs/research/PROCEDURAL-SYSTEMS.md) and [motion research](docs/research/PROCEDURAL-MOTION.md) record primary sources, mathematics, and the boundary between implemented rules and proposed extensions. The next substantial systems are broader body and behavior grammars, persistent terrain contacts, physical object construction, causal ecology and mission planning, and procedural progression and narrative.
 
 The earlier polished chapter remains at **[http://localhost:4174/?study=1](http://localhost:4174/?study=1)** as a visual and interaction reference. Its authored environment plates and fixed characters do not form the new procedural content pipeline. [Historical study documentation](docs/VISUAL-STUDY.md) preserves its controls and features.
