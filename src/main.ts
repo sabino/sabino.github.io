@@ -3,6 +3,9 @@ import { Game, distance, WALKABLE } from './game';
 import type { ActionKind, InputState } from './game';
 import { Renderer } from './render';
 import { AudioDirector } from './audio';
+import { parseSeed, formatSeed } from './seed';
+import { registerOffline } from './offline';
+void registerOffline();
 
 const SAVE_KEY = 'verso.save.v1';
 const SETTINGS_KEY = 'verso.settings.v1';
@@ -228,6 +231,7 @@ function showTitle() {
     `<div class="title-screen"><section class="title-panel" role="dialog" aria-modal="true" aria-labelledby="title-heading">
     <div class="title-emblem">${icon('diamond')}</div><h1 id="title-heading" aria-label="Verso">${logo}</h1><p class="title-subtitle">A game about multiverse,<br>species and selfishness.</p>
     <form id="start-form"><label for="operative-name">Before you borrow a life,<br>tell us your name.</label><div class="name-field"><span>&gt;</span><input id="operative-name" name="operative-name" placeholder="Your name" maxlength="22" autocomplete="off" spellcheck="false" required value="${escape(game.state.name === 'TRAVELER' ? '' : game.state.name)}" aria-label="Your name" /></div>
+    <details class="seed-options"><summary>Choose a world seed</summary><label for="world-seed">Same seed, same starting conditions.</label><input id="world-seed" maxlength="64" value="0x71A3" autocomplete="off" spellcheck="false" aria-label="World seed" /></details>
     <button class="primary" type="submit">Enter the rift <span>↗</span></button></form>
     ${saveAvailable ? '<button id="continue-button" class="secondary">Continue your assignment</button>' : ''}
     <div class="title-footer"><span>Single player adventure</span><button id="title-audio" class="text-button">Sound ${muted ? 'off' : 'on'}</button></div>
@@ -240,9 +244,10 @@ function showTitle() {
       el<HTMLInputElement>('operative-name').focus();
       return;
     }
-    void audio.start(0x71a3);
+    const seed = parseSeed(el<HTMLInputElement>('world-seed').value);
+    void audio.start(seed);
     audio.play('click');
-    game.newRun(name, 0x71a3);
+    game.newRun(name, seed);
     hasStarted = true;
     lastPhase = game.state.phase;
     showBriefing();
@@ -310,7 +315,7 @@ function showBriefing() {
     'briefing',
     `<section class="terminal briefing" role="dialog" aria-modal="true" aria-labelledby="brief-title">${terminalTop('V E R S O   /   Assignment uplink')}
     <div class="terminal-body"><div class="transmission"><span class="status-dot"></span> ${escape(game.state.name)}, your vessel is ready.</div><p class="assignment-index">Assignment ${String(game.state.mission + 1).padStart(3, '0')} <span>${b.tag}</span></p><h1 id="brief-title">${b.title}</h1><p class="brief-body">${b.body}</p>
-    <dl class="brief-data"><div><dt>Destination</dt><dd>${b.world}</dd></div><div><dt>Conditions</dt><dd>${b.weather}</dd></div><div><dt>Vessel</dt><dd>${b.bodyName}</dd></div></dl>
+    <dl class="brief-data"><div><dt>Destination</dt><dd>${b.world}</dd></div><div><dt>Conditions</dt><dd>${b.weather}</dd></div><div><dt>Vessel</dt><dd>${b.bodyName}</dd></div><div><dt>Armament</dt><dd>${escape(game.state.weapon.name)}</dd></div></dl>
     <p class="whisper">${b.detail}</p><button id="deploy-button" class="primary">Inhabit vessel <span>↗</span></button><p class="brief-hint">WASD to move · E to interact · Esc to pause</p></div></section>`,
   );
   el('deploy-button').onclick = () => {
@@ -336,11 +341,20 @@ function showPause() {
   save();
   openModal(
     'pause',
-    `<section class="terminal pause-panel" role="dialog" aria-modal="true" aria-labelledby="pause-title">${terminalTop('Link on hold', true)}<div class="terminal-body"><h1 id="pause-title">Between moments.</h1><p>This world will wait for you.</p><div class="pause-actions"><button id="resume" class="primary">Return to your vessel</button><button id="open-journal" class="secondary">Field journal <kbd>J</kbd></button><button id="save-export" class="secondary">Download save</button><button id="import-open" class="secondary">Restore a save</button><input type="file" id="save-import" accept="application/json,.json" hidden/><button id="return-title" class="text-button">Save and return to title</button></div><div class="control-reference"><span><kbd>WASD</kbd> Move</span><span><kbd>Shift</kbd> Run</span><span><kbd>LMB</kbd> Blade</span><span><kbd>RMB</kbd> Pulse</span><span><kbd>Space</kbd> Dash</span><span><kbd>E</kbd> Interact</span><span><kbd>Q</kbd> Mend</span><span><kbd>M</kbd> Audio</span></div><p class="small-note">Progress saves automatically in this browser.</p></div></section>`,
+    `<section class="terminal pause-panel" role="dialog" aria-modal="true" aria-labelledby="pause-title">${terminalTop('Link on hold', true)}<div class="terminal-body"><h1 id="pause-title">Between moments.</h1><p>This world will wait for you.</p><div class="pause-actions"><button id="resume" class="primary">Return to your vessel</button><button id="open-journal" class="secondary">Field journal <kbd>J</kbd></button><button id="save-export" class="secondary">Download save</button><button id="import-open" class="secondary">Restore a save</button><input type="file" id="save-import" accept="application/json,.json" hidden/><button id="copy-seed" class="secondary">Copy starting seed</button><button id="return-title" class="text-button">Save and return to title</button></div><div class="control-reference"><span><kbd>WASD</kbd> Move</span><span><kbd>Shift</kbd> Run</span><span><kbd>LMB</kbd> Blade</span><span><kbd>RMB</kbd> Pulse</span><span><kbd>Space</kbd> Dash</span><span><kbd>E</kbd> Interact</span><span><kbd>Q</kbd> Mend</span><span><kbd>M</kbd> Audio</span></div><p class="small-note">Progress saves automatically in this browser.</p></div></section>`,
   );
   bindClose();
   el('resume').onclick = closeModal;
   el('open-journal').onclick = showJournal;
+  el('copy-seed').onclick = async () => {
+    const seed = formatSeed(game.state.seed);
+    try {
+      await navigator.clipboard.writeText(seed);
+      notify(`Starting seed ${seed} copied. Choices still shape later worlds.`);
+    } catch {
+      notify(`Starting seed: ${seed}`);
+    }
+  };
   el('return-title').onclick = () => {
     save();
     showTitle();
@@ -415,7 +429,7 @@ function showJournal() {
     obj = game.getObjective();
   openModal(
     'journal',
-    `<section class="terminal journal-panel" role="dialog" aria-modal="true" aria-labelledby="journal-title">${terminalTop('Personal field record', true)}<div class="terminal-body"><div class="journal-heading"><h1 id="journal-title">Field journal</h1><span>${escape(s.name)} / Vessel ${String(s.player.vessel).padStart(2, '0')}</span></div><div class="journal-columns"><div><h2>Current assignment</h2><p class="journal-objective">${escape(obj.title)}</p><p>${escape(obj.description)}</p><ul class="journal-tasks">${obj.tasks.map((t) => `<li class="${t.done ? 'done' : ''}"><span>${t.done ? '✓' : '◇'}</span>${escape(t.label)} ${t.progress ? `<small>${escape(t.progress)}</small>` : ''}</li>`).join('')}</ul><h2>Your footprint</h2><div class="journal-stats"><div><strong>${Math.round(s.integrity)}%</strong><span>world integrity</span></div><div><strong>${s.kills}</strong><span>lives ended</span></div><div><strong>${s.player.vessel - 1}</strong><span>vessels lost</span></div></div><p class="journal-note">Every intervention leaves a record. Scan gently. Defend yourself when needed. The company is measuring more than your success.</p>${s.mission > 0 ? `<h2>Recovered transmission</h2><blockquote>${s.mission > 1 ? '“Why do your instructions call me an asset?”' : '“This adjustment was purchased before this world existed.”'}</blockquote>` : ''}</div><div><h2>Native species <span>${s.catalog.length} / 3</span></h2><div class="species-list">${Object.entries(
+    `<section class="terminal journal-panel" role="dialog" aria-modal="true" aria-labelledby="journal-title">${terminalTop('Personal field record', true)}<div class="terminal-body"><div class="journal-heading"><h1 id="journal-title">Field journal</h1><span>${escape(s.name)} / Vessel ${String(s.player.vessel).padStart(2, '0')}</span></div><div class="journal-columns"><div><h2>Current assignment</h2><p class="journal-objective">${escape(obj.title)}</p><p>${escape(obj.description)}</p><ul class="journal-tasks">${obj.tasks.map((t) => `<li class="${t.done ? 'done' : ''}"><span>${t.done ? '✓' : '◇'}</span>${escape(t.label)} ${t.progress ? `<small>${escape(t.progress)}</small>` : ''}</li>`).join('')}</ul><h2>Your footprint</h2><div class="journal-stats"><div><strong>${Math.round(s.integrity)}%</strong><span>world integrity</span></div><div><strong>${s.kills}</strong><span>lives ended</span></div><div><strong>${s.player.vessel - 1}</strong><span>vessels lost</span></div></div><div class="vessel-kit"><h2>Vessel equipment</h2><p class="weapon-name">${escape(s.weapon.name)}</p><div class="weapon-stats"><span>Blade <b>${s.weapon.bladeDamage}</b></span><span>Pulse <b>${s.weapon.pulseDamage}</b></span><span>Recovery <b>${s.weapon.bladeCooldown.toFixed(2)}s</b></span><span>Reach <b>${s.weapon.pulseRange < 740 ? 'Short' : s.weapon.pulseRange > 820 ? 'Long' : 'Standard'}</b></span></div><p class="weapon-note">This kit belongs to this world. Your next crossing may issue another.</p></div><p class="journal-note">Every intervention leaves a record. Scan gently. Defend yourself when needed. The company is measuring more than your success.</p>${s.mission > 0 ? `<h2>Recovered transmission</h2><blockquote>${s.mission > 1 ? '“Why do your instructions call me an asset?”' : '“This adjustment was purchased before this world existed.”'}</blockquote>` : ''}</div><div><h2>Native species <span>${s.catalog.length} / 3</span></h2><div class="species-list">${Object.entries(
       speciesLore,
     )
       .map(([key, v]) => {
@@ -609,7 +623,17 @@ function updateUI() {
     `${['VERGE', 'ARCHIVE', 'WITNESS'][s.mission % 3]} / SEED 0x${s.worldSeed.toString(16).toUpperCase()}`;
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-action]')) {
     const kind = button.dataset.action as ActionKind;
-    const duration = { blade: 0.34, pulse: 0.36, dash: 0.8, scan: 0.55, mend: 2.5 }[kind];
+    const duration = {
+      blade: s.weapon.bladeCooldown,
+      pulse: s.weapon.pulseCooldown,
+      dash: 0.8,
+      scan: 0.55,
+      mend: 2.5,
+    }[kind];
+    if (kind === 'blade')
+      button.title = `${s.weapon.name} · ${s.weapon.bladeDamage} damage · ${s.weapon.bladeCooldown.toFixed(2)}s recovery`;
+    if (kind === 'pulse')
+      button.title = `Pulse · ${s.weapon.pulseDamage} damage · ${s.weapon.pulseRange < 740 ? 'short' : s.weapon.pulseRange > 820 ? 'long' : 'standard'} reach`;
     const cd = p.cooldowns[kind];
     button.classList.toggle('on-cooldown', cd > 0);
     button.style.setProperty('--cooldown', String(Math.min(1, cd / duration)));
@@ -664,7 +688,7 @@ function drawMinimap() {
         ? '#d67a5c'
         : e.kind === 'portal'
           ? '#71e2e2'
-          : e.scanned || e.active
+          : (e.kind === 'species' ? e.scanned : e.active)
             ? '#9cb59a'
             : '#edb758';
     const r = e.kind === 'enemy' ? 2 : e.kind === 'portal' ? 3 : 3.5;
@@ -844,7 +868,8 @@ joystick.onpointercancel = releaseJoystick;
 
 let last = performance.now();
 function frame(now: number) {
-  const dt = Math.min((now - last) / 1000, 0.05);
+  const elapsed = (now - last) / 1000;
+  const dt = Math.min(elapsed, 0.05);
   last = now;
   const paused = !!modal || pausedByVisibility || !hasStarted;
   if (!paused) {
@@ -888,7 +913,7 @@ function frame(now: number) {
       lastSave = now;
     }
   }
-  renderer.draw(game, dt, paused && hasStarted);
+  renderer.draw(game, elapsed, paused && hasStarted);
   if (hasStarted && now - lastUI > 100) {
     updateUI();
     lastUI = now;

@@ -2017,3 +2017,58 @@ kbd {
     display: none;
   }
 }
+
+.seed-options {
+  font-size: 10px;
+  color: #88aaa0;
+  margin: -7px 0 20px;
+}
+.seed-options summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+.seed-options summary:hover {
+  color: #c4deca;
+}
+.seed-options label {
+  font-size: 9px;
+  margin: 12px 0 8px;
+  color: #8caaa0;
+}
+.seed-options input {
+  width: 100%;
+  border: 1px solid #6896896b;
+  background: #05262d;
+  padding: 9px;
+  color: #d5e2c9;
+  font-size: 11px;
+}
+.vessel-kit {
+  margin: 26px 0;
+}
+.vessel-kit .weapon-name {
+  font-size: 14px;
+  color: #d1e0c6;
+  margin-bottom: 13px;
+}
+.weapon-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 17px;
+  font-size: 10px;
+}
+.weapon-stats > span {
+  display: flex;
+  justify-content: space-between;
+  color: #8fae9f;
+}
+.weapon-stats b {
+  font-weight: 400;
+  color: #c8d9c3;
+}
+.terminal .weapon-note {
+  font-size: 10px;
+  line-height: 1.6;
+  color: #7f9d94;
+  margin: 13px 0;
+}

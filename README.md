@@ -6,7 +6,7 @@ This playable slice adapts the supplied **Verso Game Concept.pdf**, **Verso Game
 
 ![The Quiet Verge environment plate](public/art/verge.png)
 
-*The Quiet Verge environment plate. The player, encounters, interactions, particles, and interface are rendered live during play.*
+_The Quiet Verge environment plate. The player, encounters, interactions, particles, and interface are rendered live during play._
 
 ## Run locally
 
@@ -40,20 +40,20 @@ Completing the chapter reveals who commissions these interventions and offers a 
 
 Combat, mending, and host loss affect your record. If a host dies, another can continue the assignment and recover the fragments left behind. Debriefings and the field journal record species, assignment outcomes, world integrity, and lives ended.
 
-| Control | Action |
-| --- | --- |
-| **W A S D** | Move |
-| **Shift** | Run; consumes energy |
-| **Mouse** | Aim |
-| **Left mouse / F** | Blade attack |
-| **Right mouse / R** | Ranged pulse |
-| **Arrow keys** | Aim and fire a directional pulse |
-| **Space** | Dash |
-| **E** | Interact with the nearby prompt, or scan |
-| **Q** | Mend |
-| **J** | Field journal |
-| **Esc** | Pause or close the current journal/pause panel |
-| **M** | Toggle audio |
+| Control             | Action                                         |
+| ------------------- | ---------------------------------------------- |
+| **W A S D**         | Move                                           |
+| **Shift**           | Run; consumes energy                           |
+| **Mouse**           | Aim                                            |
+| **Left mouse / F**  | Blade attack                                   |
+| **Right mouse / R** | Ranged pulse                                   |
+| **Arrow keys**      | Aim and fire a directional pulse               |
+| **Space**           | Dash                                           |
+| **E**               | Interact with the nearby prompt, or scan       |
+| **Q**               | Mend                                           |
+| **J**               | Field journal                                  |
+| **Esc**             | Pause or close the current journal/pause panel |
+| **M**               | Toggle audio                                   |
 
 Touch devices have a movement joystick and on-screen action buttons. The pause menu includes the control reference. Leaving the game tab or moving focus to another window pauses play.
 

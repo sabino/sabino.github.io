@@ -45,11 +45,10 @@ This priority list defines a feasible demonstration, not a claim that every sour
 
 ## Source differences and decisions
 
-| Topic | PDF / DOCX | Slides | Prototype interpretation |
-| --- | --- | --- | --- |
-| Audience / rating | M, violence and strong language | 10+, fantasy violence, broad child/adult appeal | Use stylized fantasy conflict; no need for strong language or gore. No official rating is claimed. |
-| Multiplayer | “Hybrid multiplayer,” co-op or battle | Optional, up to four players | Single-player slice; preserve seed-based architecture where practical. |
-| Controls | WASD, jump, ladders, lethal edges | Adds Shift running, mouse/arrow combat | Present explicit browser-friendly bindings and verify them in play. |
-| Adaptation | Machine-learning premises | Procedural algorithms | Deterministic procedural variation first; no unsupported adaptive-AI claim. |
-| Sample assignment | First mission always explores | Later example: kill suspicious person, fireball sword, find princess | Keep the first assignment exploratory; the slide example is not the opening mission. |
-
+| Topic             | PDF / DOCX                            | Slides                                                               | Prototype interpretation                                                                           |
+| ----------------- | ------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Audience / rating | M, violence and strong language       | 10+, fantasy violence, broad child/adult appeal                      | Use stylized fantasy conflict; no need for strong language or gore. No official rating is claimed. |
+| Multiplayer       | “Hybrid multiplayer,” co-op or battle | Optional, up to four players                                         | Single-player slice; preserve seed-based architecture where practical.                             |
+| Controls          | WASD, jump, ladders, lethal edges     | Adds Shift running, mouse/arrow combat                               | Present explicit browser-friendly bindings and verify them in play.                                |
+| Adaptation        | Machine-learning premises             | Procedural algorithms                                                | Deterministic procedural variation first; no unsupported adaptive-AI claim.                        |
+| Sample assignment | First mission always explores         | Later example: kill suspicious person, fireball sword, find princess | Keep the first assignment exploratory; the slide example is not the opening mission.               |

@@ -6,14 +6,14 @@ The top row is front/right idle, walk A, walk B. The bottom row is rear/right id
 
 Use the full 512 × 512 cell when rendering so the sword and subtle edge glow remain visible. Alpha at or above 128 has these cell-local bounds (right and bottom exclusive):
 
-| Frame | Bounds | Suggested body/foot anchor |
-| --- | --- | --- |
-| Front idle | 109, 65 → 508, 459 | 282, 459 |
-| Front walk A | 74, 65 → 475, 459 | 265, 459 |
-| Front walk B | 97, 65 → 454, 459 | 268, 459 |
-| Rear idle | 103, 29 → 508, 430 | 270, 430 |
-| Rear walk A | 73, 35 → 487, 430 | 263, 430 |
-| Rear walk B | 59, 31 → 464, 434 | 251, 434 |
+| Frame        | Bounds             | Suggested body/foot anchor |
+| ------------ | ------------------ | -------------------------- |
+| Front idle   | 109, 65 → 508, 459 | 282, 459                   |
+| Front walk A | 74, 65 → 475, 459  | 265, 459                   |
+| Front walk B | 97, 65 → 454, 459  | 268, 459                   |
+| Rear idle    | 103, 29 → 508, 430 | 270, 430                   |
+| Rear walk A  | 73, 35 → 487, 430  | 263, 430                   |
+| Rear walk B  | 59, 31 → 464, 434  | 251, 434                   |
 
 Anchors are visual estimates for consistent ground contact, not baked metadata. The white hair/boots span roughly 394–403 pixels, so a displayed body height of 64 px uses a scale around 0.16 (the full cell occupies about 82 px).
 

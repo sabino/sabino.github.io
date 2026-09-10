@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "Verso",
+  "short_name": "Verso",
+  "description": "An adventure about borrowed lives, species, and the consequences of small changes.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#031b24",
+  "theme_color": "#031b24",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
