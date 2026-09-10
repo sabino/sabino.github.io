@@ -11,7 +11,7 @@ Verso is a playable isometric diorama. The world takes precedence over the inter
 - Moss: `#81913d`
 - Ember: `#ed9c49`
 
-The wordmark uses geometric letter spacing and the rest of the interface uses a locally served monospaced face. Thin corner brackets, small square controls, and restrained terminal panels echo the DOS system in the brief. They exist only where there is an interaction, status, or navigational purpose.
+The wordmark is a custom pixel grid and the rest of the interface uses a system monospaced face. Thin corner brackets, small square controls, and restrained terminal panels echo the DOS system in the brief. They exist only where there is an interaction, status, or navigational purpose.
 
 ## Composition
 

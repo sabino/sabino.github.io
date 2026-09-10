@@ -59,6 +59,8 @@ Combat, mending, and host loss affect your record. If a host dies, another can c
 
 Touch devices have a movement joystick and on-screen action buttons. The pause menu includes the control reference. Leaving the game tab or moving focus to another window pauses play.
 
+Standard-mapped gamepads are supported, using Xbox-style button labels: **left stick / D-pad** moves, **right stick** aims, **X** uses the blade, **B** fires a pulse, **A** dashes, **Y** interacts, **LB** runs, and **RB** mends. **Start** pauses and **View** opens the journal. In menus, use the left stick or D-pad to select, **A** to confirm, and **B** to go back. Press a button once to let the browser detect the controller. The title supplies “Traveler” when a controller connects; a keyboard can change the name or seed. Hardware mappings vary; controller polling and menu behavior have synthetic browser coverage, while physical controllers still need a hardware playtest.
+
 ## Offline play
 
 Production builds include a service worker and app manifest. Open the production preview (or an HTTPS deployment) once while online and allow its assets to cache. That installed version can then reload and resume local saves offline. Updates wait for existing sessions to close, so a new build never forcibly reloads a run. Development mode does not register the worker.
@@ -97,6 +99,7 @@ src/
   render.ts     Canvas world, actors, animation, lighting, particles
   main.ts       Input, HUD, terminal panels, persistence, game loop
   audio.ts      Seeded Web Audio score and synthesized effects
+  gamepad.ts    Standard controller mapping, deadzones, input edges
   seed.ts       Reproducible numeric and named world seeds
   offline.ts    Production-only offline registration
   style.css     Responsive interface and touch layout
@@ -112,4 +115,4 @@ See [visual direction](docs/DESIGN.md), [biome prompts](docs/BIOMES.md), [sprite
 
 This is a compact single-player chapter with repeatable expeditions. Its three biome plates are **authored generated environments sharing a fixed collision layout**. Encounter details, vessel equipment, and the adaptive soundtrack use seeds; the terrain geometry is not generated procedurally at runtime.
 
-The original concept's 15-hour campaign, multiplayer, infinite terrain generation, inventory and broad procedural character systems, persistent skill progression, and machine-learning adaptation remain future work. The browser slice uses a dash rather than a full jumping/ladder system. It does not yet provide gamepad controls, cloud saves, or a production content pipeline.
+The original concept's 15-hour campaign, multiplayer, infinite terrain generation, inventory and broad procedural character systems, persistent skill progression, and machine-learning adaptation remain future work. The browser slice uses a dash rather than a full jumping/ladder system. It does not yet provide cloud saves or a production content pipeline.

@@ -37,6 +37,26 @@ canvas:focus-visible {
   outline: 2px solid var(--rift);
   outline-offset: 5px;
 }
+
+.controller-connected #modal-layer :is(button, input, summary):focus {
+  outline: 2px solid var(--rift);
+  outline-offset: 4px;
+}
+
+#audio-button {
+  position: relative;
+}
+.sound-unlock {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  padding: 6px 8px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  color: var(--paper);
+  font-size: 10px;
+  white-space: nowrap;
+}
 button {
   touch-action: manipulation;
 }

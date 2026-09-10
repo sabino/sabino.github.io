@@ -36,6 +36,11 @@ export class AudioDirector {
   private readonly pentatonic = [0, 3, 5, 7, 10];
   private motif = [0, 2, 4, 2, 1, 3, 2, 0];
 
+  /** A controller can start play without granting the browser audio activation. */
+  get needsGesture(): boolean {
+    return !!this.context && this.context.state === 'suspended' && !this.muted && !this.paused;
+  }
+
   /** Create/resume audio only in response to a click, tap, or key gesture. */
   async start(seed: number): Promise<void> {
     if (this.disposed) return;

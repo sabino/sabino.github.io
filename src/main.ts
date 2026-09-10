@@ -5,6 +5,8 @@ import { Renderer } from './render';
 import { AudioDirector } from './audio';
 import { parseSeed, formatSeed } from './seed';
 import { registerOffline } from './offline';
+import { GamepadController } from './gamepad';
+import type { PadFrame } from './gamepad';
 void registerOffline();
 
 const SAVE_KEY = 'verso.save.v1';
@@ -113,6 +115,7 @@ let modal: 'title' | 'briefing' | 'pause' | 'journal' | 'dead' | 'complete' | 'r
   'title';
 let pausedByVisibility = false;
 let muted = false;
+let lastAudioButtonState = '';
 let showHints = true;
 let loading = true;
 let lastUI = 0,
@@ -121,9 +124,12 @@ let lastUI = 0,
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 let lastPhase = game.state.phase;
 let touch = { x: 0, y: 0 };
-let mouse = { x: 900, y: 500, down: false, right: false, known: false };
+let mouse = { clientX: 900, clientY: 500, down: false, right: false, known: false };
 const keys = new Set<string>();
 const input: InputState = { x: 0, y: 0, running: false, aim: { x: 895, y: 525 } };
+const controller = new GamepadController();
+let controllerConnected = false;
+let controllerArmed = false;
 let saveAvailable = false;
 
 try {
@@ -173,17 +179,150 @@ function settings() {
 }
 function updateAudioButton() {
   const b = el('audio-button');
-  b.innerHTML = icon(muted ? 'muted' : 'audio');
-  b.setAttribute('aria-label', muted ? 'Enable audio' : 'Mute audio');
+  const needsGesture = audio.needsGesture && !modal;
+  const state = `${muted}:${needsGesture}`;
+  if (state === lastAudioButtonState) return;
+  lastAudioButtonState = state;
+  b.innerHTML =
+    icon(muted ? 'muted' : 'audio') +
+    (needsGesture ? '<span class="sound-unlock">Click for sound</span>' : '');
+  b.setAttribute('aria-label', needsGesture || muted ? 'Enable audio' : 'Mute audio');
+  b.title = needsGesture ? 'Enable audio (click or press M)' : 'Toggle audio (M)';
   b.setAttribute('aria-pressed', String(muted));
 }
 function toggleAudio() {
+  if (!muted && audio.needsGesture && !modal) {
+    void audio.start(game.state.seed).then(updateAudioButton);
+    return;
+  }
   muted = !muted;
   audio.setMuted(muted);
   if (!muted && !modal) void audio.start(game.state.seed);
   settings();
   updateAudioButton();
 }
+
+function focusControllerStart() {
+  if (modal !== 'title') return;
+  const name = el<HTMLInputElement>('operative-name');
+  if (!name.value.trim()) name.value = 'Traveler';
+  el('modal-layer').querySelector<HTMLButtonElement>('#start-form button[type="submit"]')?.focus();
+}
+
+function updateControlHints() {
+  app.classList.toggle('controller-connected', controllerConnected);
+  const labels = controllerConnected
+    ? { blade: 'X', pulse: 'B', dash: 'A', scan: 'Y', mend: 'RB' }
+    : { blade: 'LMB', pulse: 'RMB', dash: 'Space', scan: 'E', mend: 'Q' };
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-action]')) {
+    const kind = button.dataset.action as ActionKind;
+    button.querySelector('kbd')!.textContent = labels[kind];
+    button.setAttribute('aria-label', `${kind[0].toUpperCase()}${kind.slice(1)} (${labels[kind]})`);
+  }
+  el('interaction').querySelector('kbd')!.textContent = labels.scan;
+  el('journal-link').querySelector('kbd')!.textContent = controllerConnected ? 'View' : 'J';
+  el('journal-link').title = `Open journal (${controllerConnected ? 'View' : 'J'})`;
+  el('pause-button').title = `Pause (${controllerConnected ? 'Start' : 'Esc'})`;
+  const tutorial = el('tutorial').querySelectorAll(':scope > span');
+  tutorial[0].innerHTML = controllerConnected
+    ? '<kbd>L</kbd> Move · <kbd>R</kbd> Aim'
+    : '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move';
+  tutorial[1].innerHTML = `<kbd>${controllerConnected ? 'LB' : 'Shift'}</kbd> Run`;
+  tutorial[2].innerHTML = `Approach a glowing species, then press <kbd>${labels.scan}</kbd>.`;
+  const briefHint = document.querySelector('.brief-hint');
+  if (briefHint)
+    briefHint.textContent = controllerConnected
+      ? 'Left stick to move · Y to interact · Start to pause'
+      : 'WASD to move · E to interact · Esc to pause';
+  const reference = document.querySelector('.control-reference');
+  if (reference) {
+    const controls = controllerConnected
+      ? [
+          ['L stick', 'Move'],
+          ['R stick', 'Aim'],
+          ['LB', 'Run'],
+          ['X', 'Blade'],
+          ['B', 'Pulse'],
+          ['A', 'Dash'],
+          ['Y', 'Interact'],
+          ['RB', 'Mend'],
+          ['View', 'Journal'],
+          ['Start', 'Pause'],
+        ]
+      : [
+          ['WASD', 'Move'],
+          ['Shift', 'Run'],
+          ['LMB', 'Blade'],
+          ['RMB', 'Pulse'],
+          ['Space', 'Dash'],
+          ['E', 'Interact'],
+          ['Q', 'Mend'],
+          ['M', 'Audio'],
+        ];
+    reference.innerHTML = controls
+      .map(([key, label]) => `<span><kbd>${key}</kbd> ${label}</span>`)
+      .join('');
+  }
+  const footer = document.querySelector('.title-footer');
+  if (footer && !document.querySelector('.controller-note'))
+    footer.insertAdjacentHTML('beforebegin', '<p class="small-note controller-note"></p>');
+  const note = document.querySelector('.controller-note');
+  if (note) {
+    note.textContent = controllerConnected ? 'Controller linked · A to select · B to go back' : '';
+    note.classList.toggle('hidden', !controllerConnected);
+  }
+}
+
+function modalControls() {
+  return Array.from(
+    el('modal-layer').querySelectorAll<HTMLElement>(
+      'button:not([disabled]),input:not([hidden]),summary,[tabindex="0"]',
+    ),
+  ).filter((node) => node.getClientRects().length > 0);
+}
+
+/** Menus consume their input frame, so confirming a dialog cannot also dash. */
+function handleControllerMenu(pad: PadFrame): boolean {
+  if (pad.pressed.includes('pause')) {
+    if (modal === 'pause') closeModal();
+    else if (modal === 'journal') el('journal-return').click();
+    else if (!modal) showPause();
+    return true;
+  }
+  if (pad.pressed.includes('journal') && hasStarted && modal !== 'title' && modal !== 'briefing') {
+    if (modal === 'journal') el('journal-return').click();
+    else showJournal();
+    return true;
+  }
+  if (!modal) return false;
+  controllerArmed = false;
+  if (pad.back) {
+    if (modal === 'pause') closeModal();
+    else if (modal === 'journal') el('journal-return').click();
+    return true;
+  }
+  const controls = modalControls();
+  if (pad.menuStep && controls.length) {
+    const current = controls.indexOf(document.activeElement as HTMLElement);
+    const next =
+      current < 0
+        ? pad.menuStep > 0
+          ? 0
+          : controls.length - 1
+        : (current + pad.menuStep + controls.length) % controls.length;
+    controls[next].focus();
+    controls[next].scrollIntoView({ block: 'nearest' });
+  }
+  if (pad.confirm) {
+    const focused = document.activeElement as HTMLElement;
+    if (controls.includes(focused)) {
+      if (focused instanceof HTMLInputElement) focused.form?.requestSubmit();
+      else focused.click();
+    } else controls.find((node) => node.classList.contains('primary'))?.click();
+  }
+  return true;
+}
+
 function openModal(kind: NonNullable<typeof modal>, html: string) {
   modal = kind;
   keys.clear();
@@ -195,11 +334,14 @@ function openModal(kind: NonNullable<typeof modal>, html: string) {
   layer.classList.add('visible');
   audio.pause(true);
   el('hud').classList.toggle('dimmed', hasStarted);
+  controllerArmed = false;
   el('world').setAttribute('aria-hidden', 'true');
   el('world').inert = true;
   el('hud').inert = true;
   requestAnimationFrame(() => {
     (layer.querySelector('[autofocus],input,button') as HTMLElement)?.focus();
+    updateControlHints();
+    if (controllerConnected) focusControllerStart();
   });
 }
 function closeModal() {
@@ -582,6 +724,7 @@ function perform(kind: ActionKind) {
   handlePhase();
 }
 function updateUI() {
+  updateAudioButton();
   const s = game.state,
     p = s.player,
     obj = game.getObjective();
@@ -733,13 +876,9 @@ window.addEventListener('keydown', (e) => {
   if (loading) return;
   const target = e.target as HTMLElement;
   const key = e.key.toLowerCase();
+  if (e.isTrusted && !modal && key !== 'm' && audio.needsGesture) void audio.start(game.state.seed);
   if (key === 'tab' && modal) {
-    const focusable = Array.from(
-      el('modal-layer').querySelectorAll<HTMLElement>(
-        'button:not([disabled]),input:not([hidden]),summary,[tabindex="0"]',
-      ),
-    );
-    const visibleFocusable = focusable.filter((node) => node.getClientRects().length > 0);
+    const visibleFocusable = modalControls();
     const first = visibleFocusable[0],
       last = visibleFocusable.at(-1);
     if (e.shiftKey && document.activeElement === first) {
@@ -764,14 +903,14 @@ window.addEventListener('keydown', (e) => {
   }
   if (key === 'escape') {
     e.preventDefault();
-    if (modal === 'pause' || modal === 'journal') {
-      returnFromJournal();
-    } else if (!modal) showPause();
+    if (modal === 'journal') el('journal-return').click();
+    else if (modal === 'pause') closeModal();
+    else if (!modal) showPause();
     return;
   }
   if (key === 'j' && hasStarted) {
     if (modal === 'journal') {
-      returnFromJournal();
+      el('journal-return').click();
     } else if (modal !== 'title' && modal !== 'briefing') showJournal();
     return;
   }
@@ -785,6 +924,7 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 window.addEventListener('blur', () => {
+  controllerArmed = false;
   keys.clear();
   mouse.down = false;
   mouse.right = false;
@@ -810,17 +950,17 @@ window.addEventListener('resize', () => {
 const canvas = el<HTMLCanvasElement>('world');
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointermove', (e) => {
-  const p = renderer.toWorld(e.clientX, e.clientY);
-  mouse.x = p.x;
-  mouse.y = p.y;
+  mouse.clientX = e.clientX;
+  mouse.clientY = e.clientY;
   mouse.known = true;
 });
 canvas.addEventListener('pointerdown', (e) => {
   if (modal) return;
+  if (e.isTrusted && audio.needsGesture) void audio.start(game.state.seed);
   canvas.focus();
   const p = renderer.toWorld(e.clientX, e.clientY);
-  mouse.x = p.x;
-  mouse.y = p.y;
+  mouse.clientX = e.clientX;
+  mouse.clientY = e.clientY;
   mouse.known = true;
   input.aim = p;
   if (e.pointerType === 'touch') return;
@@ -872,17 +1012,50 @@ function frame(now: number) {
   const elapsed = (now - last) / 1000;
   const dt = Math.min(elapsed, 0.05);
   last = now;
-  const paused = !!modal || pausedByVisibility || !hasStarted;
+  let pad: PadFrame;
+  try {
+    pad = controller.sample(navigator.getGamepads?.() || [], dt);
+  } catch {
+    pad = controller.sample([], dt);
+  }
+  if (pad.connected !== controllerConnected && !loading) {
+    controllerConnected = pad.connected;
+    controllerArmed = false;
+    updateControlHints();
+    if (pad.connected) focusControllerStart();
+    notify(
+      pad.connected
+        ? 'Controller linked. Press Start to pause and view controls.'
+        : 'Controller disconnected. Keyboard and touch controls are ready.',
+    );
+  }
+  const padCanAct = !loading && !pausedByVisibility && document.hasFocus();
+  const menuConsumed = padCanAct && handleControllerMenu(pad);
+  if (!controllerArmed && !modal && !pad.held.length && !pad.pressed.length) controllerArmed = true;
+  const padActive = padCanAct && !menuConsumed && controllerArmed;
+  const paused = !!modal || pausedByVisibility || !hasStarted || menuConsumed;
   if (!paused) {
-    input.x = (keys.has('d') ? 1 : 0) - (keys.has('a') ? 1 : 0) + touch.x;
-    input.y = (keys.has('s') ? 1 : 0) - (keys.has('w') ? 1 : 0) + touch.y;
-    input.running = keys.has('shift');
+    input.x =
+      (keys.has('d') ? 1 : 0) - (keys.has('a') ? 1 : 0) + touch.x + (padActive ? pad.move.x : 0);
+    input.y =
+      (keys.has('s') ? 1 : 0) - (keys.has('w') ? 1 : 0) + touch.y + (padActive ? pad.move.y : 0);
+    input.running = keys.has('shift') || (padActive && pad.running);
+    if (
+      padActive &&
+      (pad.move.x || pad.move.y || pad.aim.x || pad.aim.y || pad.held.length || pad.pressed.length)
+    )
+      mouse.known = false;
     const arrowX = (keys.has('arrowright') ? 1 : 0) - (keys.has('arrowleft') ? 1 : 0),
       arrowY = (keys.has('arrowdown') ? 1 : 0) - (keys.has('arrowup') ? 1 : 0);
     if (arrowX || arrowY) {
       input.aim = { x: game.state.player.x + arrowX * 300, y: game.state.player.y + arrowY * 180 };
       game.action('pulse', input.aim);
-    } else if (mouse.known) input.aim = { x: mouse.x, y: mouse.y };
+    } else if (padActive && (pad.aim.x || pad.aim.y))
+      input.aim = {
+        x: game.state.player.x + pad.aim.x * 300,
+        y: game.state.player.y + pad.aim.y * 180,
+      };
+    else if (mouse.known) input.aim = renderer.toWorld(mouse.clientX, mouse.clientY);
     else if (input.x || input.y)
       input.aim = {
         x: game.state.player.x + input.x * 200,
@@ -893,8 +1066,11 @@ function frame(now: number) {
         x: game.state.player.x + game.state.player.facing.x * 200,
         y: game.state.player.y + game.state.player.facing.y * 120,
       };
-    if (mouse.down) game.action('blade', input.aim);
-    if (mouse.right) game.action('pulse', input.aim);
+    if (mouse.down || (padActive && pad.held.includes('blade'))) game.action('blade', input.aim);
+    if (mouse.right || (padActive && pad.held.includes('pulse'))) game.action('pulse', input.aim);
+    if (padActive)
+      for (const action of pad.pressed)
+        if (action !== 'pause' && action !== 'journal') perform(action);
     game.update(dt, input);
     processEvents();
     handlePhase();
