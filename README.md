@@ -1,122 +1,104 @@
 # Verso
 
-A browser action adventure about borrowed lives, small interventions, and the worlds that bear their consequences. Enter your name, inhabit a host, complete an assignment, and return through the rift. Your intervention footprint matters as much as the objective.
+A browser game about borrowed bodies, generated worlds, and the consequences of intervening in them.
 
-This playable slice adapts the supplied **Verso Game Concept.pdf**, **Verso Game Concept.docx**, and **Verso.pptx**. [The source brief](docs/CONCEPT.md) records their shared ideas, differences, and the decisions behind this implementation.
+The default game is now a **procedural foundation**. A seed generates world conditions, connected terrain, species body graphs, anatomy-dependent movement, assembled equipment, and compatible assignments. Your actions contribute to the next crossing's seed. The opening assignment is always exploration, as specified in the concept.
 
-![The Quiet Verge environment plate](public/art/verge.png)
+This is an early implementation of the supplied PDF, DOCX, and slides. It does **not** yet realize the full ambition of universally generated mechanics, ecosystems, stories, and physics. [The foundation guide](docs/PROCEDURAL-FOUNDATION.md) connects the implementation to the reread source material and records the remaining work.
 
-_The Quiet Verge environment plate. The player, encounters, interactions, particles, and interface are rendered live during play._
+![A live generated crossing with articulated nonhumanoid inhabitants](docs/images/procedural-crossing.png)
 
-## Run locally
+## Play locally
 
-Use **Node.js 22.18 or newer** and npm.
+Use Node.js 22.18 or newer.
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open **http://localhost:4173**. To run the production build:
+Open **http://localhost:4173**. For a production build:
 
 ```sh
 npm run build
 npm run preview
 ```
 
-The preview opens at **http://localhost:4174**. Both ports are fixed; stop another process using the port before starting the server. The production output is in `dist/` and can be served by a static web server. Use a server rather than opening `index.html` directly.
+Open **http://localhost:4174**. The production output in `dist/` works on a static web server, including a subpath. The game uses local code and browser-synthesized audio, without runtime account or API requirements.
 
-All artwork is served locally and the soundtrack is synthesized in the browser. After installation and building, the game requires no external runtime libraries, asset hosts, accounts, or API services. Audio begins after a user gesture; headphones are recommended.
+Enter a number, hexadecimal seed, or a name. Try **0x71A3** and **0x2A**: the first produces a hopping host with five segments and a cold impact hammer; the second produces a skittering host with three segments and a projectile conduit. Native species and terrain also change. These examples refer to generator version 1.
 
-## Play
+## Controls
 
-The opening chapter contains three assignments across three visual worlds:
+| Control        | Action                                                           |
+| -------------- | ---------------------------------------------------------------- |
+| WASD           | Move on the isometric ground plane                               |
+| Shift          | Run                                                              |
+| Space          | Jump, when the current anatomy supports it                       |
+| Mouse          | Aim                                                              |
+| F / left mouse | Use the issued object's effect                                   |
+| E              | Read a lifeform, establish contact, recover memories, or extract |
+| Q              | Mend using a memory                                              |
+| J              | Field record: anatomy, equipment, native lineages                |
+| Esc            | Pause or close a panel                                           |
+| Mouse wheel    | Zoom                                                             |
+| ♪ button       | Sound                                                            |
 
-1. **The Quiet Verge — survey.** Catalog three native species and return through the transfer gate. The opening assignment can be completed peacefully.
-2. **The Violet Archive — adjustment.** Synchronize the three relays in the order supplied by the briefing, then extract.
-3. **The Last Witness — retrieval.** Find the archivist, establish contact, and escort them to the gate.
+Touch devices have direction and action buttons. Walking into a ladder climbs it; walking off an unprotected edge can kill the host. Different bodies have different speed, jump capacity, and gait. When a host dies, borrow another generated body and recover its memories. Complete the assignment, then return to the rift.
 
-Completing the chapter reveals who commissions these interventions and offers a choice: preserve the evidence and leave, or continue into seeded expeditions. Further expeditions reuse the assignment types with seeded encounter variation and bounded increases in danger. Each world also assigns a deterministic sabre, cleaver, or rapier kit with balanced damage, recovery, and pulse-range differences. Inspect the kit in your field journal.
+The field record explains how the body's parts determine its properties and how an object's material, shape, core, and delivery rule determine its effect. Equipment can deliver impact, projectiles, or fields; heat burns, cold slows, charge interacts with conductors, and growth heals.
 
-Expand **Choose a world seed** on the title screen to enter a number, hexadecimal seed, or a name. The same seed reproduces the starting conditions and equipment; your later choices still affect the next crossing. The pause menu can copy your starting seed.
+## What is generated
 
-Combat, mending, and host loss affect your record. If a host dies, another can continue the assignment and recover the fragments left behind. Debriefings and the field journal record species, assignment outcomes, world integrity, and lives ended.
+- **Worlds:** environmental parameters, room graphs, connecting corridors, elevations, surface detail, vegetation geometry, and placement.
+- **Species and hosts:** connected and sometimes branching body graphs, variable appendage counts and proportions, sensory traits, material affinity, capabilities, and roles. Their silhouettes are drawn from geometry.
+- **Movement:** articulated stride, skitter, hop, slither, or hover selected from anatomy. Distance-driven gait phases and inverse kinematics pose limbs; the gameplay root uses kinematic movement and gravity.
+- **Equipment:** a structural frame combined with sampled matter, shape, an active core, and a delivery rule. These control actual damage/healing, range, handling, and effect.
+- **Assignments:** a bounded vocabulary of survey, escort, attune, and hunt, bound to the generated inhabitants and issued object. This is not yet a general causal quest planner.
+- **Audio:** seeded Web Audio synthesis with gameplay-responsive layers, currently inherited from the earlier slice.
 
-| Control             | Action                                         |
-| ------------------- | ---------------------------------------------- |
-| **W A S D**         | Move                                           |
-| **Shift**           | Run; consumes energy                           |
-| **Mouse**           | Aim                                            |
-| **Left mouse / F**  | Blade attack                                   |
-| **Right mouse / R** | Ranged pulse                                   |
-| **Arrow keys**      | Aim and fire a directional pulse               |
-| **Space**           | Dash                                           |
-| **E**               | Interact with the nearby prompt, or scan       |
-| **Q**               | Mend                                           |
-| **J**               | Field journal                                  |
-| **Esc**             | Pause or close the current journal/pause panel |
-| **M**               | Toggle audio                                   |
+Generators use versioned 32-bit seed descriptors and addressed random streams. This gives reproducibility and compositional variation within defined rules, not unlimited content or a guarantee that every possible seed is interesting. Some ecological capability labels describe future interactions; the current simulation implements wandering, pursuit, escort, and equipment responses.
 
-Touch devices have a movement joystick and on-screen action buttons. The pause menu includes the control reference. Leaving the game tab or moving focus to another window pauses play.
+## Progress and offline play
 
-Standard-mapped gamepads are supported, using Xbox-style button labels: **left stick / D-pad** moves, **right stick** aims, **X** uses the blade, **B** fires a pulse, **A** dashes, **Y** interacts, **LB** runs, and **RB** mends. **Start** pauses and **View** opens the journal. In menus, use the left stick or D-pad to select, **A** to confirm, and **B** to go back. Press a button once to let the browser detect the controller. The title supplies “Traveler” when a controller connects; a keyboard can change the name or seed. Hardware mappings vary; controller polling and menu behavior have synthetic browser coverage, while physical controllers still need a hardware playtest.
+The default game autosaves locally. **Continue your crossing** restores its current world, body, position, objective progress, and consequences. Saves belong to the browser and address; `localhost`, `127.0.0.1`, and different ports have separate storage. The new game uses a separate save key from the earlier visual study.
 
-If controller-only play leaves browser audio blocked, **Click for sound** appears beside the audio control. One click enables sound; a keyboard press or a click on the world also unlocks it.
+Production includes a service worker. A complete first online load caches the build for offline reload. Existing sessions are allowed to finish before an update activates. The new foundation currently has no save-file import/export or controller integration.
 
-## Offline play
-
-Production builds include a service worker and app manifest. Open the production preview (or an HTTPS deployment) once while online and allow its assets to cache. That installed version can then reload and resume local saves offline. Updates wait for existing sessions to close, so a new build never forcibly reloads a run. Development mode does not register the worker.
-
-## Saves
-
-Progress autosaves to this browser's local storage, including after important actions. Choose **Continue your assignment** on the title screen to resume. In the pause menu, **Download save** exports a JSON file and **Restore a save** imports one; invalid files leave the current run intact.
-
-Saves belong to the browser and site address: `localhost` and `127.0.0.1`, or different ports, have separate storage. Export a save before changing addresses or clearing browser data. Your entered name and progress stay local; the game sends no personal information to a server.
-
-## Verification
+## Tests
 
 ```sh
 npm test
 npm run build
-# Both checks together:
-npm run check
+npm run format:check
 ```
 
-The engine tests cover mission progression, collision and movement, combat and consequences, relay order, escort behavior, recovery, seeded variation, and save validation. Building also checks TypeScript.
+**99 tests pass**, including **31 new procedural tests**. They cover anatomy constraints, reachable limb lengths, five motion strategies, functional equipment combinations, 100 connected generated worlds, ladder traversal, jumping and falling, escort detours, mission completion, history-dependent seeds, and memory conservation after death.
 
-The real-input browser acceptance script uses an **isolated Agent Workspace Chromium**, with a loopback CDP endpoint supplied by that workspace:
+The isolated workspace browser test uses actual keyboard and mouse inputs with read-only diagnostics:
 
 ```sh
-# Start the production preview first, then substitute its workspace CDP port:
-node scripts/browser-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174
+node scripts/browser-procedural-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
 ```
 
-The script exercises the chapter through mouse, keyboard, and touch events. It writes screenshots and detailed results to the ignored `.dream-loop/qa/` directory and a readable report to [docs/QA.md](docs/QA.md). The report states the tested viewports, results, and remaining gaps; passing the scripted route does not establish audio fidelity or every possible combat outcome.
+See [procedural browser QA](docs/PROCEDURAL-QA.md) for tested flows, screenshots, measured performance, and limits. The earlier slice's [QA](docs/QA.md), [storage checks](docs/STORAGE-QA.md), [controller checks](docs/GAMEPAD-QA.md), and [soak tests](docs/ROBUSTNESS.md) apply to that implementation, not automatically to the new one.
 
-Additional repeatable checks cover [save files and offline play](docs/STORAGE-QA.md), [controller integration](docs/GAMEPAD-QA.md), and [long-session simulation and host recovery](docs/ROBUSTNESS.md). Production startup and service-worker registration were also verified under a nested `/games/verso/` URL, with every runtime asset resolving inside that path.
-
-## Project layout
+## Code and direction
 
 ```text
-src/
-  game.ts       Deterministic simulation, missions, combat, collision, saves
-  render.ts     Canvas world, actors, animation, lighting, particles
-  main.ts       Input, HUD, terminal panels, persistence, game loop
-  audio.ts      Seeded Web Audio score and synthesized effects
-  gamepad.ts    Standard controller mapping, deadzones, input edges
-  seed.ts       Reproducible numeric and named world seeds
-  offline.ts    Production-only offline registration
-  style.css     Responsive interface and touch layout
-public/art/     Original generated environments and sprite assets
-tests/          Engine regression tests
-scripts/        Real-input browser acceptance check
-docs/           Source brief, design notes, asset prompts, QA report
+src/procedural/
+  schema.ts    Shared world, anatomy, equipment, and pose contracts
+  random.ts    Seed derivation and deterministic random streams
+  compose.ts   World laws, functional species and equipment composition
+  world.ts     Terrain topology, placement, and assignment generation
+  motion.ts    Anatomy-dependent gait and two-bone IK
+  draw.ts      Geometric body and equipment rendering
+  session.ts   Movement, interactions, effects, missions, consequences
+  app.ts       Browser loop, projection, controls, HUD, local persistence
+  style.css    Responsive interface
+src/entry.ts   Default procedural entry; ?study=1 opens the earlier study
 ```
 
-See [visual direction](docs/DESIGN.md), [biome prompts](docs/BIOMES.md), [sprite atlas notes](docs/EXPLORER-ATLAS.md), [archivist atlas notes](docs/ARCHIVIST-ATLAS.md), and [audio design](docs/AUDIO.md) for the implementation's art and sound decisions.
+[Procedural motion research](docs/research/PROCEDURAL-MOTION.md) records the primary sources and mathematics behind the approach. The next substantial systems are broader body and behavior grammars, persistent terrain contacts, physical object construction, causal ecology and mission planning, and procedural progression and narrative.
 
-## Scope and next milestones
-
-This is a compact single-player chapter with repeatable expeditions. Its three biome plates are **authored generated environments sharing a fixed collision layout**. Encounter details, vessel equipment, and the adaptive soundtrack use seeds; the terrain geometry is not generated procedurally at runtime.
-
-The original concept's 15-hour campaign, multiplayer, infinite terrain generation, inventory and broad procedural character systems, persistent skill progression, and machine-learning adaptation remain future work. The browser slice uses a dash rather than a full jumping/ladder system. It does not yet provide cloud saves or a production content pipeline.
+The earlier polished chapter remains at **[http://localhost:4174/?study=1](http://localhost:4174/?study=1)** as a visual and interaction reference. Its authored environment plates and fixed characters do not form the new procedural content pipeline. [Historical study documentation](docs/VISUAL-STUDY.md) preserves its controls and features.
