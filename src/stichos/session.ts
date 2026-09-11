@@ -8,6 +8,7 @@ import {
 import { deriveSeed } from '../procedural/random.ts';
 import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
+import { resolveForge, type ForgeRecipe, type ForgeResult } from './forge.ts';
 import {
   createFreeLife,
   restoreFreeLife,
@@ -19,6 +20,7 @@ import {
   restoreProgression,
   grantPractice,
   skillBonuses,
+  professionProfile,
   upgradeBonuses,
   homeEffects,
   applyCosmetic,
@@ -39,6 +41,7 @@ import {
 } from './campaign.ts';
 import type {
   Dialogue,
+  Appearance,
   Effect,
   GameEvent,
   Input,
@@ -288,6 +291,10 @@ export class Stichos {
   progression: ProgressionState;
   private cosmeticEntitlements: string[] = [];
   private freeLifeState = createFreeLife();
+  private forgedWeapons = new Map<
+    string,
+    Partial<Record<Weapon, { seed: number; ownerSeed: number; recipe: ForgeRecipe }>>
+  >();
   private npcMemory = new Map<string, Npc>();
   private npcRuntime = new Map<string, Npc>();
   private supplyJobs = new Map<string, SupplyJob>();
@@ -503,12 +510,106 @@ export class Stichos {
     return this.occupiedNpcId ?? `body:theo-priest:${this.seed}`;
   }
   get displayAppearance() {
-    return applyCosmetic(
-      this.player.appearance,
-      this.progression,
-      this.bodyId,
-      this.cosmeticEntitlements,
+    return this.appearanceForBody(this.player.appearance, this.bodyId);
+  }
+  appearanceForBody(base: Appearance, bodyId: string): Appearance {
+    const look = applyCosmetic(base, this.progression, bodyId, this.cosmeticEntitlements);
+    const forged =
+      base.weapon === 'none' ? undefined : this.forgedWeapons.get(bodyId)?.[base.weapon];
+    if (forged) look.weaponSeed = forged.seed;
+    else delete look.weaponSeed;
+    return look;
+  }
+  weaponSeed(kind: Weapon) {
+    return this.forgedWeapons.get(this.bodyId)?.[kind]?.seed ?? this.player.appearance.seed;
+  }
+  forgePreview(recipe: ForgeRecipe): {
+    ok: boolean;
+    message: string;
+    construction: ForgeResult | null;
+  } {
+    const raw = resolveForge(this.player.appearance.seed, recipe, this.player.level);
+    let expectedLevel = this.player.level,
+      expectedXp = this.player.xp;
+    if (raw && this.campaignState.ending) {
+      const future = clone(this.progression);
+      grantPractice(future, 'crafting', 10);
+      const current = this.freeLife;
+      const possible = freeLifeMilestones(
+        this.freeLifeState,
+        future,
+        this.quests.filter((q) => q.id.startsWith('supply:') && q.complete).length,
+        this.quests.filter(
+          (q) =>
+            q.id.startsWith('correspondence:') &&
+            q.complete &&
+            !q.objective.startsWith('Dispatch withdrawn'),
+        ).length,
+      );
+      expectedXp +=
+        possible.filter(
+          (m) => m.complete && !current.milestones.find((c) => c.id === m.id)?.rewarded,
+        ).length * 50;
+      while (expectedXp >= expectedLevel * 40 && expectedLevel < 50) {
+        expectedXp -= expectedLevel * 40;
+        expectedLevel++;
+      }
+    }
+    const construction = raw
+      ? {
+          ...raw,
+          profile: this.profileWithBonuses(
+            generatedWeaponProfile(raw.seed, recipe.kind, expectedLevel),
+            recipe.kind,
+          ),
+        }
+      : null;
+    const fail = (message: string) => ({ ok: false, message, construction });
+    if (!construction) return fail('That combination could not be constructed.');
+    if (this.phase !== 'playing') return fail('This body cannot work.');
+    if (!this.progressionContext().nearWorkbench)
+      return fail('Visit a workbench or furnish one at home.');
+    if (professionProfile(this.progression, 'crafting').level < 2)
+      return fail('Crafting level two is required to shape a new weapon.');
+    if (this.forgedWeapons.get(this.bodyId)?.[recipe.kind]?.seed === construction.seed)
+      return fail('This body already carries that exact construction.');
+    if (this.player.coins < construction.cost.coins || !this.has(construction.cost.items))
+      return fail(
+        `Needs ${construction.cost.coins} coins and ${this.costText(construction.cost.items)}.`,
+      );
+    return {
+      ok: true,
+      message: `Forge ${construction.profile.name} for this body. The chosen material, living core and frame determine its appearance and handling.`,
+      construction,
+    };
+  }
+  forge(recipe: ForgeRecipe): { ok: boolean; message: string; construction: ForgeResult | null } {
+    const preview = this.forgePreview(recipe);
+    if (!preview.ok || !preview.construction) {
+      this.event('dialogue', preview.message);
+      return preview;
+    }
+    const made = preview.construction;
+    if (!this.spend(made.cost.items))
+      return { ...preview, ok: false, message: 'The materials are no longer available.' };
+    this.player.coins -= made.cost.coins;
+    const belongings = this.forgedWeapons.get(this.bodyId) ?? {};
+    belongings[recipe.kind] = {
+      seed: made.seed,
+      ownerSeed: this.player.appearance.seed,
+      recipe: clone(recipe),
+    };
+    this.forgedWeapons.set(this.bodyId, belongings);
+    this.weapons.add(recipe.kind);
+    this.player.appearance.weapon = recipe.kind;
+    grantPractice(this.progression, 'crafting', 10);
+    this.syncFreeLife();
+    this.effect('harvest', this.player, made.profile.color, 1);
+    this.event(
+      'quest',
+      `Forged ${made.profile.name}. Its physical construction remains with this body.`,
     );
+    return preview;
   }
   setCosmeticEntitlements(ids: readonly string[]) {
     this.cosmeticEntitlements = [...new Set(ids.filter((id) => typeof id === 'string'))].slice(
@@ -633,7 +734,12 @@ export class Stichos {
   }
 
   weaponProfile(kind: Weapon): WeaponProfile {
-    const profile = generatedWeaponProfile(this.player.appearance.seed, kind, this.player.level);
+    return this.profileWithBonuses(
+      generatedWeaponProfile(this.weaponSeed(kind), kind, this.player.level),
+      kind,
+    );
+  }
+  private profileWithBonuses<T extends WeaponProfile>(profile: T, kind: Weapon): T {
     const skill = skillBonuses(this.progression),
       upgrade = upgradeBonuses(this.progression, this.bodyId, kind);
     return {
@@ -836,7 +942,9 @@ export class Stichos {
       }
       const kind = npc.appearance.weapon === 'none' ? 'staff' : npc.appearance.weapon;
       const profile =
-        npc.hostile && range < 8 ? generatedWeaponProfile(npc.appearance.seed, kind, 1) : null;
+        npc.hostile && range < 8
+          ? generatedWeaponProfile(npc.appearance.weaponSeed ?? npc.appearance.seed, kind, 1)
+          : null;
       const reach = profile ? profile.range * 0.78 : 0;
       const canAim = !!profile && range <= reach && this.lineOfSight(npc, this.player);
       if (canAim && npc.cooldown <= 0) {
@@ -892,7 +1000,9 @@ export class Stichos {
       return (
         npc.appearance.weapon === 'bow' &&
         range < 8 &&
-        range <= generatedWeaponProfile(npc.appearance.seed, 'bow', 1).range * 0.78 &&
+        range <=
+          generatedWeaponProfile(npc.appearance.weaponSeed ?? npc.appearance.seed, 'bow', 1).range *
+            0.78 &&
         this.lineOfSight(npc, this.player)
       );
     });
@@ -2658,7 +2768,13 @@ export class Stichos {
         hp: this.player.hp,
         maxHp: this.player.maxHp,
         heading: this.player.heading,
-        appearance: clone(this.player.appearance),
+        appearance: {
+          ...clone(this.player.appearance),
+          ...(this.player.appearance.weapon !== 'none' &&
+          this.forgedWeapons.get(this.bodyId)?.[this.player.appearance.weapon]
+            ? { weaponSeed: this.weaponSeed(this.player.appearance.weapon) }
+            : {}),
+        },
       });
       this.npcMemory.set(previous.id, previous);
       this.npcRuntime.set(previous.id, clone(previous));
@@ -2691,6 +2807,7 @@ export class Stichos {
       this.player.bodyName = target.name;
       this.player.clan = target.clan;
       this.player.appearance = clone(target.appearance);
+      delete this.player.appearance.weaponSeed;
       this.player.appearance.weapon = belongings.equipped;
       this.player.cequinTime = 0;
       this.player.maxHp = target.maxHp;
@@ -2991,6 +3108,9 @@ export class Stichos {
       campaign: this.campaignState,
       progression: this.progression,
       freeLife: this.freeLifeState,
+      forgedWeapons: [...this.forgedWeapons].flatMap(([bodyId, weapons]) =>
+        Object.entries(weapons).map(([kind, record]) => ({ bodyId, kind, ...record })),
+      ),
       inventory: this.inventory,
       removed: [...this.removed],
       opened: [...this.opened],
@@ -3023,6 +3143,15 @@ export class Stichos {
     game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
     game.inventory = { ...data.inventory };
     game.progression = restoreProgression(data.progression, data.seed);
+    for (const record of data.forgedWeapons ?? []) {
+      const owned = game.forgedWeapons.get(record.bodyId) ?? {};
+      owned[record.kind as Weapon] = {
+        seed: record.seed,
+        ownerSeed: record.ownerSeed,
+        recipe: clone(record.recipe),
+      };
+      game.forgedWeapons.set(record.bodyId, owned);
+    }
     for (const id of data.removed) game.removed.add(id);
     for (const id of data.opened) game.opened.add(id);
     game.weapons.clear();
@@ -3209,6 +3338,7 @@ function validateSave(value: unknown): SaveData {
     ['height', 'build'].every((k) => number(v[k], 0.1, 10)) &&
     ['hairStyle', 'hat'].every((k) => number(v[k], 0, 100, true)) &&
     typeof v.cloak === 'boolean' &&
+    (v.weaponSeed === undefined || number(v.weaponSeed, 0, 0xffffffff, true)) &&
     ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
   if (!object(value) || value.version !== 1 || !number(value.seed, 0, 0xffffffff, true))
     return fail();
@@ -3476,6 +3606,36 @@ function validateSave(value: unknown): SaveData {
       )
     )
       return fail();
+  }
+  if (value.forgedWeapons !== undefined) {
+    if (!Array.isArray(value.forgedWeapons) || value.forgedWeapons.length > 768) return fail();
+    const ids = new Set<string>();
+    for (const record of value.forgedWeapons) {
+      if (
+        !object(record) ||
+        !text(record.bodyId, 160) ||
+        !['staff', 'sword', 'bow'].includes(record.kind as string) ||
+        !number(record.seed, 0, 0xffffffff, true) ||
+        !number(record.ownerSeed, -0xffffffff, 0xffffffff, true) ||
+        !object(record.recipe) ||
+        record.recipe.kind !== record.kind
+      )
+        return fail();
+      const key = `${record.bodyId}:${record.kind}`;
+      if (ids.has(key)) return fail();
+      ids.add(key);
+      const owner =
+        record.bodyId === currentBodyId
+          ? p.appearance
+          : (value.npcs as Npc[]).find((n) => n.id === record.bodyId)?.appearance;
+      if (!owner || !object(owner) || owner.seed !== record.ownerSeed) return fail();
+      const construction = resolveForge(
+        record.ownerSeed as number,
+        record.recipe as unknown as ForgeRecipe,
+        1,
+      );
+      if (!construction || construction.seed !== record.seed) return fail();
+    }
   }
   return value as unknown as SaveData;
 }
