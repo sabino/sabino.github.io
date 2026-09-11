@@ -51,6 +51,7 @@ export function createCommission(
   plants: Prop[],
   enemies: Npc[],
   garden: { x: number; y: number; plant: ItemId } | undefined,
+  yieldFor: (prop: Prop) => number = () => 1,
 ): Commission {
   const h = deriveSeed(seed, 'free-life-contract', town.id, number),
     mode = h % 4;
@@ -105,8 +106,13 @@ export function createCommission(
       reward: 24 + required * 7,
     };
   }
-  const plot = plants[(h >>> 4) % plants.length],
-    required = 6 + ((h >>> 12) % 5);
+  const plot = plants[(h >>> 4) % plants.length];
+  const matching = new Map(plants.filter((p) => p.kind === plot.kind).map((p) => [p.id, p]));
+  const available = [...matching.values()].reduce((sum, p) => {
+    const amount = yieldFor(p);
+    return sum + (Number.isSafeInteger(amount) && amount >= 1 ? amount : 1);
+  }, 0);
+  const required = Math.min(6 + ((h >>> 12) % 5), available);
   return {
     ...base,
     kind: 'field',

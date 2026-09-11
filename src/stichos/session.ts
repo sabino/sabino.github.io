@@ -291,6 +291,11 @@ export class Stichos {
   progression: ProgressionState;
   private cosmeticEntitlements: string[] = [];
   private freeLifeState = createFreeLife();
+  private fieldCommissionSearch: {
+    jobId: string;
+    propId?: string;
+    failedAtRemovedSize?: number;
+  } | null = null;
   private forgedWeapons = new Map<
     string,
     Partial<Record<Weapon, { seed: number; ownerSeed: number; recipe: ForgeRecipe }>>
@@ -1134,13 +1139,15 @@ export class Stichos {
         plants,
         enemies,
         garden,
+        (prop) => this.botanicalProfile(prop)?.yield ?? 1,
       );
       this.freeLifeState.commission = next;
+      this.fieldCommissionSearch = null;
       this.addQuest({
         id: next.id,
         title: next.title,
         description: next.description,
-        objective: `${next.description} Progress0/${next.required}. Reward${next.reward}coins.`,
+        objective: `${next.description} Progress 0/${next.required}. Reward ${next.reward} coins.`,
         stage: 0,
         complete: false,
         target: { ...next.target },
@@ -1160,6 +1167,7 @@ export class Stichos {
     ) {
       if (job.item && !this.spend({ [job.item]: job.required })) return;
       job.status = 'complete';
+      this.fieldCommissionSearch = null;
       this.freeLifeState.completed++;
       this.player.coins += job.reward;
       this.awardXp(24);
@@ -1175,6 +1183,7 @@ export class Stichos {
       this.syncFreeLife();
     } else if (id === 'life:cancel' && job?.status === 'active') {
       job.status = 'cancelled';
+      this.fieldCommissionSearch = null;
       this.complete(job.id);
       const quest = this.quests.find((q) => q.id === job.id);
       if (quest) quest.objective = 'Withdrawn without payment.';
@@ -1198,17 +1207,45 @@ export class Stichos {
   private syncFreeLife() {
     if (!this.campaignState.ending) return;
     const job = this.freeLifeState.commission;
+    if (job?.status !== 'active') this.fieldCommissionSearch = null;
     if (job?.status === 'active') {
       if (job.kind === 'watch')
         job.progress = job.targets.filter((id) => this.removed.has(id)).length;
-      if (job.progress >= job.required) job.target = { ...job.board };
-      else if (job.kind === 'field') {
-        const plots = this.world
-          .propsAround(job.board.x, job.board.y, 48)
-          .filter((p) => p.kind === job.item && !this.removed.has(p.id));
-        if (!plots.some((p) => distance(p, job.target) < 0.1)) {
-          const plot = plots.sort((a, b) => distance(a, this.player) - distance(b, this.player))[0];
-          if (plot) job.target = { x: plot.x, y: plot.y };
+      let fieldUnavailable = false;
+      if (job.progress >= job.required) {
+        job.target = { ...job.board };
+        this.fieldCommissionSearch = null;
+      } else if (job.kind === 'field') {
+        const cached =
+          this.fieldCommissionSearch?.jobId === job.id ? this.fieldCommissionSearch : null;
+        if (cached?.propId && !this.removed.has(cached.propId)) {
+          // A living target remains valid across routine quest/save refreshes.
+        } else if (cached?.failedAtRemovedSize === this.removed.size) {
+          fieldUnavailable = true;
+          job.target = { ...job.board };
+        } else {
+          let plot = this.world
+            .propsAround(job.target.x, job.target.y, 0.25)
+            .find(
+              (p) =>
+                p.kind === job.item && distance(p, job.target) < 0.1 && !this.removed.has(p.id),
+            );
+          if (!plot)
+            for (const radius of [48, 80, 128]) {
+              plot = this.world
+                .propsAround(job.board.x, job.board.y, radius)
+                .filter((p) => p.kind === job.item && !this.removed.has(p.id))
+                .sort((a, b) => distance(a, this.player) - distance(b, this.player))[0];
+              if (plot) break;
+            }
+          if (plot) {
+            job.target = { x: plot.x, y: plot.y };
+            this.fieldCommissionSearch = { jobId: job.id, propId: plot.id };
+          } else {
+            fieldUnavailable = true;
+            job.target = { ...job.board };
+            this.fieldCommissionSearch = { jobId: job.id, failedAtRemovedSize: this.removed.size };
+          }
         }
       } else if (job.kind === 'watch') {
         const target = job.targets
@@ -1220,7 +1257,9 @@ export class Stichos {
       if (quest)
         Object.assign(quest, {
           target: { ...job.target },
-          objective: `${job.description} ${job.progress}/${job.required} completed. ${job.progress >= job.required ? 'Return to the issuing noticeboard with the requested supplies.' : ''}`,
+          objective: fieldUnavailable
+            ? `${job.progress}/${job.required} fresh ${job.item} gathered. No matching plots remain within 128 paces of this board. Return to withdraw without penalty, or gather matching plants farther away; the accepted terms and ${job.reward}-coin reward are unchanged.`
+            : `${job.description} ${job.progress}/${job.required} completed. ${job.progress >= job.required ? 'Return to the issuing noticeboard with the requested supplies.' : ''}`,
         });
     }
     for (const milestone of this.freeLife.milestones) {
