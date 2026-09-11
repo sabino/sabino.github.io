@@ -42,11 +42,13 @@
   isolation: isolate;
 }
 .is-notebook .s-window:not(:has(.is-shut))::before {
+  content: '';
   display: block;
   position: absolute;
   inset: 65px 8px 9px 9px;
   width: auto;
   height: auto;
+  padding: 0;
   border: 1px solid #b9a785;
   border-radius: 14px 15px 13px 11px;
   background: repeating-linear-gradient(90deg, #decfae 0 2px, #9b8b6b 2px 3px, #e8d9b8 3px 5px);
@@ -55,19 +57,24 @@
     4px 3px #c5b796,
     5px 4px #82775c;
   pointer-events: none;
-  z-index: -1;
+  z-index: 0;
 }
 .is-notebook .s-window:not(:has(.is-shut))::after {
+  content: '';
   display: block;
   position: absolute;
   inset: 5px;
   width: auto;
   height: auto;
+  padding: 0;
+  background: transparent;
   border: 1px dashed #a2ad7f60;
   border-radius: 4px 10px 8px 3px;
   pointer-events: none;
 }
 .s-notebook:not(.is-shut) {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: 58px 40px minmax(0, 1fr) 54px;
   height: 100%;
