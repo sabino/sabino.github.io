@@ -56,3 +56,11 @@ These unedited browser captures show the actual generation 3 game, including a v
 - [Stíchos cathedral square](../images/stichos.png)
 - [Calfell village](../images/stichos-village.png)
 - [Atlas road discovery](../images/stichos-atlas.png)
+
+## Contextual humanoid motion
+
+The existing articulated pixel bodies now reach down and recover a sprig when gathering, work with both hands when crafting, raise their arms for a ward, lift a medicine vial, and briefly recoil from a hit. Simulation effects drive these poses without changing movement, cooldowns, damage or item timing. A harvest effect at the actor selects bench work; one at a nearby resource selects gathering. Impact effects are associated with a single nearby actor when first seen.
+
+Six quantized states reuse the bounded 384-frame humanoid cache. Feet remain anchored, completed actions return to the original idle raster, and reduced motion uses a static restrained pose with fixed secondary-particle positions. Gathering leaves, small crafting sparks, and impact flecks use a few pixel primitives. Northward held arms and equipment remain behind the torso and hood, including northern diagonals and contextual actions. Forged equipment uses `appearance.weaponSeed` while anatomy retains its original seed.
+
+`scripts/browser-motion-check.mjs` renders a real Canvas2D contact sheet at `.dream-loop/stichos-progression/contextual-motion.png`. The asset proof checks 525 contextual north-facing combinations, five visibly distinct poses, static reduced-motion rasters, and three forged-weapon cache identities. The original 720-case held-equipment regression remains available in `scripts/browser-humanoid-check.mjs`. These are asset checks; they do not replace gameplay or foreground performance measurements.

@@ -14,6 +14,8 @@ import {
 } from './art.ts';
 import type { CivilBuildingKind, Sprite } from './art.ts';
 import { drawHomeDecoration, homeDecorations } from './progression-art.ts';
+import { effectActor } from './actor-motion.ts';
+import type { HumanoidAction, HumanoidActionKind } from './actor-motion.ts';
 
 interface Building {
   id: string;
@@ -64,6 +66,9 @@ export class StichosRenderer {
   private footsteps: { x: number; y: number; age: number; side: number; heading: number }[] = [];
   private previousPlayer: Point | null = null;
   private footDistance = 0;
+  private effectActors = new Map<number, { id: string; kind: HumanoidActionKind }>();
+  private actorActions = new Map<string, HumanoidAction>();
+  private reducedMotion = false;
   constructor(readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
     this.resize(canvas.clientWidth || 1000, canvas.clientHeight || 700);
@@ -116,6 +121,8 @@ export class StichosRenderer {
       unit = this.unit,
       scale = unit / 32;
     const dt = this.lastTime < 0 ? 0 : clamp(game.time - this.lastTime, 0, 0.05);
+    if (this.lastTime > game.time) this.effectActors.clear();
+    this.reducedMotion = !!options.reducedMotion;
     this.lastTime = game.time;
     if (this.worldSeed !== game.world.seed || this.worldGeneration !== game.world.generation) {
       this.worldSeed = game.world.seed;
@@ -133,6 +140,35 @@ export class StichosRenderer {
       this.previousPlayer = null;
       this.npcPrevious.clear();
       this.npcWalking.clear();
+      this.effectActors.clear();
+    }
+    this.actorActions.clear();
+    const motionActors = [
+      { id: '$player', x: game.player.x, y: game.player.y, player: true },
+      ...game.npcs
+        .filter((n) => n.id !== game.occupiedNpcId)
+        .map((n) => ({ id: n.id, x: n.x, y: n.y, player: false })),
+    ];
+    const activeEffects = new Set(game.effects.map((effect) => effect.id));
+    for (const id of this.effectActors.keys())
+      if (!activeEffects.has(id)) this.effectActors.delete(id);
+    for (const effect of game.effects) {
+      let owner = this.effectActors.get(effect.id);
+      if (!owner) {
+        const assigned = effectActor(effect, motionActors);
+        if (assigned) {
+          this.effectActors.set(effect.id, assigned);
+          owner = assigned;
+        }
+      }
+      if (!owner || effect.age >= effect.duration) continue;
+      const prior = this.actorActions.get(owner.id);
+      if (prior?.kind === 'hurt' && owner.kind !== 'hurt') continue;
+      this.actorActions.set(owner.id, {
+        kind: owner.kind,
+        progress: effect.age / Math.max(0.01, effect.duration),
+        reduced: this.reducedMotion,
+      });
     }
     const follow = options.reducedMotion
       ? 1
@@ -821,7 +857,8 @@ export class StichosRenderer {
         Math.hypot(person.x - this.previousPlayer.x, person.y - this.previousPlayer.y) > 0.002
       : (this.npcWalking.get((person as Npc).id) ?? false);
     const cooldown = player ? game.player.attackCooldown : (person as Npc).cooldown;
-    const attack = cooldown > 0.25 ? clamp((cooldown - 0.25) / 0.4, 0, 1) : 0;
+    const action = this.actorActions.get(player ? '$player' : (person as Npc).id) ?? null;
+    const attack = action ? 0 : cooldown > 0.25 ? clamp((cooldown - 0.25) / 0.4, 0, 1) : 0;
     const facing = humanoidDirection(person.heading);
     drawHumanoid(
       ctx,
@@ -835,6 +872,7 @@ export class StichosRenderer {
       attack,
       player,
       facing.weaponBehindBody,
+      action,
     );
     const near = Math.hypot(person.x - game.player.x, person.y - game.player.y) < 4;
     if (player || near || (person as Npc).hostile) {
@@ -864,7 +902,9 @@ export class StichosRenderer {
         );
       }
     }
-    const breath = fract(game.time * 0.36 + (person.appearance.seed % 13));
+    const breath = this.reducedMotion
+      ? 0.5
+      : fract(game.time * 0.36 + (person.appearance.seed % 13));
     if (breath < 0.4) {
       ctx.save();
       ctx.globalAlpha = 0.22 * Math.sin((breath / 0.4) * Math.PI);
@@ -1976,6 +2016,14 @@ export class StichosRenderer {
       p = this.worldToScreen(effect),
       s = this.unit / 32,
       t = clamp(effect.age / effect.duration, 0, 1);
+    if (
+      p.x < -100 * s ||
+      p.x > this.width + 100 * s ||
+      p.y < -100 * s ||
+      p.y > this.height + 100 * s
+    )
+      return;
+    const motionT = this.reducedMotion ? 0.35 : t;
     ctx.save();
     ctx.translate(p.x, p.y - 10 * s);
     ctx.globalAlpha = 1 - t;
@@ -2007,34 +2055,62 @@ export class StichosRenderer {
         '#dbe7e8',
       );
     } else if (effect.kind === 'ward' || effect.kind === 'mind') {
-      const r = (12 + t * 55) * s;
+      const r = (12 + motionT * 55) * s;
       ctx.strokeStyle = effect.color;
       ctx.lineWidth = 2 * s;
       ctx.beginPath();
       ctx.ellipse(0, 10 * s, r, r * 0.55, 0, 0, TAU);
       ctx.stroke();
       for (let i = 0; i < 12; i++) {
-        const a = (i / 12) * TAU + t * 0.8;
+        const a = (i / 12) * TAU + motionT * 0.8;
         rect(ctx, Math.cos(a) * r, 10 * s + Math.sin(a) * r * 0.55, 2 * s, 3 * s, '#d8f0df');
+      }
+    } else if (effect.kind === 'harvest') {
+      const craft = this.effectActors.get(effect.id)?.kind === 'craft';
+      const count = this.reducedMotion ? 3 : 7;
+      for (let i = 0; i < count; i++) {
+        const a = i * 2.399 + (effect.id % 7),
+          reach = (craft ? 6 : 4) + motionT * (craft ? 12 : 15),
+          x = Math.cos(a) * reach * s,
+          y =
+            ((craft ? -12 : -3) +
+              Math.sin(a) * reach * 0.3 -
+              motionT * 13 +
+              motionT * motionT * 10) *
+            s;
+        if (craft) {
+          rect(ctx, x, y, s, 3 * s, i % 2 ? '#d8d8a5' : '#b4cbb5');
+          rect(ctx, x - s, y + s, 3 * s, s, '#e2dbb4');
+        } else {
+          line(ctx, x - s, y + 2 * s, x + 2 * s, y - s, '#719a88', s);
+          rect(ctx, x, y - s, 3 * s, 2 * s, i % 2 ? '#b6c99f' : effect.color);
+        }
+      }
+    } else if (effect.kind === 'hurt') {
+      for (let i = 0; i < (this.reducedMotion ? 2 : 5); i++) {
+        const side = i % 2 ? 1 : -1;
+        const x = side * (4 + i + motionT * (9 + i)) * s;
+        const y = (-10 - i * 2 - motionT * 8 + motionT * motionT * 16) * s;
+        rect(ctx, x, y, 2 * s, s, i % 2 ? '#e4ceb5' : effect.color);
       }
     } else {
       const rng = random(effect.id * 8191);
       for (let i = 0; i < 10; i++) {
         const angle = rng() * TAU,
-          d = (6 + t * 20) * s,
-          y = Math.sin(angle) * d * 0.5 - t * 20 * s;
+          d = (6 + motionT * 20) * s,
+          y = Math.sin(angle) * d * 0.5 - motionT * 20 * s;
         rect(ctx, Math.cos(angle) * d, y, (1 + rng() * 2) * s, 2 * s, effect.color);
       }
       if (effect.kind === 'heal') {
-        rect(ctx, -s, -14 * t * s - 10 * s, 2 * s, 8 * s, '#cfeec2');
-        rect(ctx, -4 * s, -14 * t * s - 7 * s, 8 * s, 2 * s, '#cfeec2');
+        rect(ctx, -s, -14 * motionT * s - 10 * s, 2 * s, 8 * s, '#cfeec2');
+        rect(ctx, -4 * s, -14 * motionT * s - 7 * s, 8 * s, 2 * s, '#cfeec2');
       }
     }
     if (effect.text) {
       ctx.fillStyle = effect.color;
       ctx.font = `${11 * s}px Georgia,serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(effect.text, 0, -24 * s - t * 16 * s);
+      ctx.fillText(effect.text, 0, -24 * s - motionT * 16 * s);
     }
     ctx.restore();
   }

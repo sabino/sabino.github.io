@@ -3,6 +3,8 @@ import type { Appearance, BuildingKind, PropKind, Terrain, Tile } from './types.
 import { drawWeapon, weaponGenome } from './equipment.ts';
 import { drawPlant } from './botany.ts';
 import type { PlantKind } from './botany.ts';
+import { actionMotion } from './actor-motion.ts';
+import type { HumanoidAction } from './actor-motion.ts';
 
 export interface Sprite {
   image: HTMLCanvasElement;
@@ -1410,7 +1412,9 @@ export function drawHumanoid(
   attack = 0,
   player = false,
   weaponBehindBody = ((Math.round(heading) % 4) + 4) % 4 === 0,
+  action: HumanoidAction | null = null,
 ) {
+  const motion = actionMotion(action);
   const gait = moving ? ((Math.round((phase / (Math.PI * 2)) * 8) % 8) + 8) % 8 : 0;
   const strike = Math.round(attack * 5);
   const key = [
@@ -1426,11 +1430,15 @@ export function drawHumanoid(
     look.build,
     look.trousers,
     look.weapon,
+    look.weaponSeed ?? look.seed,
     heading,
     gait,
     moving,
     strike,
     weaponBehindBody,
+    motion.kind ?? '',
+    motion.step,
+    !!action?.reduced,
   ].join(':');
   let frame = humanFrames.get(key);
   if (!frame) {
@@ -1450,6 +1458,9 @@ export function drawHumanoid(
           strike / 5,
           player,
           weaponBehindBody,
+          motion.kind
+            ? { kind: motion.kind, progress: motion.step / 6, reduced: action?.reduced }
+            : null,
         ),
       48,
       68,
@@ -1483,6 +1494,7 @@ function drawHumanoidParts(
   attack = 0,
   player = false,
   weaponBehindBody = false,
+  action: HumanoidAction | null = null,
 ) {
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
@@ -1494,10 +1506,55 @@ function drawHumanoidParts(
     bob = moving ? Math.abs(Math.sin(phase * 2)) : 0;
   const cloak = color(look.coat, -9),
     coat = look.coat;
+  const motion = actionMotion(action),
+    strength = motion.strength;
+  const handPose = (s: number, front: boolean) => {
+    const ax = side ? east * (front ? 5 : -4) : s * 6;
+    let hx = ax + 1,
+      hy = -14 + (moving ? step * s * 2 : 0);
+    if (motion.kind === 'gather') {
+      hx += strength * (side ? east * (front ? 3 : 8) : front ? -2 : 3);
+      hy += strength * (front ? 4 : 10 - motion.settle * 10);
+    } else if (motion.kind === 'craft') {
+      hx += strength * (side ? east * 5 : -s * 4);
+      hy -=
+        strength * (front ? 4 : 7) +
+        (action?.reduced ? 0 : Math.sin(motion.settle * Math.PI * 4) * strength * 1.5);
+    } else if (motion.kind === 'ward') {
+      hx += strength * (side ? east * 5 : s * 6);
+      hy -= strength * 17;
+    } else if (motion.kind === 'heal' && !front) {
+      hx += strength * (side ? east * 6 : 4);
+      hy -= strength * 17;
+    } else if (motion.kind === 'hurt') {
+      hx += strength * (side ? -east * 3 : -s * 4);
+      hy -= strength * (front ? 1 : 7);
+    }
+    return { x: hx, y: hy };
+  };
   const arm = (s: number, front: boolean) => {
     const ax = side ? east * (front ? 5 : -4) : s * 6,
       sway = moving ? step * s * 2 : 0,
       lift = attack > 0 && front ? -8 * Math.sin(attack * Math.PI) : 0;
+    if (motion.kind) {
+      const hand = handPose(s, front);
+      const elbowX = ax + (side ? east * 2 : s * 2),
+        elbowY = (-25 - bob + hand.y) * 0.5 + 2;
+      line(ctx, ax, -25 - bob, elbowX, elbowY, color(coat, front ? 9 : -15), 3);
+      line(ctx, elbowX, elbowY, hand.x, hand.y, color(coat, front ? 14 : -8), 3);
+      rect(ctx, hand.x - 1, hand.y - 2, 3, 2, '#aaa18a');
+      rect(ctx, hand.x - 1, hand.y, 3, 3, look.skin);
+      if (!front && motion.kind === 'heal') {
+        rect(ctx, hand.x - 1, hand.y - 5, 3, 5, '#89b6a2');
+        rect(ctx, hand.x, hand.y - 6, 2, 2, '#d8ce9e');
+        rect(ctx, hand.x, hand.y - 3, 1, 2, '#c8e5ca');
+      }
+      if (!front && motion.kind === 'gather' && motion.settle >= 0.5) {
+        line(ctx, hand.x, hand.y, hand.x + 2, hand.y - 5, '#91b59a');
+        rect(ctx, hand.x + 2, hand.y - 4, 3, 2, '#b2c99e');
+      }
+      return;
+    }
     line(
       ctx,
       ax,
@@ -1512,25 +1569,28 @@ function drawHumanoidParts(
   };
   const heldArmAndItem = () => {
     arm(1, true);
-    const wx = side ? east * 7 : 8,
-      hand = -14 + step * 2 - attack * 7;
+    const held = motion.kind ? handPose(1, true) : null;
+    const wx = held ? held.x : side ? east * 7 : 8,
+      hand = held ? held.y : -14 + step * 2 - attack * 7;
     if (look.weapon !== 'none') {
       const sign = side ? east : 1;
       const angle =
-        look.weapon === 'sword'
+        (motion.kind === 'gather' ? sign * strength * 0.22 : 0) +
+        (look.weapon === 'sword'
           ? sign * (0.16 + attack * 1.12)
           : look.weapon === 'bow'
             ? sign * attack * 0.3
-            : sign * (0.04 + attack * 0.7);
+            : sign * (0.04 + attack * 0.7));
       const weaponScale = look.weapon === 'bow' ? 0.62 : 0.68;
-      const bow = look.weapon === 'bow' ? weaponGenome(look.seed, 'bow') : null;
+      const weaponSeed = look.weaponSeed ?? look.seed;
+      const bow = look.weapon === 'bow' ? weaponGenome(weaponSeed, 'bow') : null;
       ctx.save();
       ctx.translate(wx + sign * attack * 4, hand);
       ctx.rotate(angle);
       if (side && east < 0) ctx.scale(-1, 1);
       drawWeapon(
         ctx,
-        look.seed,
+        weaponSeed,
         look.weapon,
         bow ? -(2 + bow.breadth) * weaponScale : 0,
         bow ? -(13 - bow.length / 2) * weaponScale : 0,
@@ -1550,6 +1610,8 @@ function drawHumanoidParts(
     rect(ctx, bx - 2, -3 + sy, 3, 1, '#77818a');
     rect(ctx, bx, -10 + sy, 1, 5, color(look.trousers, 17));
   }
+  // The torso moves around planted feet; short contextual poses never shift gameplay position.
+  if (motion.kind) ctx.translate((side ? east : 0) * motion.lean, motion.crouch);
   // Looking north puts the held arm, grip and item beyond the back of the body.
   // Paint the complete assembly first so neither a swing nor a bow can cross the hood.
   if (weaponBehindBody) heldArmAndItem();
@@ -1581,7 +1643,7 @@ function drawHumanoidParts(
     line(ctx, -4, -25 - bob, -6, -10, color(cloak, 17));
     line(ctx, 1, -24, 3, -9, color(cloak, -12));
   }
-  arm(-1, false);
+  if (!motion.kind || weaponBehindBody) arm(-1, false);
   poly(
     ctx,
     [
@@ -1672,5 +1734,6 @@ function drawHumanoidParts(
     rect(ctx, -5, -35 - bob, 11, 2, '#bbc7c9');
   }
   if (!weaponBehindBody) heldArmAndItem();
+  if (motion.kind && !weaponBehindBody) arm(-1, false);
   ctx.restore();
 }
