@@ -48,7 +48,7 @@ const results = [],
   findings = [],
   screenshots = [];
 const started = new Date();
-let browser, page, targetId, contextId, failure, fps, final, exportedSave;
+let browser, page, targetId, contextId, failure, fps, wideFps, final, exportedSave;
 const held = new Set();
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -406,6 +406,107 @@ async function vaultWalk(site, goal) {
   }
 }
 
+async function wideViewCheck(name) {
+  if ((await state()).paused) await tap('Escape');
+  await viewport(1600, 1000);
+  const canvas = await read(
+    `(()=>{const r=document.querySelector('#s-world').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`,
+  );
+  for (let i = 0; i < 5 && (await read('window.stichos.zoom')) > 0.65; i++) {
+    await page.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x: canvas.x,
+      y: canvas.y,
+      deltaX: 0,
+      deltaY: 350,
+    });
+    await delay(180);
+  }
+  assert(
+    Math.abs((await read('window.stichos.zoom')) - 0.65) < 0.001,
+    'Real wheel did not reach minimum zoom',
+  );
+  await delay(3000);
+  await page.send('Profiler.enable');
+  await page.send('Profiler.start');
+  wideFps = await read(
+    'new Promise(resolve=>{const times=[],start=performance.now();function tick(t){times.push(t);if(t-start>2500)resolve({frames:times.length,elapsedMs:t-times[0],rafFps:(times.length-1)*1000/(t-times[0]),reported:window.stichos.fps,foreground:!document.hidden&&document.hasFocus(),zoom:window.stichos.zoom,player:{x:window.stichos.state.player.x,y:window.stichos.state.player.y}});else requestAnimationFrame(tick)}requestAnimationFrame(tick)})',
+  );
+  const { profile } = await page.send('Profiler.stop');
+  fs.writeFileSync(path.join(out, `${name}.cpuprofile`), JSON.stringify(profile));
+  wideFps.visibleProps = await read(
+    `(()=>{const p=window.stichos.state.player,r=document.querySelector('#s-world').getBoundingClientRect(),props=window.stichos.props(p.x,p.y,80).filter(q=>{const s=window.stichos.worldToScreen(q);return s.x>=-120&&s.x<=r.width+120&&s.y>=-120&&s.y<=r.height+120});const organic=props.filter(q=>['pine','rock','cequin','heartleaf','emberroot','mushroom'].includes(q.kind));return {all:props.length,organic:organic.length,uniqueOrganicSeeds:new Set(organic.map(q=>q.kind+':'+q.seed)).size}})()`,
+  );
+  await screenshot(name);
+  assert(wideFps.foreground, 'Minimum-zoom FPS sample was not foreground');
+  log(
+    'Real wheel reaches minimum zoom; dense view remains playable',
+    `${wideFps.rafFps.toFixed(1)} FPS, ${wideFps.visibleProps.uniqueOrganicSeeds} unique organic sprites at (${wideFps.player.x.toFixed(1)},${wideFps.player.y.toFixed(1)})`,
+  );
+  if (wideFps.rafFps < 40)
+    finding(
+      `Minimum zoom renders ${wideFps.rafFps.toFixed(1)} FPS; CPU profile and visible sprite counts recorded.`,
+    );
+}
+
+async function wildBotanyCheck() {
+  const candidate = await read(`(()=>{
+    const host=window.stichos.state.player,all=window.stichos.props(host.x,host.y,12);
+    const plants=all.filter(p=>['cequin','heartleaf','emberroot','mushroom'].includes(p.kind)&&!p.id.startsWith('origin:')&&Math.hypot(p.x-host.x,p.y-host.y)<9).sort((a,b)=>Math.hypot(a.x-host.x,a.y-host.y)-Math.hypot(b.x-host.x,b.y-host.y));
+    for(const prop of plants)for(const dx of [-1,1]){
+      const approach={x:prop.x+dx,y:prop.y};
+      if([[0,0],[.3,0],[-.3,0],[0,.3],[0,-.3]].some(([x,y])=>window.stichos.blocked(approach.x+x,approach.y+y)))continue;
+      if(all.some(q=>q.id!==prop.id&&Math.hypot(q.x-approach.x,q.y-approach.y)<1.2))continue;
+      return {prop,approach,profile:window.stichos.botanicalProfile(prop)};
+    }
+    return null;
+  })()`);
+  assert(candidate?.profile, 'No accessible wild botanical specimen near the road');
+  const { prop, approach, profile } = candidate;
+  await clickWalk(approach, 0.2, 'approach generated wild plant');
+  const pos = await read(
+    `(()=>{const p=window.stichos.worldToScreen({x:${prop.x},y:${prop.y - 0.25}}),r=document.querySelector('#s-world').getBoundingClientRect();return {x:r.left+p.x,y:r.top+p.y}})()`,
+  );
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pos.x, y: pos.y });
+  await delay(220);
+  const hover = await read(
+    'document.querySelector("#s-hover").hidden ? "" : document.querySelector("#s-hover").textContent',
+  );
+  const prompt = await read(
+    'document.querySelector("#s-context").hidden ? "" : document.querySelector("#s-context").textContent',
+  );
+  assert(
+    hover.includes(profile.name) &&
+      hover.includes(`${profile.yield} portions`) &&
+      hover.includes(profile.construction),
+    'Wild plant hover differs from generated profile',
+  );
+  assert(
+    prompt.toLowerCase().includes(profile.name.toLowerCase()) &&
+      prompt.includes(`${profile.yield} portions`),
+    'Nearby harvest prompt omits actual plant name or yield',
+  );
+  await screenshot('02b-wild-plant-profile');
+  const item = prop.kind === 'mushroom' ? 'rations' : prop.kind;
+  const before = (await state()).inventory[item] ?? 0;
+  await tap('e');
+  await waitFor(
+    `window.stichos.state.removed.includes(${JSON.stringify(prop.id)})`,
+    'wild botanical harvest',
+  );
+  assert(
+    ((await state()).inventory[item] ?? 0) === before + profile.yield,
+    'Actual wild harvest differs from displayed generated yield',
+  );
+  await screenshot('02c-wild-plant-harvest');
+  await clickWalk({ x: 0, y: 32 }, 0.2, 'return from wild plant to south road');
+  log(
+    'Generated wild botanical hover and nearby prompt agree with actual harvest',
+    `${profile.name}: ${profile.yield} ${item}`,
+  );
+  return { id: prop.id, item, amount: profile.yield, x: prop.x, y: prop.y };
+}
+
 async function expeditionChecks() {
   assert(
     (await state()).worldGeneration === 2,
@@ -426,6 +527,12 @@ async function expeditionChecks() {
     job && distance(job.target, (await state()).player) > 40,
     'Dispatch must target a real distant recipient',
   );
+  assert(
+    await read(
+      `document.querySelector('#s-quest-title').textContent===window.stichos.state.quests.find(q=>q.id===${JSON.stringify('correspondence:' + job.sourceId + ':' + job.number)})?.title`,
+    ),
+    'Newly accepted dispatch is not tracked in the sidebar',
+  );
   await screenshot('01-dispatch-accepted');
   await closeDialogue();
   log(
@@ -441,6 +548,8 @@ async function expeditionChecks() {
   await clickWalk({ x: 0, y: 5 }, 0.25, 'join south road');
   const site = (await read('window.stichos.vaults(40,40,1)'))[0];
   assert(site, 'First excavation missing');
+  await roadAxis('y', 32);
+  const harvestedPlant = await wildBotanyCheck();
   await roadAxis('y', 80);
   await roadAxis('x', site.entrance.x);
   await interactTarget(`${site.id}:notice`);
@@ -452,24 +561,37 @@ async function expeditionChecks() {
     ),
     'Notice did not mark the actual deep archive',
   );
+  assert(
+    await read(
+      `document.querySelector('#s-quest-title').textContent===window.stichos.state.quests.find(q=>q.id===${JSON.stringify(site.id + ':survey')})?.title`,
+    ),
+    'Newly accepted vault task is not tracked in the sidebar',
+  );
+  log('Newly accepted dispatch and vault task automatically replace the tracked sidebar objective');
   await roadAxis('x', site.entrance.x);
   await roadAxis('y', site.entrance.y);
   await screenshot('04-vault-entrance');
   console.log('SHOT 04-vault-entrance.png');
   await vaultWalk(site, site.reward);
-  for (let i = 0; i < 100; i++) {
-    const enemies = (await state()).npcs.filter(
-      (n) => n.id.startsWith(`${site.id}:guard:`) && n.hp > 0,
-    );
+  for (let i = 0; i < 24; i++) {
+    const current = await state();
+    const enemies = current.npcs
+      .filter((n) => n.id.startsWith(`${site.id}:guard:`) && n.hp > 0)
+      .sort((a, b) => distance(a, current.player) - distance(b, current.player));
     if (!enemies.length) break;
-    await combatNearby();
-    await delay(100);
+    if (distance(enemies[0], current.player) > current.weaponProfile.range - 0.03)
+      await vaultWalk(site, enemies[0]);
+    else {
+      await combatNearby();
+      await delay(150);
+    }
   }
   assert(
     (await state()).removed.filter((id) => id.startsWith(`${site.id}:guard:`)).length === 2,
     'Both actual vault guards must be defeated',
   );
   await screenshot('05-vault-combat-cleared');
+  await vaultWalk(site, site.reward);
   const chest = (await read(`window.stichos.props(${site.reward.x},${site.reward.y},3)`)).find(
     (p) => p.id === `${site.id}:cache`,
   );
@@ -572,8 +694,23 @@ async function expeditionChecks() {
       restored.correspondenceJobs.find((j) => j.sourceId === job.sourceId)?.status === 'delivered',
     'Expedition save lost archive or dispatch outcomes',
   );
+  assert(
+    restored.removed.includes(harvestedPlant.id) &&
+      !(await read(
+        `window.stichos.props(${harvestedPlant.x},${harvestedPlant.y},1).some(p=>p.id===${JSON.stringify(harvestedPlant.id)})`,
+      )),
+    'Save/Continue regenerated the harvested wild plant',
+  );
+  assert(
+    JSON.stringify(restored.inventory) === JSON.stringify(saved.inventory),
+    'Save/Continue lost harvested inventory',
+  );
+  log('Save/Continue preserves the generated wild plant removal and actual inventory');
   await screenshot('09-expedition-continued');
   log('Save/Continue preserves generation2, position, archive and dispatch outcomes');
+  await roadAxis('x', grid.x);
+  await roadAxis('y', 40);
+  await wideViewCheck('10-dense-forest-minimum-zoom');
   assert(errors.length === 0, 'Browser reported runtime or console errors');
   log('No browser console or runtime errors');
 }
@@ -882,6 +1019,7 @@ try {
           '390×844',
         );
       }
+      await wideViewCheck(`${visualName}-wide`);
     } else {
       const beforeMove = (await state()).player;
       await setKeys(['d']);
@@ -1230,6 +1368,7 @@ try {
     findings,
     errors,
     fps,
+    wideFps,
     screenshots,
     failure: failure?.stack,
     final,

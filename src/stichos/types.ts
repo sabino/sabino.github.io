@@ -17,6 +17,14 @@ export type ItemId =
   | 'bandage'
   | 'seal'
   | 'lens';
+export type BuildingKind =
+  | 'church'
+  | 'house'
+  | 'inn'
+  | 'workshop'
+  | 'greenhouse'
+  | 'storehouse'
+  | 'hall';
 export interface Tile extends Point {
   seed: number;
   terrain: Terrain;
@@ -25,6 +33,7 @@ export interface Tile extends Point {
   temperature: number;
   detail: number;
   building?: string;
+  buildingKind?: BuildingKind;
   site?: string;
   clan?: number;
 }
@@ -100,6 +109,7 @@ export interface Settlement extends Point {
   name: string;
   clan: number;
   kind: 'cathedral' | 'village' | 'foundry';
+  rank?: 'city' | 'village' | 'hamlet';
   radius: number;
 }
 export interface Chunk {

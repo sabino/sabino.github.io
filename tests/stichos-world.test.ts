@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { InfiniteWorld, CHUNK_SIZE, appearance } from '../src/stichos/world.ts';
+import {
+  InfiniteWorld,
+  CHUNK_SIZE,
+  CITY_SPACING,
+  STOP_SPACING,
+  appearance,
+} from '../src/stichos/world.ts';
 import type { Point, Tile } from '../src/stichos/types.ts';
 
 test('generation one preserves existing wilderness terrain, obstacles, residents and resources byte-for-byte', () => {
@@ -22,9 +28,9 @@ test('generation one preserves existing wilderness terrain, obstacles, residents
       expected,
     );
   }
-  assert.equal(new InfiniteWorld(2).generation, 2);
+  assert.equal(new InfiniteWorld(2).generation, 3);
   assert.notDeepEqual(new InfiniteWorld(2, 1).chunk(2, 2), new InfiniteWorld(2, 2).chunk(2, 2));
-  assert.throws(() => new InfiniteWorld(2, 3 as 2), /Unsupported/);
+  assert.throws(() => new InfiniteWorld(2, 4 as 2), /Unsupported/);
 });
 
 test('warped climate is continuous across positive, negative and distant chunk seams', () => {
@@ -187,8 +193,8 @@ test('vault occurrence and placement are deterministic in negative districts and
 });
 
 test('chunk seams and content are independent of load order including negative and far coordinates', () => {
-  const a = new InfiniteWorld(703),
-    b = new InfiniteWorld(703);
+  const a = new InfiniteWorld(703, 2),
+    b = new InfiniteWorld(703, 2);
   const positions = [
     [-17, -17],
     [-16, -16],
@@ -221,7 +227,7 @@ test('chunk seams and content are independent of load order including negative a
 
 test('a continuous road can be walked thousands of tiles through towns and wilderness in each direction', () => {
   for (const seed of [0, 17, 703]) {
-    const world = new InfiniteWorld(seed);
+    const world = new InfiniteWorld(seed, 2);
     for (let p = -1600; p <= 1600; p++) {
       assert.equal(world.blocked(p, 0), false, `seed ${seed}: east/west route blocked at ${p}`);
       assert.equal(world.blocked(0, p), false, `seed ${seed}: north/south route blocked at ${p}`);
@@ -234,7 +240,7 @@ test('a continuous road can be walked thousands of tiles through towns and wilde
 });
 
 test('chunk LRU stays bounded and evicted terrain, residents and resources regenerate identically', () => {
-  const world = new InfiniteWorld(2),
+  const world = new InfiniteWorld(2, 2),
     original = structuredClone(world.chunk(0, 0));
   for (let cx = 1; cx <= 200; cx++) world.chunk(cx, cx % 7);
   assert.equal(world.cacheSize, 160);
@@ -277,7 +283,7 @@ const accessible = (seen: Set<string>, p: Point) =>
 
 test('origin has accessible canon residents, radio, crafting, herbs, timber, and ore with no hostile spawn', () => {
   for (const seed of [0, 1, 2, 9, 71, 703]) {
-    const world = new InfiniteWorld(seed),
+    const world = new InfiniteWorld(seed, 2),
       seen = reachable(world, world.spawn, 22);
     assert.equal(world.blocked(world.spawn.x, world.spawn.y), false);
     const npcs = world.npcsAround(0, 0, 24),
@@ -307,7 +313,7 @@ test('origin has accessible canon residents, radio, crafting, herbs, timber, and
 });
 
 test('generated settlement interiors and residents connect to open streets and road network', () => {
-  const world = new InfiniteWorld(319);
+  const world = new InfiniteWorld(319, 2);
   for (const [gx, gy] of [
     [0, 0],
     [1, 0],
@@ -336,7 +342,7 @@ test('generated settlement interiors and residents connect to open streets and r
 });
 
 test('coherent wilderness varies four biomes, resources and terrain rather than repeating a finite island', () => {
-  const world = new InfiniteWorld(903),
+  const world = new InfiniteWorld(903, 2),
     biomes = new Set<string>(),
     terrain = new Set<string>(),
     shapes = new Set<string>();
@@ -364,7 +370,7 @@ test('coherent wilderness varies four biomes, resources and terrain rather than 
     assert.ok(terrain.has(kind), kind);
   assert.ok(shapes.size > 50);
   assert.ok(matching / neighbors > 0.85, 'neighboring tiles should form coherent regions');
-  assert.notDeepEqual(new InfiniteWorld(1).chunk(9, 9), new InfiniteWorld(2).chunk(9, 9));
+  assert.notDeepEqual(new InfiniteWorld(1, 2).chunk(9, 9), new InfiniteWorld(2, 2).chunk(9, 9));
 });
 
 test('humanoid appearance is deterministic, visibly varied, and respects role and clan components', () => {
@@ -374,9 +380,202 @@ test('humanoid appearance is deterministic, visibly varied, and respects role an
     assert.deepEqual(a, appearance(seed, 'guard', seed % 6));
     assert.ok(['sword', 'bow'].includes(a.weapon));
     assert.ok(a.height >= 0.88 && a.height <= 1.14);
-    assert.equal(a.trim, new InfiniteWorld(0).clans[seed % 6].color);
+    assert.equal(a.trim, new InfiniteWorld(0, 2).clans[seed % 6].color);
     forms.add(JSON.stringify(a));
   }
   assert.equal(forms.size, 100);
   assert.equal(appearance(3, 'botanist').weapon, 'staff');
+});
+
+test('generation two terrain, settlement anchors and vaults remain byte-identical after the wider world revision', () => {
+  const fixtures = [
+    [0, 0, 0, '3e2931442c4cdb572e2a5b59f6b55239b40b10d259e24e217457c41981d692b9'],
+    [0, 2, 2, 'bd2db888e3a1e5500b10cd604807627a9657f0854432564b7bbcd0742ab0ac94'],
+    [0, -3, -3, '105c011cad1f032ebae2ee89e888ffd6850c6819f634759e5b53aa2f9759a0ae'],
+    [703, 0, 0, '8250d5996178fb67517aacc605739dffc1e48c12d7ccb86b06a16238124909d9'],
+    [703, 2, 2, '2a6836907d520312bf8a6db4495563e34379d440f383a26487acd24dbfc1f24d'],
+    [703, 5, 0, '32ca66c4bd89c0f622b5dba061560b661db11031058564542687f89224034635'],
+    [1398032707, -3, -3, 'e5c1f7c89f1166517b13cdfe742514e16a2d512da103d9e3017e2adc120fcf62'],
+    [1398032707, 5, 0, 'aa61fa3a7a497186d144240fac6b7786d6770f2eba41e36f441ba0b9ec6b95e1'],
+  ] as const;
+  for (const [seed, cx, cy, expected] of fixtures)
+    assert.equal(
+      createHash('sha256')
+        .update(JSON.stringify(new InfiniteWorld(seed, 2).chunk(cx, cy)))
+        .digest('hex'),
+      expected,
+    );
+});
+
+test('generation three separates cities by 640 tiles and composes smaller seeded stops between them', () => {
+  const counts = new Set<number>(),
+    ranks = new Set<string>(),
+    positions = new Set<string>();
+  for (let seed = 0; seed < 100; seed++) {
+    const world = new InfiniteWorld(seed, 3),
+      towns = world.settlementsAround(0, 0, 700),
+      cities = towns.filter((t) => t.rank === 'city');
+    assert.equal(world.cacheSize, 0, 'large settlement queries must remain metadata-only');
+    assert.equal(
+      cities.length,
+      5,
+      'origin plus four neighboring cities, not a church every short road',
+    );
+    for (const a of cities)
+      for (const b of cities)
+        if (a.id !== b.id) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= CITY_SPACING);
+    for (const t of towns) {
+      assert.ok(Number.isInteger(t.x) && Number.isInteger(t.y));
+      ranks.add(t.rank!);
+      assert.equal(t.kind === 'cathedral', t.rank === 'city');
+    }
+    for (const sign of [-1, 1]) {
+      const roadStops = towns
+        .filter(
+          (t) => Math.abs(t.y) <= 10 && Math.sign(t.x) === sign && Math.abs(t.x) < CITY_SPACING,
+        )
+        .sort((a, b) => Math.abs(a.x) - Math.abs(b.x));
+      assert.equal(roadStops.length, 2, 'two smaller stops divide the long city road');
+      assert.ok(Math.abs(roadStops[0].x) >= 193 && Math.abs(roadStops[0].x) <= 234);
+      assert.ok(
+        Math.abs(roadStops[1].x - roadStops[0].x) >= 190 &&
+          Math.abs(roadStops[1].x - roadStops[0].x) <= 240,
+      );
+    }
+    counts.add(towns.length);
+    positions.add(JSON.stringify(towns.map((t) => [t.x, t.y, t.rank])));
+  }
+  assert.equal(positions.size, 100);
+  assert.ok(counts.size > 3);
+  assert.deepEqual([...ranks].sort(), ['city', 'hamlet', 'village']);
+});
+
+test('generation three building archetypes, residents and useful fixtures connect to actual road crossings', () => {
+  const kinds = new Set<string>(),
+    sizes = new Set<string>(),
+    buildingCounts = new Set<number>();
+  for (const seed of [3, 71, 703]) {
+    const world = new InfiniteWorld(seed, 3),
+      towns = world.settlementsAround(0, 0, 700);
+    const selected = ['city', 'village', 'hamlet'].map(
+      (rank) => towns.find((t) => t.rank === rank && t.id !== 'origin')!,
+    );
+    selected.push(towns.find((t) => t.id === 'origin')!);
+    for (const town of selected) {
+      assert.ok(town);
+      const seen = reachable(world, town, town.radius + 3),
+        footprints = new Map<string, Tile[]>();
+      for (let y = town.y - town.radius; y <= town.y + town.radius; y++)
+        for (let x = town.x - town.radius; x <= town.x + town.radius; x++) {
+          const tile = world.tile(x, y);
+          if (!tile.building?.startsWith(town.id + ':')) continue;
+          assert.ok(tile.buildingKind, 'every footprint tile needs an honest renderer archetype');
+          const cells = footprints.get(tile.building) ?? [];
+          cells.push(tile);
+          footprints.set(tile.building, cells);
+        }
+      buildingCounts.add(footprints.size);
+      assert.equal(
+        [...footprints.values()].filter((c) => c[0].buildingKind === 'church').length,
+        town.rank === 'city' ? 1 : 0,
+      );
+      for (const cells of footprints.values()) {
+        const kind = cells[0].buildingKind!;
+        kinds.add(kind);
+        assert.ok(cells.every((c) => c.buildingKind === kind));
+        const xs = cells.map((c) => c.x),
+          ys = cells.map((c) => c.y);
+        const width = Math.max(...xs) - Math.min(...xs) + 1,
+          depth = Math.max(...ys) - Math.min(...ys) + 1;
+        assert.equal(
+          cells.length,
+          width * depth,
+          'footprint is complete, without clipped roofs or disconnected wings',
+        );
+        sizes.add(`${width}:${depth}`);
+      }
+      for (const npc of world.npcsAround(town.x, town.y, town.radius + 1))
+        if (npc.id.startsWith(town.id + ':') || npc.id.startsWith('origin-')) {
+          assert.ok(Number.isInteger(npc.x) && Number.isInteger(npc.y));
+          assert.ok(
+            seen.has(`${npc.x},${npc.y}`),
+            `${town.id}/${npc.id} must stand on connected ground`,
+          );
+        }
+      const props = world
+        .propsAround(town.x, town.y, town.radius + 2)
+        .filter((p) => p.id.startsWith(town.id + ':') || p.id === 'origin-radio');
+      for (const prop of props)
+        assert.ok(accessible(seen, prop), `${seed}/${town.id}/${prop.id} cannot be used`);
+      for (const kind of ['cequin', 'workbench', 'bench'])
+        assert.ok(props.some((p) => p.kind === kind));
+      const crossing = {
+        x: Math.round(Math.round(town.x / STOP_SPACING) * STOP_SPACING),
+        y: Math.round(Math.round(town.y / STOP_SPACING) * STOP_SPACING),
+      };
+      assert.ok(
+        seen.has(`${crossing.x},${crossing.y}`),
+        'local streets connect to the rounded global crossing',
+      );
+    }
+  }
+  assert.ok(
+    kinds.has('church') &&
+      kinds.has('inn') &&
+      kinds.has('workshop') &&
+      kinds.has('house') &&
+      kinds.has('storehouse') &&
+      kinds.has('greenhouse'),
+  );
+  assert.ok(sizes.size >= 5);
+  assert.ok(buildingCounts.size >= 3);
+});
+
+test('rounded generation-three roads remain unbroken across distant cities, negative coordinates and chunk eviction', () => {
+  for (const seed of [0, 703]) {
+    const world = new InfiniteWorld(seed, 3),
+      original = structuredClone(world.chunk(-41, 0));
+    for (let p = -1920; p <= 1920; p++) {
+      assert.equal(world.blocked(p, 0), false, `${seed}: east/west ${p}`);
+      assert.equal(world.blocked(0, p), false, `${seed}: north/south ${p}`);
+    }
+    for (const index of [-7, -2, 1, 5]) {
+      const line = Math.round(index * STOP_SPACING);
+      for (let p = -220; p <= 220; p++) {
+        assert.equal(world.blocked(line, p), false, `${seed}: rounded vertical ${line},${p}`);
+        assert.equal(world.blocked(p, line), false, `${seed}: rounded horizontal ${p},${line}`);
+      }
+    }
+    assert.equal(world.cacheSize, 160);
+    assert.deepEqual(world.chunk(-41, 0), original);
+    assert.deepEqual(
+      world.tile(-1_000_016, 1_000_016),
+      new InfiniteWorld(seed, 3).tile(-1_000_016, 1_000_016),
+    );
+    assert.deepEqual(
+      world.climate(347, -819),
+      new InfiniteWorld(seed, 2).climate(347, -819),
+      'world spacing reuses coherent climate rather than reseeding biomes',
+    );
+  }
+});
+
+test('generation three relocates vaults between wider settlements with an accessible road approach', () => {
+  for (const seed of [0, 71, 703]) {
+    const world = new InfiniteWorld(seed, 3),
+      site = world.vaultsAround(107, 107, 1)[0];
+    assert.ok(site);
+    assert.ok(Number.isInteger(site.entrance.x) && Number.isInteger(site.entrance.y));
+    for (const town of world.settlementsAround(site.x, site.y, 300))
+      assert.ok(Math.hypot(site.x - town.x, site.y - town.y) > town.radius + 32);
+    for (let y = site.entrance.y; y <= 213; y++)
+      assert.equal(world.blocked(site.entrance.x, y), false, `${seed}: vault approach ${y}`);
+    const seen = reachable(world, site.entrance, 40);
+    assert.ok(seen.has(`${site.reward.x},${site.reward.y}`));
+    for (const npc of world
+      .npcsAround(site.x, site.y, 24)
+      .filter((n) => n.id.startsWith(site.id + ':guard:')))
+      assert.ok(seen.has(`${npc.x},${npc.y}`));
+    assert.ok(world.propsAround(site.entrance.x, 212, 3).some((p) => p.id === site.id + ':notice'));
+  }
 });

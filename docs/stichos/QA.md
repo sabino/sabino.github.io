@@ -1,6 +1,6 @@
 # Stíchos browser QA
 
-**PASS** — the opening campaign, body-specific mind transfer, and a later generation-2 vault/dispatch expedition completed through real browser input. The opening and possession checks used `app-C7Uk0xX8.js` / service worker `fb8fa2a70d25b402a3ce`; the expedition used `app-BMa4UVxL.js` / `23fbddecb2494ab77ce8`, at `http://localhost:4174/`.
+**PASS** — the opening campaign, body-specific mind transfer, and a later generation-2 vault/dispatch expedition completed through real browser input. The opening and possession checks used `app-C7Uk0xX8.js` / service worker `fb8fa2a70d25b402a3ce`; the expedition used `app-BQLDpW6p.js` / `3cdc9cff1bf20984bc80`, at `http://localhost:4174/`.
 
 The harness uses an isolated Agent Workspace Chromium tab, real CDP keyboard/mouse input, and read-only `window.stichos` diagnostics. It does not inject game state or directly write or clear browser storage; save changes come from normal game actions. The game runs on the separate localhost origin.
 
@@ -38,7 +38,7 @@ Evidence: [possession results and screenshots](../../.dream-loop/stichos-possess
 
 ## Save files and offline play
 
-The isolated storage pass tested production `app-Bqud7p6L.js` / service worker `dd38cbd0f71bfbed460b`. Seven checks passed:
+The isolated storage pass was repeated on production `app-BQLDpW6p.js` / service worker `3cdc9cff1bf20984bc80`. Seven checks passed:
 
 - Actual Download save JSON matched the live seed and position.
 - The file chooser restored that downloaded position, inventory, and world.
@@ -46,27 +46,29 @@ The isolated storage pass tested production `app-Bqud7p6L.js` / service worker `
 - Offline service-worker reload, saved continuation, and real walking worked. The cache held 18 assets; an uncached network request was blocked during the offline check.
 - No runtime exceptions occurred.
 
-Evidence: [storage results](../../.dream-loop/stichos-storage/results.json). This storage pass preceded the body-specific belongings build; the later possession pass independently verified its normal Save/Continue path.
+Evidence: [storage results](../../.dream-loop/stichos-storage/results.json). The dedicated possession pass also independently verified body-specific belongings through normal Save/Continue.
 
 ## Generation-2 expedition
 
-A fresh isolated context completed 497 paces of actual walking between 2026-09-11T02:43:17Z and 02:46:05Z. The harness harvested herbs and crafted two salves, accepted a dispatch from the engineer, followed roads to the excavation, and marked the real deep archive through its roadside notice.
+A fresh isolated context completed 554 paces of actual walking between 2026-09-11T03:07:12.020Z and 2026-09-11T03:10:30.314Z. The harness harvested herbs and crafted two salves, accepted a dispatch from the engineer, followed roads to the excavation, and marked the real deep archive through its roadside notice.
 
-Keyboard input followed passable room corridors, and staff attacks plus the ward defeated both vault guards. The archive gave exactly three seed-selected herbs, two ore, one ration, and twelve coins, and completed its journal task. Searching it again produced no extra reward.
+A generated wild Clustered snowcap displayed its name, construction and two-portion yield in both hover and nearby prompts. Actual gathering added exactly two rations. Newly accepted dispatch and vault quests immediately replaced the tracked sidebar objective.
 
-The character then walked to Ana Reed in Veywick. Authorized delivery, disclosure, and withholding were all offered as distinct choices. Delivery paid the promised 21 coins and changed both families' reputation by the specified amounts. Save/Continue retained generation 2, the actual position, the opened archive, and the completed dispatch. No console or runtime errors occurred.
+Keyboard input followed passable room corridors, and staff attacks plus the ward defeated both vault guards with the current ranged-enemy combat rules. The archive gave exactly three seed-selected herbs, two ore, one ration, and twelve coins, and completed its journal task. Searching it again produced no extra reward.
+
+The character then walked to Ana Reed in Veywick. Authorized delivery, disclosure, and withholding were all offered as distinct choices. Delivery paid the promised 21 coins and changed both families' reputation by the specified amounts. Save/Continue retained generation 2, the actual position, exact inventory, harvested wild-plant removal, the opened archive, and the completed dispatch. No console or runtime errors occurred.
 
 Evidence: [expedition results and screenshots](../../.dream-loop/stichos-expedition/). Route planning reads tile/collision diagnostics; all movement, combat, dialogue, and looting use keyboard/mouse input. The entire context is disposed afterward, preserving the earlier campaign save.
 
 ## Findings
 
-The expedition build kept the old opening objective in the sidebar after accepting new tasks. The journal held the correct targets. Automatic tracking and map/site labels have been corrected in source and await the next browser checkpoint.
+The previously reported sidebar tracking issue is fixed and browser-verified. No consequential gameplay findings remain from this bounded route. An initial performance detour clicked a nearby village interaction instead of walking; the harness now uses actual cardinal keys there, and the complete repeat passed.
 
 ## Evidence and limits
 
-Screenshots and detailed results: [full route evidence](../../.dream-loop/stichos-qa/). Browser errors: 0. Desktop: 1600×1000. The updated portrait/world and satchel were captured at 390×844 in round04 without horizontal overflow; the correctly verified mobile journal is [expedition screenshot 02](../../.dream-loop/stichos-expedition/02-mobile-journal.png). An earlier round04 screenshot labeled journal actually showed pause; the input sequence and modal assertion are corrected in the harness.
+Screenshots and detailed results: [full route evidence](../../.dream-loop/stichos-qa/) and [latest expedition](../../.dream-loop/stichos-expedition/). Browser errors: 0. Desktop: 1600×1000. Round05 captured the actual mobile world, satchel and journal at 390×844 without horizontal overflow.
 
-The full-route sample was 53.9 foreground RAF FPS; warm-cache visual samples were 59.0 FPS in round03 and 54.1 FPS in round04. These are observations from this isolated browser session, not controlled hardware benchmarks. [Round04 scene](../../.dream-loop/stichos/round-04.png) and [equipment panel](../../.dream-loop/stichos/round-04-gear.png) are preserved separately. Audio listening quality, prolonged combat balance, browser-driven death recovery, and the southern-wall visual cutaway remain unverified.
+The full-route sample was 53.9 foreground RAF FPS. Round05 measured 55.6 FPS at default zoom and 50.1 FPS at minimum zoom0.65 near the cathedral. After the expedition, the dense forest at (−80,40) measured 58.0 foreground FPS at zoom0.65, with 519 unique organic sprites in the viewport plus sprite-margin footprint. CPU profiles accompany both wide-view samples. These observations describe this isolated browser session rather than a controlled hardware benchmark. [Round05 scene](../../.dream-loop/stichos/round-05.png), [equipment panel](../../.dream-loop/stichos/round-05-gear.png), and [dense forest](../../.dream-loop/stichos-expedition/10-dense-forest-minimum-zoom.png) are preserved separately. Audio listening quality, prolonged combat balance, browser-driven death recovery, and the southern-wall visual cutaway remain unverified.
 
 ## Repeat
 

@@ -2,6 +2,7 @@ import { deriveSeed, random, mix } from '../procedural/random.ts';
 import { generateVault, VAULT_SIZE, type VaultLayout } from './vault.ts';
 import type {
   Appearance,
+  BuildingKind,
   Biome,
   Chunk,
   Clan,
@@ -15,7 +16,9 @@ import type {
 } from './types.ts';
 
 export const CHUNK_SIZE = 16;
-export type WorldGeneration = 1 | 2;
+export type WorldGeneration = 1 | 2 | 3;
+export const CITY_SPACING = 640;
+export const STOP_SPACING = CITY_SPACING / 3;
 export type WildernessBiome = Exclude<Biome, 'settlement'>;
 export interface WorldClimate {
   elevation: number;
@@ -120,6 +123,7 @@ interface Building {
   halfX: number;
   halfY: number;
   name: string;
+  kind?: BuildingKind;
 }
 interface TownLayout {
   settlement: Settlement;
@@ -135,13 +139,37 @@ export class InfiniteWorld {
   private cache = new Map<string, Chunk>();
   private lattice = new Map<string, number>();
   private vaultCache = new Map<string, PlacedVault>();
-  constructor(seed: number, generation: WorldGeneration = 2) {
-    if (generation !== 1 && generation !== 2) throw new RangeError('Unsupported world generation');
+  constructor(seed: number, generation: WorldGeneration = 3) {
+    if (generation !== 1 && generation !== 2 && generation !== 3)
+      throw new RangeError('Unsupported world generation');
     this.seed = Number.isFinite(seed) ? seed >>> 0 : 0;
     this.generation = generation;
   }
   get cacheSize() {
     return this.cache.size;
+  }
+
+  private get spacing() {
+    return this.generation === 3 ? STOP_SPACING : TOWN_SPACING;
+  }
+  private roadCenter(index: number) {
+    return Math.round(index * this.spacing);
+  }
+  private highway(x: number, y: number) {
+    return (
+      Math.abs(x - this.roadCenter(Math.round(x / this.spacing))) <= 1 ||
+      Math.abs(y - this.roadCenter(Math.round(y / this.spacing))) <= 1
+    );
+  }
+  private hasTown(gx: number, gy: number) {
+    // Stops on the routes between cities are guaranteed. Some cross-country
+    // junctions are deliberately empty, preserving larger stretches of wilderness.
+    return (
+      this.generation !== 3 ||
+      gx % 3 === 0 ||
+      gy % 3 === 0 ||
+      deriveSeed(this.seed, 'settlement-presence-v3', gx, gy) % 5 < 3
+    );
   }
 
   private noise(x: number, y: number, scale: number, address: string): number {
@@ -260,8 +288,8 @@ export class InfiniteWorld {
     }
     const seed = deriveSeed(this.seed, 'botanical-vault', gx, gy);
     const layout = generateVault(seed);
-    const x = gx * TOWN_SPACING + 40,
-      y = gy * TOWN_SPACING + 40;
+    const x = Math.round((gx + 0.5) * this.spacing),
+      y = Math.round((gy + 0.5) * this.spacing);
     const origin = { x: x - VAULT_SIZE / 2, y: y - VAULT_SIZE / 2 };
     const worldPoint = (p: Point) => ({ x: origin.x + p.x, y: origin.y + p.y });
     const site: VaultSite = {
@@ -288,7 +316,7 @@ export class InfiniteWorld {
         guards.push(p);
         if (guards.length === 2) break;
       }
-    const placed: PlacedVault = { site, layout, origin, roadY: (gy + 1) * TOWN_SPACING, guards };
+    const placed: PlacedVault = { site, layout, origin, roadY: this.roadCenter(gy + 1), guards };
     this.vaultCache.set(id, placed);
     while (this.vaultCache.size > 32) this.vaultCache.delete(this.vaultCache.keys().next().value!);
     return placed;
@@ -296,6 +324,31 @@ export class InfiniteWorld {
 
   private vaultsForChunk(x0: number, y0: number): PlacedVault[] {
     if (this.generation === 1) return [];
+    if (this.generation === 3) {
+      const result: PlacedVault[] = [],
+        spacing = this.spacing;
+      for (
+        let gy = Math.ceil((y0 - spacing - 1) / spacing);
+        gy <= Math.floor((y0 + CHUNK_SIZE - 1 - spacing / 2 + 17) / spacing);
+        gy++
+      )
+        for (
+          let gx = Math.ceil((x0 - spacing / 2 - 17) / spacing);
+          gx <= Math.floor((x0 + CHUNK_SIZE - 1 - spacing / 2 + 17) / spacing);
+          gx++
+        ) {
+          const vault = this.vault(gx, gy);
+          if (
+            vault &&
+            x0 <= vault.origin.x + 31 &&
+            x0 + CHUNK_SIZE - 1 >= vault.origin.x &&
+            y0 <= vault.roadY &&
+            y0 + CHUNK_SIZE - 1 >= vault.origin.y
+          )
+            result.push(vault);
+        }
+      return result;
+    }
     const result: PlacedVault[] = [];
     // Excavations occupy x24..55 and y24..55 in their 80-tile district;
     // the south approach continues to y80. No settlement lies on that approach.
@@ -315,6 +368,7 @@ export class InfiniteWorld {
     return result;
   }
   private town(gx: number, gy: number): TownLayout {
+    if (this.generation === 3) return this.townV3(gx, gy);
     const seed = deriveSeed(this.seed, 'settlement', gx, gy),
       rng = random(seed),
       origin = gx === 0 && gy === 0;
@@ -369,7 +423,153 @@ export class InfiniteWorld {
       });
     return { settlement, buildings };
   }
+  private townV3(gx: number, gy: number): TownLayout {
+    const origin = gx === 0 && gy === 0;
+    const seed = deriveSeed(this.seed, origin ? 'settlement' : 'settlement-v3', gx, gy),
+      rng = random(seed);
+    const city = gx % 3 === 0 && gy % 3 === 0;
+    const rank: NonNullable<Settlement['rank']> = city
+      ? 'city'
+      : deriveSeed(seed, 'stop-scale') % 4 === 0
+        ? 'hamlet'
+        : 'village';
+    const jitter = rank === 'city' ? 0 : rank === 'hamlet' ? 6 : 10;
+    const x = this.roadCenter(gx) + (origin ? 0 : Math.floor(rng() * (jitter * 2 + 1)) - jitter);
+    const y = this.roadCenter(gy) + (origin ? 0 : Math.floor(rng() * (jitter * 2 + 1)) - jitter);
+    // Retain the opening people's seeds and identities along with their exact anchors.
+    const clan = origin ? 0 : Math.floor(rng() * CLANS.length);
+    const name = origin
+      ? 'Stíchos'
+      : `${pick(['Vey', 'Mor', 'El', 'Khar', 'Sael', 'Or', 'Cal', 'Thren'], rng)}${pick(['wick', 'mere', 'holt', 'grave', 'gard', 'watch', 'fell', 'haven'], rng)}`;
+    const mainKind: BuildingKind = city
+      ? 'church'
+      : rank === 'hamlet'
+        ? pick(['inn', 'workshop'] as const, rng)
+        : pick(['hall', 'workshop', 'inn'] as const, rng);
+    const settlement: Settlement = {
+      id: origin ? 'origin' : `town:${gx}:${gy}`,
+      seed,
+      x,
+      y,
+      name,
+      clan,
+      kind: city ? 'cathedral' : mainKind === 'workshop' ? 'foundry' : 'village',
+      rank,
+      radius: origin ? 21 : city ? 26 : rank === 'village' ? 17 : 11,
+    };
+    const names: Record<BuildingKind, string> = {
+      church: 'Winter cathedral',
+      house: 'Snowbound dwelling',
+      inn: 'Wayfarer inn',
+      workshop: 'Radio workshop',
+      greenhouse: 'Glass conservatory',
+      storehouse: 'Provision storehouse',
+      hall: 'Assembly hall',
+    };
+    const main: Building = {
+      id: `${settlement.id}:hall`,
+      x,
+      y: y - (origin ? 5 : rank === 'hamlet' ? 6 : 8),
+      halfX: origin
+        ? 11
+        : city
+          ? 7 + Math.floor(rng() * 3)
+          : rank === 'hamlet'
+            ? 3
+            : 3 + Math.floor(rng() * 2),
+      halfY: origin ? 4 : city ? 4 : rank === 'hamlet' ? 2 : 3,
+      name: names[mainKind],
+      kind: mainKind,
+    };
+    const buildings = [main];
+    if (origin) {
+      for (const [side, row, kind] of [
+        [-1, -1, 'greenhouse'],
+        [1, -1, 'workshop'],
+        [-1, 1, 'inn'],
+        [1, 1, 'storehouse'],
+      ] as const)
+        buildings.push({
+          id: `origin:house:${side}:${row}`,
+          x: side * (row < 0 ? 16 : 13),
+          y: row < 0 ? -8 : 10,
+          halfX: 2,
+          halfY: 2,
+          name: names[kind],
+          kind,
+        });
+    } else {
+      const slots: Point[] =
+        rank === 'city'
+          ? [
+              { x: -16, y: -10 },
+              { x: 16, y: -10 },
+              { x: -16, y: 9 },
+              { x: 16, y: 9 },
+              { x: -8, y: 20 },
+              { x: 8, y: 20 },
+            ]
+          : rank === 'village'
+            ? [
+                { x: -11, y: -7 },
+                { x: 11, y: -7 },
+                ...(rng() > 0.45
+                  ? [
+                      { x: -11, y: 11 },
+                      { x: 11, y: 11 },
+                    ]
+                  : []),
+              ]
+            : rng() > 0.5
+              ? [{ x: 7, y: -5 }]
+              : [];
+      const kinds: BuildingKind[] = [
+        'house',
+        'greenhouse',
+        'storehouse',
+        'inn',
+        'workshop',
+        'house',
+      ];
+      const offset = Math.floor(rng() * kinds.length);
+      slots.forEach((slot, i) => {
+        const kind = kinds[(i + offset) % kinds.length];
+        const halfX = rank === 'hamlet' ? 2 : 2 + Math.floor(rng() * (rank === 'city' ? 3 : 2));
+        const halfY = rank === 'hamlet' ? 2 : 2 + Math.floor(rng() * 2);
+        buildings.push({
+          id: `${settlement.id}:house:${i}`,
+          x: x + slot.x,
+          y: y + slot.y,
+          halfX,
+          halfY,
+          kind,
+          name: names[kind],
+        });
+      });
+    }
+    return { settlement, buildings };
+  }
   private layouts(x: number, y: number, radius = 20): TownLayout[] {
+    if (this.generation === 3) {
+      const result: TownLayout[] = [];
+      for (
+        let gy = Math.floor((y - radius - 40) / this.spacing);
+        gy <= Math.ceil((y + radius + 40) / this.spacing);
+        gy++
+      )
+        for (
+          let gx = Math.floor((x - radius - 40) / this.spacing);
+          gx <= Math.ceil((x + radius + 40) / this.spacing);
+          gx++
+        ) {
+          if (!this.hasTown(gx, gy)) continue;
+          const layout = this.townV3(gx, gy),
+            s = layout.settlement;
+          if (Math.abs(s.x - x) <= radius + s.radius && Math.abs(s.y - y) <= radius + s.radius)
+            result.push(layout);
+        }
+      return result;
+    }
     const minX = Math.floor((x - radius - 24) / TOWN_SPACING),
       maxX = Math.ceil((x + radius + 24) / TOWN_SPACING);
     const minY = Math.floor((y - radius - 24) / TOWN_SPACING),
@@ -410,9 +610,7 @@ export class InfiniteWorld {
       temperature: climate.temperature,
       detail,
     };
-    const highway =
-      Math.abs(x - Math.round(x / TOWN_SPACING) * TOWN_SPACING) <= 1 ||
-      Math.abs(y - Math.round(y / TOWN_SPACING) * TOWN_SPACING) <= 1;
+    const highway = this.highway(x, y);
     if (highway) tile.terrain = terrain === 'water' || terrain === 'ice' ? 'bridge' : 'road';
     for (const { settlement: s, buildings } of layouts) {
       const dx = x - s.x,
@@ -431,6 +629,7 @@ export class InfiniteWorld {
           const door = x === b.x && Math.abs(y - b.y) === b.halfY;
           tile.terrain = edge && !door ? 'wall' : 'floor';
           tile.building = b.id;
+          if (b.kind) tile.buildingKind = b.kind;
         }
     }
     // Buildings that meet a trunk road form an arcade instead of sealing the
@@ -531,12 +730,7 @@ export class InfiniteWorld {
       p.x >= x0 && p.x < x0 + CHUNK_SIZE && p.y >= y0 && p.y < y0 + CHUNK_SIZE;
     const add = (p: Prop) => {
       if (!contains(p)) return;
-      if (
-        p.solid &&
-        (Math.abs(p.x - Math.round(p.x / TOWN_SPACING) * TOWN_SPACING) <= 1 ||
-          Math.abs(p.y - Math.round(p.y / TOWN_SPACING) * TOWN_SPACING) <= 1)
-      )
-        return;
+      if (p.solid && this.highway(p.x, p.y)) return;
       chunk.props.push(p);
     };
     for (let y = y0; y < y0 + CHUNK_SIZE; y++)
@@ -574,7 +768,15 @@ export class InfiniteWorld {
             ].every(
               ([dx, dy]) => deriveSeed(this.seed, 'ecology', x + dx, y + dy) / 0xffffffff >= 0.16,
             );
-            if (roll < 0.14 && clearNeighbor) add(this.prop('pine', x, y, 'Cathedral frostwood'));
+            if (roll < 0.14 && clearNeighbor)
+              add(
+                this.prop(
+                  'pine',
+                  x,
+                  y,
+                  this.generation === 3 ? 'Courtyard frostwood' : 'Cathedral frostwood',
+                ),
+              );
             else if (roll >= 0.14 && roll < 0.16 && clearNeighbor)
               add(this.prop('rock', x, y, 'Weathered mineral stone'));
             else if (roll < 0.2) add(this.prop('mushroom', x, y, 'Snowcap colony'));
@@ -615,8 +817,8 @@ export class InfiniteWorld {
           )
         ) {
           const local = this.town(
-            Math.round(x / TOWN_SPACING),
-            Math.round(y / TOWN_SPACING),
+            Math.round(x / this.spacing),
+            Math.round(y / this.spacing),
           ).settlement;
           const role: NpcRole =
             deriveSeed(this.seed, 'wanderer-role', x, y) % 3 === 0 ? 'pilgrim' : 'raider';
@@ -646,8 +848,8 @@ export class InfiniteWorld {
         ),
       );
       const settlement = this.town(
-        Math.floor(s.x / TOWN_SPACING),
-        Math.floor(s.y / TOWN_SPACING),
+        Math.floor(s.x / this.spacing),
+        Math.floor(s.y / this.spacing),
       ).settlement;
       vault.guards.forEach((p, i) => {
         if (contains(p))
@@ -765,7 +967,25 @@ export class InfiniteWorld {
           );
         add(
           this.prop(
-            i === 0 ? 'shrine' : i === 1 ? 'workbench' : i === 2 ? 'crate' : 'chest',
+            this.generation === 3
+              ? (
+                  {
+                    church: 'shrine',
+                    house: 'crate',
+                    inn: 'bench',
+                    workshop: 'workbench',
+                    greenhouse: 'cequin',
+                    storehouse: 'chest',
+                    hall: 'notice',
+                  } as const
+                )[b.kind!]
+              : i === 0
+                ? 'shrine'
+                : i === 1
+                  ? 'workbench'
+                  : i === 2
+                    ? 'crate'
+                    : 'chest',
             b.x + 1,
             b.y,
             b.name,
@@ -784,7 +1004,11 @@ export class InfiniteWorld {
         ['refugee', -4, 0],
         ['pilgrim', 2, 4],
       ];
-      residents.forEach(([role, dx, dy, id], index) => {
+      const presentResidents =
+        this.generation === 3 && s.rank === 'hamlet'
+          ? residents.filter(([role]) => ['botanist', 'merchant', 'pilgrim'].includes(role))
+          : residents;
+      presentResidents.forEach(([role, dx, dy, id], index) => {
         const npc = this.resident(s, role, s.x + dx, s.y + dy, index, id);
         if (contains(npc)) chunk.npcs.push(npc);
       });
@@ -834,7 +1058,10 @@ export class InfiniteWorld {
   settlementsAround(x: number, y: number, radius: number): Settlement[] {
     x = integer(x);
     y = integer(y);
-    radius = Math.min(128, Math.max(0, Number.isFinite(radius) ? radius : 0));
+    radius = Math.min(
+      this.generation === 3 ? 2048 : 128,
+      Math.max(0, Number.isFinite(radius) ? radius : 0),
+    );
     return this.layouts(x, y, radius)
       .map((layout) => layout.settlement)
       .filter((settlement) => squareDistance(settlement, { x, y }) <= radius * radius);
@@ -844,6 +1071,24 @@ export class InfiniteWorld {
     x = integer(x);
     y = integer(y);
     radius = Math.min(128, Math.max(0, Number.isFinite(radius) ? radius : 0));
+    if (this.generation === 3) {
+      const result: VaultSite[] = [];
+      for (
+        let gy = Math.ceil((y - radius - this.spacing / 2 - 1) / this.spacing);
+        gy <= Math.floor((y + radius - this.spacing / 2 + 1) / this.spacing);
+        gy++
+      )
+        for (
+          let gx = Math.ceil((x - radius - this.spacing / 2 - 1) / this.spacing);
+          gx <= Math.floor((x + radius - this.spacing / 2 + 1) / this.spacing);
+          gx++
+        ) {
+          const vault = this.vault(gx, gy);
+          if (vault && squareDistance(vault.site, { x, y }) <= radius * radius)
+            result.push(vault.site);
+        }
+      return result;
+    }
     const result: VaultSite[] = [];
     for (let gy = Math.ceil((y - radius - 40) / 80); gy <= Math.floor((y + radius - 40) / 80); gy++)
       for (
