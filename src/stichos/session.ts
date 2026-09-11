@@ -221,13 +221,25 @@ type SupplyJob = {
   active: boolean;
   target: Point;
 };
+type OrdinaryWeapon = {
+  version: 2;
+  kind: Weapon;
+  seed: number;
+  source: 'merchant' | 'loot';
+  sourceId: string;
+};
+type OrdinaryPack = {
+  designs: OrdinaryWeapon[];
+  selected: Partial<Record<Weapon, number>>;
+  inherited?: Partial<Record<Weapon, number>>;
+};
 type BodyPossessions = {
   npcId: string;
   notebook: boolean;
   inventory: Partial<Record<ItemId, number>>;
   coins: number;
   weapons: Weapon[];
-  equipped: Weapon;
+  equipped: Weapon | 'none';
 };
 type CorrespondenceJob = {
   sourceId: string;
@@ -389,6 +401,7 @@ export class Stichos {
     string,
     { designs: string[]; equipped: string | null; wear?: Record<string, number> }
   >();
+  private ordinaryEquipment = new Map<string, OrdinaryPack>();
   private forgedWeapons = new Map<
     string,
     Partial<Record<Weapon, { seed: number; ownerSeed: number; recipe: ForgeRecipe }>>
@@ -409,7 +422,7 @@ export class Stichos {
 
   constructor(seed: number, generation: WorldGeneration = 3) {
     if (!Number.isSafeInteger(seed)) throw new Error('A world seed must be a safe integer.');
-    if (![1, 2, 3].includes(generation)) throw new Error('Unknown world generation.');
+    if (![1, 2, 3, 4].includes(generation)) throw new Error('Unknown world generation.');
     this.seed = seed >>> 0;
     this.progression = createProgression(this.seed);
     this.world = new InfiniteWorld(this.seed, generation);
@@ -566,7 +579,6 @@ export class Stichos {
     this.inventory = clone(candidate.inventory);
     this.notebook = false;
     this.weapons.clear();
-    this.weapons.add('staff');
     if (candidate.appearance.weapon !== 'none') this.weapons.add(candidate.appearance.weapon);
     this.progression = createProgression(this.seed);
     this.progression.xp = { ...candidate.professionXp };
@@ -648,14 +660,8 @@ export class Stichos {
         notebook: false,
         inventory: clone(candidate.inventory),
         coins: candidate.coins,
-        weapons:
-          candidate.appearance.weapon === 'staff'
-            ? ['staff']
-            : [
-                'staff',
-                candidate.appearance.weapon === 'none' ? 'staff' : candidate.appearance.weapon,
-              ],
-        equipped: candidate.appearance.weapon === 'none' ? 'staff' : candidate.appearance.weapon,
+        weapons: candidate.appearance.weapon === 'none' ? [] : [candidate.appearance.weapon],
+        equipped: candidate.appearance.weapon,
       });
       this.installLifeTools(candidate);
     }
@@ -1157,8 +1163,18 @@ export class Stichos {
     const look = applyCosmetic(base, this.progression, bodyId, this.cosmeticEntitlements);
     const forged =
       base.weapon === 'none' ? undefined : this.forgedWeapons.get(bodyId)?.[base.weapon];
-    if (forged) look.weaponSeed = forged.seed;
-    else delete look.weaponSeed;
+    const ordinary =
+      base.weapon === 'none'
+        ? undefined
+        : this.ordinaryEquipment.get(bodyId)?.selected[base.weapon];
+    if (ordinary !== undefined) look.weaponSeed = ordinary;
+    else if (forged) look.weaponSeed = forged.seed;
+    else if (
+      base.weapon !== 'none' &&
+      this.ordinaryEquipment.get(bodyId)?.inherited?.[base.weapon] !== undefined
+    )
+      look.weaponSeed = this.ordinaryEquipment.get(bodyId)!.inherited![base.weapon];
+    // Ordinary inherited equipment already has its own seed; never erase it here.
     const artifact = this.artifactPacks.get(bodyId)?.equipped;
     if (artifact) {
       look.artifactDesign = artifact;
@@ -1774,6 +1790,8 @@ export class Stichos {
       p.stamina < (kind === 'attack' ? 8 : 30)
     )
       return result(false, 'Recover enough energy and let the action settle first.');
+    if (kind === 'attack' && p.appearance.weapon === 'none' && !this.activeArtifact)
+      return result(false, 'Equip a weapon or an invented implement before attacking.');
     if (kind === 'attack') {
       const weapon = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon;
       const range = this.activeArtifact?.properties.range ?? this.weaponProfile(weapon).range;
@@ -2040,6 +2058,20 @@ export class Stichos {
         grantPractice(this.progression, 'combat', 6);
         this.awardXp(16);
         if (death.killerId === localPeerId) {
+          const defeated = this.npcMemory.get(death.npcId);
+          if (
+            defeated &&
+            defeated.hp <= 0 &&
+            defeated.role === 'raider' &&
+            defeated.appearance.weapon !== 'none'
+          ) {
+            const kind = defeated.appearance.weapon,
+              seed = defeated.appearance.weaponSeed ?? defeated.appearance.seed;
+            this.storeOrdinary(
+              { version: 2, kind, seed, source: 'loot', sourceId: defeated.id },
+              death.killerBodyId ?? this.bodyId,
+            );
+          }
           if (!death.killerBodyId || death.killerBodyId === this.bodyId) this.player.coins += 4;
           else {
             const body = this.bodyPossessions.get(death.killerBodyId);
@@ -2385,7 +2417,129 @@ export class Stichos {
     delete this.player.appearance.artifactDesign;
   }
   weaponSeed(kind: Weapon) {
-    return this.forgedWeapons.get(this.bodyId)?.[kind]?.seed ?? this.player.appearance.seed;
+    return (
+      this.ordinaryEquipment.get(this.bodyId)?.selected[kind] ??
+      this.forgedWeapons.get(this.bodyId)?.[kind]?.seed ??
+      this.ordinaryEquipment.get(this.bodyId)?.inherited?.[kind] ??
+      (this.player.appearance.weapon === kind ? this.player.appearance.weaponSeed : undefined) ??
+      this.player.appearance.seed
+    );
+  }
+  get weaponInventory() {
+    const owned = this.ordinaryEquipment.get(this.bodyId)?.designs ?? [];
+    const rows = [...this.weapons]
+      .map((kind) => {
+        const forged = this.forgedWeapons.get(this.bodyId)?.[kind],
+          seed =
+            forged?.seed ??
+            this.ordinaryEquipment.get(this.bodyId)?.inherited?.[kind] ??
+            (this.player.appearance.weapon === kind
+              ? this.player.appearance.weaponSeed
+              : undefined) ??
+            this.player.appearance.seed;
+        return {
+          id: `base:${kind}`,
+          kind,
+          seed,
+          source: forged ? 'forged' : 'inherited',
+          profile: this.profileWithBonuses(
+            generatedWeaponProfile(seed, kind, this.player.level),
+            kind,
+          ),
+          equipped:
+            !this.activeArtifact &&
+            this.player.appearance.weapon === kind &&
+            this.ordinaryEquipment.get(this.bodyId)?.selected[kind] === undefined,
+        };
+      })
+      .filter(
+        (row) =>
+          !owned.length ||
+          this.forgedWeapons.get(this.bodyId)?.[row.kind] ||
+          this.ordinaryEquipment.get(this.bodyId)?.inherited?.[row.kind] !== undefined,
+      );
+    return [
+      ...rows,
+      ...owned.map((item) => ({
+        ...item,
+        id: `ordinary:${item.kind}:${item.seed}`,
+        source: item.source as string,
+        profile: this.profileWithBonuses(
+          generatedWeaponProfile(item.seed, item.kind, this.player.level),
+          item.kind,
+        ),
+        equipped:
+          !this.activeArtifact &&
+          this.player.appearance.weapon === item.kind &&
+          this.weaponSeed(item.kind) === item.seed,
+      })),
+    ];
+  }
+  equipWeapon(id: string) {
+    const item = this.weaponInventory.find((w) => w.id === id);
+    if (!item || this.phase !== 'playing')
+      return { ok: false, message: 'That construction is not carried by this body.' };
+    const pack = this.ordinaryEquipment.get(this.bodyId);
+    if (pack) {
+      if (id.startsWith('ordinary:')) pack.selected[item.kind] = item.seed;
+      else delete pack.selected[item.kind];
+    }
+    this.player.appearance.weapon = item.kind;
+    this.player.appearance.weaponSeed = item.seed;
+    this.clearArtifact();
+    this.event('dialogue', `Equipped ${item.profile.name}.`);
+    return { ok: true, message: `Equipped ${item.profile.name}.` };
+  }
+  private storeOrdinary(record: OrdinaryWeapon, bodyId = this.bodyId) {
+    const belongings = bodyId === this.bodyId ? null : this.bodyPossessions.get(bodyId),
+      owner =
+        bodyId === this.bodyId ? this.player.appearance : this.npcMemory.get(bodyId)?.appearance;
+    if (!owner || (bodyId !== this.bodyId && !belongings)) return false;
+    const kinds = bodyId === this.bodyId ? [...this.weapons] : belongings!.weapons;
+    const pack: OrdinaryPack = this.ordinaryEquipment.get(bodyId) ?? {
+      designs: [],
+      selected: {},
+      inherited: Object.fromEntries(
+        kinds.map((kind) => [
+          kind,
+          bodyId === this.bodyId
+            ? this.weaponSeed(kind)
+            : (this.forgedWeapons.get(bodyId)?.[kind]?.seed ??
+              (owner.weapon === kind ? owner.weaponSeed : undefined) ??
+              owner.seed),
+        ]),
+      ),
+    };
+    if (pack.designs.some((w) => w.kind === record.kind && w.seed === record.seed)) return false;
+    if (pack.designs.length >= 64) return false;
+    pack.designs.push(record);
+    pack.selected[record.kind] = record.seed;
+    this.ordinaryEquipment.set(bodyId, pack);
+    if (bodyId === this.bodyId) this.weapons.add(record.kind);
+    else if (!belongings!.weapons.includes(record.kind)) belongings!.weapons.push(record.kind);
+    return true;
+  }
+  merchantWeaponStock(npcId: string) {
+    const npc = this.npcs.find(
+      (n) => n.id === npcId && n.role === 'merchant' && n.hp > 0 && !n.hostile,
+    );
+    if (!npc) return [];
+    return (['staff', 'sword', 'bow'] as const).map((kind) => {
+      const seed = deriveSeed(this.seed, 'ordinary-stock-v2', npc.id, kind),
+        profile = generatedWeaponProfile(seed, kind, this.player.level);
+      return {
+        version: 2 as const,
+        kind,
+        seed,
+        source: 'merchant' as const,
+        sourceId: npc.id,
+        profile,
+        price: kind === 'staff' ? 20 : kind === 'sword' ? 28 : 32,
+        owned: (this.ordinaryEquipment.get(this.bodyId)?.designs ?? []).some(
+          (w) => w.kind === kind && w.seed === seed,
+        ),
+      };
+    });
   }
   forgePreview(recipe: ForgeRecipe): {
     ok: boolean;
@@ -2464,6 +2618,9 @@ export class Stichos {
       recipe: clone(recipe),
     };
     this.forgedWeapons.set(this.bodyId, belongings);
+    const ordinary = this.ordinaryEquipment.get(this.bodyId);
+    if (ordinary) delete ordinary.selected[recipe.kind];
+    delete this.player.appearance.weaponSeed;
     this.weapons.add(recipe.kind);
     this.player.appearance.weapon = recipe.kind;
     this.clearArtifact();
@@ -3859,12 +4016,15 @@ export class Stichos {
             id: `sell:${item}`,
             label: `Sell ${ITEMS[item].name} · ${this.sellPrice(item)} coins`,
           })),
-        ...(['sword', 'bow'] as Weapon[])
-          .filter((w) => !this.weapons.has(w))
+        ...this.merchantWeaponStock(npc.id)
+          .filter((w) => !w.owned)
           .map((w) => ({
-            id: `weapon:${w}`,
-            label: `Buy ${w} · ${w === 'sword' ? 28 : 32} coins`,
-            disabled: this.player.coins < (w === 'sword' ? 28 : 32),
+            id: `weapon:${w.kind}`,
+            label: `Buy ${w.profile.name} · ${w.price} coins`,
+            detail: `${w.profile.damage} power · ${w.profile.range} reach · ${w.profile.cooldown}s · ${w.profile.construction}`,
+            disabled:
+              this.player.coins < w.price ||
+              (this.ordinaryEquipment.get(this.bodyId)?.designs.length ?? 0) >= 64,
           })),
         { id: 'close', label: 'Finish trading' },
       ],
@@ -3984,17 +4144,21 @@ export class Stichos {
     }
     if (choiceId.startsWith('weapon:')) {
       if (npc?.role !== 'merchant') return;
-      const weapon = choiceId.slice(7) as Weapon;
-      const price = weapon === 'sword' ? 28 : 32;
+      const weapon = choiceId.slice(7) as Weapon,
+        stock = this.merchantWeaponStock(npc.id).find((w) => w.kind === weapon);
+      if (!stock || stock.owned || this.player.coins < stock.price) return;
       if (
-        !['sword', 'bow'].includes(weapon) ||
-        this.weapons.has(weapon) ||
-        this.player.coins < price
+        !this.storeOrdinary({
+          version: 2,
+          kind: stock.kind,
+          seed: stock.seed,
+          source: 'merchant',
+          sourceId: npc.id,
+        })
       )
         return;
-      this.player.coins -= price;
-      this.weapons.add(weapon);
-      this.event('trade', `Acquired a ${weapon}.`);
+      this.player.coins -= stock.price;
+      this.event('trade', `Acquired ${stock.profile.name}.`);
       this.merchant(npc);
       return;
     }
@@ -4343,7 +4507,7 @@ export class Stichos {
     const nearby = this.world.settlementsAround(
       source.x,
       source.y,
-      this.world.generation === 3 ? 480 : 112,
+      this.world.generation >= 3 ? 480 : 112,
     );
     const home = [...nearby].sort((a, b) => distance(a, source) - distance(b, source))[0];
     if (!home || distance(home, source) > 32) return;
@@ -4490,7 +4654,11 @@ export class Stichos {
       this.attackArtifact(artifact);
       return;
     }
-    const weapon = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon;
+    if (p.appearance.weapon === 'none') {
+      this.event('dialogue', 'Equip a weapon or an invented implement before attacking.');
+      return;
+    }
+    const weapon = p.appearance.weapon;
     const profile = this.weaponProfile(weapon);
     p.stamina -= 8;
     p.attackCooldown = profile.cooldown;
@@ -4644,6 +4812,12 @@ export class Stichos {
         this.recordFreeLife('watch', npc.id, 1);
         grantPractice(this.progression, 'combat', 6);
         this.player.coins += 4;
+        if (npc.appearance.weapon !== 'none') {
+          const kind = npc.appearance.weapon,
+            seed = npc.appearance.weaponSeed ?? npc.appearance.seed;
+          if (this.storeOrdinary({ version: 2, kind, seed, source: 'loot', sourceId: npc.id }))
+            this.event('harvest', `Recovered ${generatedWeaponProfile(seed, kind, 1).name}.`);
+        }
         this.awardXp(16);
       } else {
         this.changeReputation(npc.clan, -18);
@@ -4756,7 +4930,14 @@ export class Stichos {
       this.event('dialogue', 'Acquire that weapon from a merchant first.');
       return;
     }
+    const seed = this.weaponSeed(weapon);
     this.player.appearance.weapon = weapon;
+    if (
+      this.ordinaryEquipment.get(this.bodyId)?.selected[weapon] !== undefined ||
+      this.forgedWeapons.get(this.bodyId)?.[weapon]
+    )
+      this.player.appearance.weaponSeed = seed;
+    else delete this.player.appearance.weaponSeed;
     this.clearArtifact();
     this.event('dialogue', `Equipped ${weapon}.`);
   }
@@ -4839,7 +5020,9 @@ export class Stichos {
           ...clone(this.player.appearance),
           ...(this.activeArtifact ? { artifactDesign: this.activeArtifact.design } : {}),
           ...(this.player.appearance.weapon !== 'none' &&
-          this.forgedWeapons.get(this.bodyId)?.[this.player.appearance.weapon]
+          (this.forgedWeapons.get(this.bodyId)?.[this.player.appearance.weapon] ||
+            this.ordinaryEquipment.get(this.bodyId)?.selected[this.player.appearance.weapon] !==
+              undefined)
             ? { weaponSeed: this.weaponSeed(this.player.appearance.weapon) }
             : {}),
         },
@@ -4853,8 +5036,7 @@ export class Stichos {
         inventory: clone(this.inventory),
         coins: this.player.coins,
         weapons: [...this.weapons],
-        equipped:
-          this.player.appearance.weapon === 'none' ? 'staff' : this.player.appearance.weapon,
+        equipped: this.player.appearance.weapon,
       });
       const belongings = this.bodyPossessions.get(target.id) ?? this.initialPossessions(target);
       this.bodyPossessions.delete(target.id);
@@ -4875,7 +5057,6 @@ export class Stichos {
       this.player.bodyName = target.name;
       this.player.clan = target.clan;
       this.player.appearance = clone(target.appearance);
-      delete this.player.appearance.weaponSeed;
       delete this.player.appearance.artifactDesign;
       this.player.appearance.weapon = belongings.equipped;
       this.player.cequinTime = 0;
@@ -4920,12 +5101,7 @@ export class Stichos {
 
   private initialPossessions(npc: Npc): BodyPossessions {
     const seed = deriveSeed(this.seed, `body:${npc.id}:belongings`);
-    const equipped =
-      npc.role === 'guard'
-        ? 'sword'
-        : npc.appearance.weapon === 'none'
-          ? 'staff'
-          : npc.appearance.weapon;
+    const equipped = npc.appearance.weapon;
     return {
       npcId: npc.id,
       notebook: npc.id === `body:theo-priest:${this.seed}`,
@@ -4936,7 +5112,7 @@ export class Stichos {
             ? { cequin: 2, heartleaf: 1, rations: 1 }
             : { cequin: 3, rations: 1, tonic: 1 },
       coins: (npc.role === 'guard' ? 12 : npc.role === 'refugee' ? 2 : 5) + (seed % 8),
-      weapons: equipped === 'staff' ? ['staff'] : ['staff', equipped],
+      weapons: equipped === 'none' ? [] : [equipped],
       equipped,
     };
   }
@@ -5211,6 +5387,9 @@ export class Stichos {
         equipped: pack.equipped,
         wear: { ...pack.wear },
       })),
+      ordinaryEquipment: this.ordinaryEquipment.size
+        ? [...this.ordinaryEquipment].map(([bodyId, pack]) => ({ bodyId, ...pack }))
+        : undefined,
       forgedWeapons: [...this.forgedWeapons].flatMap(([bodyId, weapons]) =>
         Object.entries(weapons).map(([kind, record]) => ({ bodyId, kind, ...record })),
       ),
@@ -5311,6 +5490,9 @@ export class Stichos {
         pack.bodyId,
         { designs: [...pack.designs], equipped: pack.equipped, wear: { ...pack.wear } },
       ]),
+    );
+    game.ordinaryEquipment = new Map(
+      (data.ordinaryEquipment ?? []).map(({ bodyId, ...pack }) => [bodyId, clone(pack)]),
     );
     for (const record of data.forgedWeapons ?? []) {
       const owned = game.forgedWeapons.get(record.bodyId) ?? {};
@@ -5591,7 +5773,10 @@ function validateSave(value: unknown): SaveData {
   if (value.doorRevision !== undefined && value.doorRevision !== 1) fail();
   if (value.terrainRevision !== undefined && ![1, 2, 3].includes(value.terrainRevision as number))
     return fail();
-  if (value.worldGeneration !== undefined && ![1, 2, 3].includes(value.worldGeneration as number))
+  if (
+    value.worldGeneration !== undefined &&
+    ![1, 2, 3, 4].includes(value.worldGeneration as number)
+  )
     return fail();
   const p = value.player;
   if (
@@ -5627,9 +5812,9 @@ function validateSave(value: unknown): SaveData {
     !strings(value.visited) ||
     !(value.visited as string[]).every((key) => chunkCoordinates(key)) ||
     !Array.isArray(value.weapons) ||
-    !value.weapons.length ||
     !value.weapons.every((w) => ['staff', 'sword', 'bow'].includes(w)) ||
-    !value.weapons.includes((p.appearance as Record<string, unknown>).weapon)
+    ((p.appearance as Record<string, unknown>).weapon !== 'none' &&
+      !value.weapons.includes((p.appearance as Record<string, unknown>).weapon))
   )
     return fail();
   if (value.exploration !== undefined) {
@@ -5756,10 +5941,9 @@ function validateSave(value: unknown): SaveData {
             CAPACITY &&
           number(body.coins, 0, Number.MAX_SAFE_INTEGER, true) &&
           Array.isArray(body.weapons) &&
-          body.weapons.length > 0 &&
           body.weapons.every((w) => ['staff', 'sword', 'bow'].includes(w)) &&
           new Set(body.weapons).size === body.weapons.length &&
-          body.weapons.includes(body.equipped),
+          (body.equipped === 'none' || body.weapons.includes(body.equipped)),
       ) ||
       new Set(value.bodyPossessions.map((body) => body.npcId)).size !== value.bodyPossessions.length
     )
@@ -6062,6 +6246,96 @@ function validateSave(value: unknown): SaveData {
         !number(work.requiredStrokes, 2, 9, true) ||
         !number(work.strokes, 1, (work.requiredStrokes as number) - 1, true) ||
         !number(work.lastStrokeAt, 0, value.time as number)
+      )
+        return fail();
+    }
+  }
+  if (value.ordinaryEquipment !== undefined) {
+    if (!Array.isArray(value.ordinaryEquipment) || value.ordinaryEquipment.length > 256)
+      return fail();
+    const bodies = new Set<string>();
+    for (const pack of value.ordinaryEquipment) {
+      if (
+        !object(pack) ||
+        Object.keys(pack).some(
+          (k) => !['bodyId', 'designs', 'selected', 'inherited'].includes(k),
+        ) ||
+        !text(pack.bodyId, 160) ||
+        bodies.has(pack.bodyId as string) ||
+        !Array.isArray(pack.designs) ||
+        pack.designs.length > 64 ||
+        !object(pack.selected)
+      )
+        return fail();
+      const owner =
+        pack.bodyId === currentBodyId
+          ? p.appearance
+          : (value.npcs as Npc[]).find((n) => n.id === pack.bodyId)?.appearance;
+      if (!owner) return fail();
+      bodies.add(pack.bodyId as string);
+      const keys = new Set<string>();
+      for (const raw of pack.designs) {
+        if (
+          !object(raw) ||
+          Object.keys(raw).some(
+            (k) => !['version', 'kind', 'seed', 'source', 'sourceId'].includes(k),
+          ) ||
+          raw.version !== 2 ||
+          !['staff', 'sword', 'bow'].includes(raw.kind as string) ||
+          !number(raw.seed, 0, 0xffffffff, true) ||
+          !['merchant', 'loot'].includes(raw.source as string) ||
+          !text(raw.sourceId, 160)
+        )
+          return fail();
+        const id = `${raw.kind}:${raw.seed}`;
+        if (keys.has(id)) return fail();
+        keys.add(id);
+        const source = (value.npcs as Npc[]).find((n) => n.id === raw.sourceId);
+        if (!source) return fail();
+        if (
+          raw.source === 'merchant' &&
+          (source.role !== 'merchant' ||
+            raw.seed !==
+              deriveSeed(value.seed as number, 'ordinary-stock-v2', source.id, raw.kind as string))
+        )
+          return fail();
+        if (
+          raw.source === 'loot' &&
+          (source.role !== 'raider' ||
+            source.hp > 0 ||
+            !(value.removed as string[]).includes(source.id) ||
+            source.appearance.weapon !== raw.kind ||
+            raw.seed !== (source.appearance.weaponSeed ?? source.appearance.seed))
+        )
+          return fail();
+      }
+      if (
+        !Object.entries(pack.selected).every(
+          ([kind, seed]) =>
+            ['staff', 'sword', 'bow'].includes(kind) &&
+            number(seed, 0, 0xffffffff, true) &&
+            keys.has(`${kind}:${seed}`),
+        )
+      )
+        return fail();
+      if (
+        pack.inherited !== undefined &&
+        (!object(pack.inherited) ||
+          !Object.entries(pack.inherited).every(
+            ([kind, seed]) =>
+              ['staff', 'sword', 'bow'].includes(kind) && number(seed, 0, 0xffffffff, true),
+          ))
+      )
+        return fail();
+      const weapons =
+        pack.bodyId === currentBodyId
+          ? value.weapons
+          : (value.bodyPossessions as BodyPossessions[] | undefined)?.find(
+              (b) => b.npcId === pack.bodyId,
+            )?.weapons;
+      if (
+        !Array.isArray(weapons) ||
+        !(pack.designs as OrdinaryWeapon[]).every((w) => weapons.includes(w.kind))
       )
         return fail();
     }

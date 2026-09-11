@@ -922,7 +922,7 @@ test('enemy bow aim respects obstruction and released arrows collide with newly 
 test('generated enemy melee weapons change impact and recovery while a ward interrupts their telegraph', () => {
   const outcomes = new Set<string>();
   for (const seed of [3, 8, 19, 31, 46, 57]) {
-    const game = enemyArena('sword', seed, { x: 4000, y: 4000 }, { x: 4000, y: 3999 });
+    const game = enemyArena('sword', seed, { x: 4000, y: 4000 }, { x: 4000, y: 3999.25 });
     game.update(0.02, still);
     assert.equal(game.player.hp, 100);
     assert.ok(game.effects.some((e) => e.text === 'Striking'));
@@ -999,6 +999,9 @@ test('directional melee and a stamina-priced ward distinguish targets and persis
   assert.ok(dist(front, game.player) > 1.3, 'the ward physically repels an attacker');
   assert.equal(bystander.hp, 50, 'defensive ward does not injure a friendly passerby');
   front.hp = 1;
+  // Close the distance after the ward: short botanical poles now have their own reach.
+  front.x = game.player.x + 0.7;
+  front.y = game.player.y;
   game.player.attackCooldown = 0;
   game.attack(front);
   assert.equal(front.hp, 0);
@@ -1283,7 +1286,7 @@ test('legacy wilderness saves retain their exact generator while new worlds opt 
   assert.ok(!restored.world.blocked(changed.x, changed.y));
   assert.equal(restored.save().worldGeneration, 1);
   assert.equal(Stichos.restore(current.save()).world.generation, 2);
-  assert.throws(() => Stichos.restore({ ...current.save(), worldGeneration: 4 }));
+  assert.throws(() => Stichos.restore({ ...current.save(), worldGeneration: 5 }));
 });
 
 test('actual generation-three travel reveals a persistent narrow trail while atlas queries reveal nothing', () => {

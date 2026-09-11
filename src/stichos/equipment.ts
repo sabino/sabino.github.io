@@ -1,7 +1,41 @@
 import { deriveSeed, random } from '../procedural/random.ts';
 
 export type WeaponKind = 'staff' | 'sword' | 'bow';
+export type WeaponSubtype =
+  | 'arming sword'
+  | 'sabre'
+  | 'dagger'
+  | 'falchion'
+  | 'needleblade'
+  | 'walking pole'
+  | 'forked staff'
+  | 'crook'
+  | 'root staff'
+  | 'seed sceptre'
+  | 'longbow'
+  | 'recurve bow'
+  | 'flatbow'
+  | 'reflex bow';
+export interface WeaponConstruction {
+  version: 2;
+  edge: number;
+  taper: number;
+  guard: 'bar' | 'swept' | 'disc' | 'hook' | 'none';
+  grip: 'cord' | 'leather' | 'bare' | 'woven';
+  pommel: 'cap' | 'ring' | 'drop' | 'none';
+  shaft: 'straight' | 'bent' | 'knotted';
+  flex: number;
+  balance: number;
+  handleWood: string;
+  headMetal: string;
+  gripColor: string;
+  metalColor: string;
+  exposedCore: boolean;
+}
 export interface WeaponGenome {
+  generatorVersion: 2;
+  subtype: WeaponSubtype;
+  parts: WeaponConstruction;
   seed: number;
   kind: WeaponKind;
   material: string;
@@ -51,16 +85,52 @@ export function weaponGenome(ownerSeed: number, kind: WeaponKind): WeaponGenome 
   const material = materials[kind][Math.floor(rng() * 3)];
   const effect = (['stagger', 'breath', 'warmth'] as const)[Math.floor(rng() * 3)];
   const core = { stagger: '#adbad3', breath: '#7fbea8', warmth: '#d69769' }[effect];
+  // Keep the original structural random stream stable: saved forge recipes remain resolvable.
+  const length = 37 + Math.floor(rng() * 17),
+    breadth = 2 + Math.floor(rng() * 4),
+    curvature = (rng() - 0.5) * 5,
+    crown = Math.floor(rng() * 4),
+    binding = 3 + Math.floor(rng() * 4);
+  const part = random(deriveSeed(seed, 'ordinary-construction', 2));
+  const choose = <T>(xs: readonly T[]): T => xs[Math.floor(part() * xs.length)];
+  const subtype = choose<WeaponSubtype>(
+    kind === 'sword'
+      ? ['arming sword', 'sabre', 'dagger', 'falchion', 'needleblade']
+      : kind === 'staff'
+        ? ['walking pole', 'forked staff', 'crook', 'root staff', 'seed sceptre']
+        : ['longbow', 'recurve bow', 'flatbow', 'reflex bow'],
+  );
+  const wood = choose(materials.staff),
+    metal = choose(materials.sword);
+  const parts: WeaponConstruction = {
+    version: 2,
+    edge: 0.65 + part() * 0.65,
+    taper: 0.15 + part() * 0.7,
+    guard: choose(['bar', 'swept', 'disc', 'hook', 'none']),
+    grip: choose(['cord', 'leather', 'bare', 'woven']),
+    pommel: choose(['cap', 'ring', 'drop', 'none']),
+    shaft: choose(['straight', 'bent', 'knotted']),
+    flex: (kind === 'bow' ? 1.1 / material[1] : 0.7) * (0.7 + part() * 0.5),
+    balance: 0.25 + part() * 0.6,
+    handleWood: wood[0],
+    headMetal: metal[0],
+    gripColor: choose(['#704e3f', '#435755', '#796742', '#615873']),
+    metalColor: metal[2],
+    exposedCore: subtype === 'seed sceptre' || (subtype !== 'walking pole' && part() > 0.78),
+  };
   return {
+    generatorVersion: 2,
+    subtype,
+    parts,
     seed,
     kind,
     material: material[0],
     density: material[1],
-    length: 37 + Math.floor(rng() * 17),
-    breadth: 2 + Math.floor(rng() * 4),
-    curvature: (rng() - 0.5) * 5,
-    crown: Math.floor(rng() * 4),
-    binding: 3 + Math.floor(rng() * 4),
+    length,
+    breadth,
+    curvature,
+    crown,
+    binding,
     effect,
     palette: [
       'transparent',
@@ -68,14 +138,17 @@ export function weaponGenome(ownerSeed: number, kind: WeaponKind): WeaponGenome 
       shade(material[2], -40),
       material[2],
       shade(material[2], 34),
-      '#405165',
-      '#95a9b8',
-      '#dce0dd',
+      shade(kind === 'sword' ? material[2] : metal[2], -38),
+      kind === 'sword' ? material[2] : metal[2],
+      shade(kind === 'sword' ? material[2] : metal[2], 55),
       shade(core, -44),
       core,
       shade(core, 52),
-      '#5c4038',
-      '#bf9960',
+      parts.gripColor,
+      shade(metal[2], 18),
+      shade(wood[2], -30),
+      wood[2],
+      shade(wood[2], 30),
     ],
   };
 }
@@ -84,10 +157,27 @@ export function weaponProfile(ownerSeed: number, kind: WeaponKind, level: number
 }
 export function weaponProfileFromGenome(g: WeaponGenome, level: number) {
   const kind = g.kind;
-  const mass = g.density * (g.length / 45) * (0.7 + g.breadth * 0.12);
+  const shape = {
+    'arming sword': [1, 1, 1],
+    sabre: [1, 0.94, 1.05],
+    dagger: [0.67, 0.7, 0.78],
+    falchion: [0.9, 1.3, 1.12],
+    needleblade: [1.1, 0.72, 1.02],
+    'walking pole': [1, 0.72, 0.85],
+    'forked staff': [1, 0.97, 1.05],
+    crook: [0.94, 1.05, 1],
+    'root staff': [0.93, 1.18, 1.1],
+    'seed sceptre': [0.8, 1.2, 1.15],
+    longbow: [1.1, 1, 1],
+    'recurve bow': [0.96, 0.95, 1.15],
+    flatbow: [0.95, 1.2, 1.05],
+    'reflex bow': [0.9, 0.82, 1.2],
+  }[g.subtype] ?? [1, 1, 1];
+  const mass = g.density * (g.length / 45) * (0.7 + g.breadth * 0.12) * shape[1];
+  const leverage = 0.8 + g.parts.balance * 0.4;
   const prefix = { stagger: 'Steadfast', breath: 'Breathkeeper', warmth: 'Emberbound' }[g.effect];
   return {
-    name: `${prefix} ${g.material} ${kind}`,
+    name: `${prefix} ${g.material} ${g.subtype}`,
     material: g.material,
     effect: g.effect,
     effectDescription: {
@@ -96,12 +186,25 @@ export function weaponProfileFromGenome(g: WeaponGenome, level: number) {
       warmth: 'Successful hits restore three warmth.',
     }[g.effect],
     color: g.palette[9],
-    damage: Math.round((kind === 'sword' ? 22 : kind === 'bow' ? 14 : 16) + mass * 3.2 + level * 2),
-    range: Number((kind === 'bow' ? 6.9 + g.length * 0.045 : 0.85 + g.length * 0.018).toFixed(2)),
-    cooldown: Number(
-      ((kind === 'sword' ? 0.38 : kind === 'bow' ? 0.54 : 0.46) + mass * 0.105).toFixed(2),
+    damage: Math.round(
+      (kind === 'sword'
+        ? 17 + g.parts.edge * 5
+        : kind === 'bow'
+          ? 12 + g.parts.flex * 3 * shape[2]
+          : 13 + shape[2] * 3) +
+        mass * 3.2 * leverage +
+        level * 2,
     ),
-    construction: `${g.material} · ${g.length} span · ${g.breadth} breadth · ${['bud', 'fork', 'cage', 'branch'][g.crown]} crown`,
+    range: Number(
+      (kind === 'bow'
+        ? 5.9 + g.length * 0.045 * shape[0] + g.parts.flex * 0.65
+        : 0.72 + g.length * 0.019 * shape[0]
+      ).toFixed(2),
+    ),
+    cooldown: Number(
+      ((kind === 'sword' ? 0.34 : kind === 'bow' ? 0.5 : 0.42) + mass * 0.13 * leverage).toFixed(2),
+    ),
+    construction: `${g.subtype} · ${g.material} · ${g.length} span · ${g.parts.handleWood} ${g.parts.grip} grip · ${kind === 'sword' ? `${g.parts.guard} guard / ${g.parts.pommel} pommel` : kind === 'bow' ? `${g.parts.flex.toFixed(2)} flex / ${g.breadth} limb` : `${g.parts.shaft} shaft / ${g.parts.headMetal} ferrule`}`,
   };
 }
 export interface WeaponPixels {
@@ -118,130 +221,187 @@ export function weaponPixels(g: WeaponGenome): WeaponPixels {
   const w = 32,
     h = 64,
     pixels = new Uint8Array(w * h),
-    rng = random(g.seed);
+    rng = random(deriveSeed(g.seed, 'grain-v2'));
   const set = (x: number, y: number, c: number) => {
     x = Math.round(x);
     y = Math.round(y);
     if (x > 0 && x < w - 1 && y > 0 && y < h - 1) pixels[y * w + x] = c;
   };
-  const stroke = (x: number, y: number, x2: number, y2: number, c: number, breadth = 1) => {
-    const n = Math.ceil(Math.hypot(x2 - x, y2 - y) * 2);
-    for (let i = 0; i <= n; i++)
-      for (let k = 0; k < breadth; k++)
-        set(x + ((x2 - x) * i) / Math.max(1, n) + k, y + ((y2 - y) * i) / Math.max(1, n), c);
-  };
-  const top = 59 - g.length;
-  if (g.kind === 'sword') {
-    const guardY = 43,
-      half = g.breadth / 2;
-    for (let y = top; y <= guardY; y++) {
-      const width = Math.min(half, (y - top) * 0.48 + 0.2);
-      const center = 16 + Math.sin(((y - top) / (guardY - top)) * Math.PI) * g.curvature * 0.5;
-      for (let x = -width; x <= width; x++) set(center + x, y, x < 0 ? 7 : x < 1 ? 6 : 5);
-      if (y > top + 8 && y % 6 === g.binding % 6) set(center, y, 9);
+  // Staircase rasterization keeps diagonal structural members four-connected at pixel scale.
+  const stroke = (x: number, y: number, tx: number, ty: number, c: number, breadth = 1) => {
+    let px = Math.round(x),
+      py = Math.round(y);
+    const n = Math.max(1, Math.ceil(Math.hypot(tx - x, ty - y) * 2));
+    const dot = () => {
+      for (let k = 0; k < breadth; k++) set(px + k, py, c);
+    };
+    dot();
+    for (let i = 1; i <= n; i++) {
+      const nx = Math.round(x + ((tx - x) * i) / n),
+        ny = Math.round(y + ((ty - y) * i) / n);
+      while (px !== nx) {
+        px += Math.sign(nx - px);
+        dot();
+      }
+      while (py !== ny) {
+        py += Math.sign(ny - py);
+        dot();
+      }
     }
-    stroke(15, 44, 15, 57, 3, 3);
-    for (let y = 46; y < 56; y += 3) stroke(15, y, 17, y - 1, 11);
-    const span = 5 + g.crown;
-    stroke(16 - span, 43 - (g.crown % 2), 16, 45, 12, 2);
-    stroke(16, 45, 16 + span, 43 - (g.crown % 2), 12, 2);
-    stroke(14, 58, 17, 58, 12, 2);
-    set(16, 57, 9);
+  };
+  const ring = (
+    cx: number,
+    cy: number,
+    rx: number,
+    ry: number,
+    c: number,
+    start = 0,
+    end = Math.PI * 2,
+  ) => {
+    let p = [cx + Math.cos(start) * rx, cy + Math.sin(start) * ry];
+    for (let i = 1; i <= 48; i++) {
+      const t = start + ((end - start) * i) / 48,
+        q = [cx + Math.cos(t) * rx, cy + Math.sin(t) * ry];
+      stroke(p[0], p[1], q[0], q[1], c);
+      p = q;
+    }
+  };
+  const top = 59 - g.length,
+    p = g.parts;
+  const grip = (x: number, a: number, b: number, width = 3) => {
+    stroke(x, a, x, b, p.grip === 'bare' ? 14 : 11, width);
+    if (p.grip !== 'bare')
+      for (let y = a + 1; y < b; y += g.binding - 1)
+        stroke(x, y, x + width - 1, y - (p.grip === 'woven' ? 1 : 0), p.grip === 'cord' ? 12 : 4);
+  };
+  if (g.kind === 'sword') {
+    const guardY = 44,
+      bladeTop = g.subtype === 'dagger' ? top + 12 : top;
+    let prev = { x: 16, y: guardY };
+    for (let y = guardY; y >= bladeTop; y--) {
+      const t = (guardY - y) / Math.max(1, guardY - bladeTop);
+      const curve =
+        g.subtype === 'sabre'
+          ? (4 + Math.abs(g.curvature)) * t * t
+          : g.subtype === 'falchion'
+            ? 3 * t * t
+            : g.curvature * 0.2 * Math.sin(t * Math.PI);
+      const center = 16 + curve;
+      const bulb = g.subtype === 'falchion' ? 1 + Math.sin(t * Math.PI) * 0.65 : 1;
+      const base = g.subtype === 'needleblade' ? 1.1 : g.breadth * 0.65;
+      const half = Math.max(0.2, base * bulb * (1 - t * p.taper) * Math.min(1, (1 - t) * 7 + 0.15));
+      stroke(prev.x, prev.y, center, y, 6);
+      for (let x = Math.floor(center - half); x <= Math.ceil(center + half); x++)
+        set(x, y, x < center ? 7 : x > center + half * 0.5 ? 5 : 6);
+      prev = { x: center, y };
+    }
+    grip(15, 44, 56);
+    const span = 3 + g.crown;
+    if (p.guard === 'bar') stroke(16 - span, 44, 16 + span, 44, 12, 2);
+    if (p.guard === 'swept') {
+      stroke(16 - span, 41, 16, 45, 12);
+      stroke(16, 45, 16 + span, 41, 12);
+    }
+    if (p.guard === 'disc') {
+      stroke(12, 44, 20, 44, 6);
+      stroke(13, 43, 19, 43, 12);
+    }
+    if (p.guard === 'hook') {
+      stroke(12, 44, 22, 44, 12);
+      ring(20, 47, 3, 4, 6, -Math.PI / 2, Math.PI / 2);
+      stroke(20, 51, 17, 53, 6);
+    }
+    if (p.pommel === 'cap') stroke(14, 57, 18, 57, 12, 1);
+    if (p.pommel === 'ring') {
+      stroke(16, 56, 16, 57, 12);
+      ring(16, 59, 2, 2, 12);
+    }
+    if (p.pommel === 'drop') {
+      stroke(15, 57, 17, 57, 6);
+      stroke(16, 57, 16, 60, 12);
+    }
+    if (p.exposedCore) {
+      set(16, 44, 9);
+      set(16, 43, 10);
+    }
   } else if (g.kind === 'bow') {
-    const bottom = 59,
-      mid = (top + bottom) / 2,
-      bend = 6 + g.breadth;
-    let previous = { x: 12, y: top };
-    for (let y = top + 1; y <= bottom; y++) {
-      const x = 12 + Math.sin(((y - top) / (bottom - top)) * Math.PI) * bend;
-      stroke(previous.x, previous.y, x, y, 3, 2);
+    const mid = (top + 59) / 2,
+      bend = 5 + g.breadth + p.flex;
+    let previous = { x: 11, y: top };
+    for (let y = top; y <= 59; y++) {
+      const t = (y - top) / (59 - top);
+      let x = 11 + Math.sin(t * Math.PI) * bend;
+      if (g.subtype === 'recurve bow') x -= Math.sin(t * Math.PI * 3) * 3;
+      if (g.subtype === 'reflex bow') x += Math.cos(t * Math.PI * 4) * 2 - 2;
+      if (g.subtype === 'flatbow') x = 11 + (1 - Math.abs(t * 2 - 1)) * bend;
+      const width = g.subtype === 'flatbow' ? 3 : 2;
+      stroke(previous.x, previous.y, x, y, 3, width);
       set(x, y, 4);
       previous = { x, y };
     }
-    stroke(12, top, 12, bottom, 7);
-    stroke(11, mid, 27, mid, 6);
-    stroke(24, mid - 2, 27, mid, 7);
-    stroke(27, mid, 24, mid + 2, 5);
-    stroke(12 + bend, mid - 3, 12 + bend, mid + 3, 11, 2);
-    set(13 + bend, mid, 9);
+    const endX = g.subtype === 'reflex bow' ? 11 : 11;
+    stroke(endX, top, endX, 59, 7);
+    grip(
+      Math.round(11 + bend + (g.subtype === 'recurve bow' ? 3 : 0)),
+      Math.round(mid - 3),
+      Math.round(mid + 3),
+      2,
+    );
+    // Bind the grip to the actual central limb even on recurved profiles.
+    stroke(11 + bend, mid, 11 + bend + (g.subtype === 'recurve bow' ? 3 : 0), mid, 11, 2);
+    if (p.exposedCore) set(12 + bend, mid, 9);
   } else {
-    const radius = 5 + g.crown,
-      cy = top + 8,
-      neck = cy + radius;
+    const ornate = g.subtype === 'seed sceptre',
+      cy = top + (ornate ? 7 : 4),
+      neck = ornate ? cy + 7 : g.subtype === 'crook' ? cy + 5 : top + 5;
+    const center = (y: number) =>
+      15 +
+      (p.shaft === 'straight' ? 0 : Math.sin(((y - neck) / (59 - neck)) * Math.PI) * g.curvature) +
+      (p.shaft === 'knotted' ? Math.sin(y * 0.5) * 0.65 : 0);
+    let prev = { x: center(neck), y: neck };
     for (let y = neck; y <= 59; y++) {
-      const x = 15 + Math.sin(((y - neck) / (59 - neck)) * Math.PI) * g.curvature;
-      set(x, y, 2);
-      set(x + 1, y, 3);
-      if (g.breadth > 3) set(x + 2, y, 4);
-      if (y > 40 && y < 49 && y % 2 === 0) stroke(x, y, x + 2, y, 11);
+      const x = center(y);
+      stroke(prev.x, prev.y, x, y, 3, g.breadth > 3 ? 3 : 2);
+      set(x, y, 4);
+      prev = { x, y };
     }
-    // Grow a symmetric botanical crown around a guaranteed connected stem/ring.
-    const locked = new Uint8Array(w * h);
-    const lock = (x: number, y: number) => {
-      x = Math.round(x);
-      y = Math.round(y);
-      if (x > 0 && x < w - 1 && y > 0 && y < h - 1) {
-        set(x, y, 12);
-        locked[y * w + x] = 1;
+    stroke(center(57), 57, center(59), 59, 6, 2);
+    grip(Math.round(center(46)), 42, 49, g.breadth > 3 ? 3 : 2);
+    stroke(center(42), 42, center(49), 49, p.grip === 'bare' ? 14 : 11, 2);
+    if (g.subtype === 'walking pole') stroke(15, top, 15, neck, 3, 2);
+    if (g.subtype === 'forked staff') {
+      stroke(15, neck, 10 - g.crown, top, 3, 2);
+      stroke(15, neck, 21 + g.crown, top + 1, 3, 2);
+    }
+    if (g.subtype === 'crook') {
+      stroke(15, neck, 15, cy, 3, 2);
+      ring(19, cy, 4, 4, 3, Math.PI, Math.PI * 2.4);
+    }
+    if (g.subtype === 'root staff') {
+      stroke(15, neck, 15, top, 3, 3);
+      for (let i = 0; i < 3; i++) {
+        const side = i % 2 ? -1 : 1,
+          by = top + 3 + i * 3;
+        stroke(16, by + 4, 16 + side * (5 + i), by, 3, 2);
+        stroke(16 + side * (5 + i), by, 16 + side * (6 + i), by - 2, 4);
       }
-    };
-    for (let y = cy; y <= neck + 2; y++) lock(16, y);
-    for (let i = 0; i < 80; i++) {
-      const t = (i * Math.PI * 2) / 80;
-      lock(16 + Math.cos(t) * radius, cy + Math.sin(t) * (radius + 1));
     }
-    let cells = new Uint8Array(w * h);
-    for (let y = cy - radius - 2; y <= cy + radius + 2; y++)
-      for (let x = 16 - radius - 2; x <= 16; x++)
-        if (
-          y > 0 &&
-          Math.hypot((x - 16) / (radius + 1), (y - cy) / (radius + 2)) < 1.05 &&
-          rng() > 0.48
-        ) {
-          cells[y * w + x] = 1;
-          cells[y * w + (32 - x)] = 1;
-        }
-    for (let iteration = 0; iteration < 3; iteration++) {
-      const next = new Uint8Array(w * h);
-      for (let y = 1; y < Math.min(59, neck + 4); y++)
-        for (let x = 2; x < 30; x++) {
-          let n = 0;
-          for (let dy = -1; dy <= 1; dy++)
-            for (let dx = -1; dx <= 1; dx++)
-              if (dx || dy)
-                n += cells[(y + dy) * w + x + dx] || locked[(y + dy) * w + x + dx] ? 1 : 0;
-          next[y * w + x] = locked[y * w + x] || n > 4 || (cells[y * w + x] && n > 2) ? 1 : 0;
-        }
-      cells = next;
+    if (ornate) {
+      stroke(16, neck, 16, cy, 12);
+      ring(16, cy, 5 + g.crown * 0.5, 6, 3);
+      stroke(16, cy + 6, 16, cy - 3, 12);
+      for (let y = -3; y <= 3; y++)
+        for (let x = -2; x <= 2; x++)
+          if (Math.abs(x) + Math.abs(y) < 4) set(16 + x, cy + y, x < 0 ? 10 : x ? 8 : 9);
     }
-    // Remove detached ornaments; every visible cell must attach to the shaft.
-    const queue = [(neck + 2) * w + 16],
-      seen = new Set(queue);
-    for (let i = 0; i < queue.length; i++)
-      for (const d of [-w, -1, 1, w]) {
-        const p = queue[i] + d;
-        if (p >= 0 && p < cells.length && cells[p] && !seen.has(p)) {
-          seen.add(p);
-          queue.push(p);
-        }
-      }
-    for (const p of seen) if (cells[p]) pixels[p] = locked[p] ? 12 : 3;
-    for (let y = cy - 3; y <= cy + 3; y++)
-      for (let x = 13; x <= 19; x++)
-        if (Math.abs(x - 16) + Math.abs(y - cy) <= 3) set(x, y, x < 16 ? 10 : x === 16 ? 9 : 8);
-    // The luminous seed is held by visible botanical filaments.
-    stroke(16, cy + 3, 16, cy + radius, 12);
-    stroke(16 - radius, cy, 13, cy, 12);
-    stroke(19, cy, 16 + radius, cy, 12);
-    set(15, cy - 1, 10);
   }
-  // One-pixel outline is separate from the mask, so it never erodes slender handles.
+  // The silhouette, bindings and highlights all belong to one connected manufactured object.
   const out = pixels.slice();
   for (let y = 1; y < h - 1; y++)
     for (let x = 1; x < w - 1; x++)
       if (pixels[y * w + x]) {
         for (const d of [-w, -1, 1, w]) if (!pixels[y * w + x + d]) out[y * w + x + d] = 1;
-        if (pixels[y * w + x] === 3 && rng() > 0.78) out[y * w + x] = 4;
+        if (pixels[y * w + x] === 3 && rng() > 0.82) out[y * w + x] = 4;
       }
   return { width: w, height: h, pixels: out, palette: [...g.palette] };
 }

@@ -151,7 +151,7 @@ export function generateLifeCandidate(
   const candidateSeed = deriveSeed(seed, 'life-origin', index),
     rng = random(candidateSeed);
   const towns = world
-    .settlementsAround(0, 0, generation === 3 ? 340 : 110)
+    .settlementsAround(0, 0, generation >= 3 ? 340 : 110)
     .filter((t) => t.rank !== 'hamlet')
     .sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y) || a.id.localeCompare(b.id));
   const town = towns[Math.floor(rng() * Math.min(9, towns.length))];
@@ -251,7 +251,11 @@ export function generateLifeCandidate(
     label = 'Sorting useful stems from a gathered bundle';
     perk = 'Field experience improves medicine; a quick stride helps reach new work.';
   }
-  look.weapon = resident.role === 'guard' ? 'sword' : 'staff';
+  // Occupation, rather than character creation, determines what this resident carries.
+  look.weapon = resident.appearance.weapon;
+  if (look.weapon !== 'none')
+    look.weaponSeed =
+      resident.appearance.weaponSeed ?? deriveSeed(candidateSeed, 'owned-equipment', look.weapon);
   const candidate: LifeCandidate = {
     id: resident.id,
     seed: candidateSeed,

@@ -10,7 +10,12 @@ import {
   validForgeRecipe,
 } from '../src/stichos/forge.ts';
 import type { ForgeRecipe } from '../src/stichos/forge.ts';
-import { weaponGenome, weaponProfile, weaponPixels } from '../src/stichos/equipment.ts';
+import {
+  weaponGenome,
+  weaponProfile,
+  weaponProfileFromGenome,
+  weaponPixels,
+} from '../src/stichos/equipment.ts';
 
 test('all eighty-one component recipes resolve to real generator parts within the fixed search budget', () => {
   const seeds = [3886, 0, 0xffffffff];
@@ -42,8 +47,18 @@ test('changing actual frame, material and living core changes handling and visib
       const recipe: ForgeRecipe = { kind, material: 0, core: 'breath', span: 'swift' };
       const frames = FORGE_SPANS.map((s) => resolveForge(owner, { ...recipe, span: s.id })!);
       for (let i = 1; i < frames.length; i++) {
-        assert.ok(frames[i].profile.range > frames[i - 1].profile.range);
-        assert.ok(frames[i].profile.cooldown > frames[i - 1].profile.cooldown);
+        // A long dagger need not outrange a short needleblade. Hold the other
+        // functional parts fixed when testing the physical effect of span.
+        const samePartsLonger = weaponProfileFromGenome(
+          {
+            ...frames[i - 1].genome,
+            length: frames[i].genome.length,
+            breadth: frames[i].genome.breadth,
+          },
+          1,
+        );
+        assert.ok(samePartsLonger.range > frames[i - 1].profile.range);
+        assert.ok(samePartsLonger.cooldown > frames[i - 1].profile.cooldown);
         assert.ok(frames[i].cost.items.wood! > frames[i - 1].cost.items.wood!);
         assert.notDeepEqual(
           weaponPixels(frames[i].genome).pixels,
@@ -52,8 +67,9 @@ test('changing actual frame, material and living core changes handling and visib
       }
       const light = resolveForge(owner, recipe)!;
       const heavy = resolveForge(owner, { ...recipe, material: 1 })!;
-      assert.ok(heavy.profile.damage >= light.profile.damage);
-      assert.ok(heavy.profile.cooldown > light.profile.cooldown);
+      const denser = weaponProfileFromGenome({ ...light.genome, density: heavy.genome.density }, 1);
+      assert.ok(denser.damage >= light.profile.damage);
+      assert.ok(denser.cooldown > light.profile.cooldown);
       assert.notDeepEqual(heavy.genome.palette, light.genome.palette);
       const cores = FORGE_CORES.map((c) => resolveForge(owner, { ...recipe, core: c.id })!);
       assert.deepEqual(
