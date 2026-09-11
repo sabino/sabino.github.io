@@ -171,16 +171,12 @@ export function generateLifeCandidate(
     .sort((a, b) => a.id.localeCompare(b.id));
   const resident = residents[Math.floor(rng() * residents.length)];
   if (!resident) throw new Error('This settlement has no available resident.');
-  const doors = world
-    .propsAround(town.x, town.y, town.radius + 6)
-    .filter(
-      (p) =>
-        p.kind === 'door' &&
-        p.building &&
-        (world.tile(p.x, p.y).buildingKind === 'house' ||
-          world.tile(p.x, p.y).buildingKind === 'inn' ||
-          p.building.includes(':house:')),
-    );
+  const doors = world.propsAround(town.x, town.y, town.radius + 6).filter((p) => {
+    if (p.kind !== 'door' || !p.building) return false;
+    const kind = world.tile(p.x, p.y).buildingKind;
+    // G4 retains legacy IDs for compatibility: ':house:' does not imply a dwelling.
+    return kind === 'house' || kind === 'inn' || (generation < 4 && p.building.includes(':house:'));
+  });
   const homes = new Map<string, (typeof doors)[number]>();
   for (const door of doors)
     if (!homes.has(door.building!) || homes.get(door.building!)!.y < door.y)

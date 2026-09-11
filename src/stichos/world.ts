@@ -560,6 +560,14 @@ export class InfiniteWorld {
       });
     }
     if (this.generation === 4) {
+      // Every inhabited stop needs actual housing. The building grammar can
+      // otherwise roll only workplaces; designate an existing noncivic room
+      // before its name and fixtures are generated, preserving the whole layout.
+      if (!buildings.some((b) => b.kind === 'house' || b.kind === 'inn')) {
+        const dwelling = buildings.find((b) => b !== main && b.kind !== 'church') ?? main;
+        if (dwelling.kind !== 'church')
+          dwelling.kind = deriveSeed(seed, 'v4-residential-use') % 3 === 0 ? 'inn' : 'house';
+      }
       const climate = this.climate(x, y) as RegionalClimate;
       settlement.architecture = civilizationArchitecture(
         architecturalCulture(seed, climate, clan, this.clans[clan].color, origin),

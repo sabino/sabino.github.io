@@ -81,6 +81,76 @@ test('bounded appearance and name editing never changes professional resources o
   assert.throws(() => generateLifeCandidate(3886, Infinity));
 });
 
+test('generation-four lives own actual local residences and keep their southern entrance as the home anchor', () => {
+  for (const seed of [8, 11, 71, 0x53544943]) {
+    const world = new InfiniteWorld(seed, 4);
+    for (const index of [0, 1, 2, 7, 16, 23]) {
+      const candidate = generateLifeCandidate(seed, index, {}, 4);
+      const tile = world.tile(candidate.home.x, candidate.home.y);
+      assert.ok(
+        tile.buildingKind === 'house' || tile.buildingKind === 'inn',
+        `seed ${seed} life ${index} owns ${tile.buildingKind}`,
+      );
+      assert.equal(candidate.home.settlementId, candidate.settlement.id);
+      assert.equal(tile.building, candidate.home.buildingId);
+      const doors = world
+        .propsAround(candidate.home.x, candidate.home.y, 24)
+        .filter((prop) => prop.kind === 'door' && prop.building === candidate.home.buildingId);
+      assert.equal(candidate.home.y, Math.max(...doors.map((door) => door.y)));
+      assert.equal(world.blocked(candidate.home.x, candidate.home.y, undefined, true), false);
+      assert.deepEqual(generateLifeCandidate(seed, index, {}, 4).home, candidate.home);
+    }
+  }
+  const guard = generateLifeCandidate(11, 16, {}, 4),
+    world = new InfiniteWorld(11, 4);
+  assert.equal(guard.id, 'origin:resident:4');
+  assert.equal(guard.name, 'Wishe Pace');
+  assert.equal(guard.profession, 'guard');
+  assert.equal(world.tile(16, -6).buildingKind, 'workshop', 'the real workshop keeps its purpose');
+  assert.notEqual(
+    guard.home.buildingId,
+    'origin:house:1:-1',
+    'legacy house IDs cannot turn workshops into homes',
+  );
+  assert.equal(guard.home.buildingId, 'origin:house:-1:1');
+  assert.equal(world.tile(guard.home.x, guard.home.y).buildingKind, 'inn');
+});
+
+test('every inhabited generation-four stop contains housing without moving rooms, residents or civic workshops', () => {
+  for (const seed of [8, 11, 71, 0x53544943]) {
+    const world = new InfiniteWorld(seed, 4),
+      previous = new InfiniteWorld(seed, 3);
+    for (const town of world.settlementsAround(0, 0, 340)) {
+      const props = world.propsAround(town.x, town.y, town.radius + 6);
+      const doors = props.filter((prop) => prop.kind === 'door');
+      assert.ok(
+        doors.some((door) => ['house', 'inn'].includes(world.tile(door.x, door.y).buildingKind!)),
+        `seed ${seed} ${town.id} has a real residential room`,
+      );
+      assert.ok(
+        props.some((prop) => prop.id === `${town.id}:workbench`),
+        'civic crafting remains available',
+      );
+      const coordinates = (list: typeof doors) =>
+        list
+          .filter((prop) => prop.kind === 'door')
+          .map((door) => [door.id, door.x, door.y])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+      assert.deepEqual(
+        coordinates(doors),
+        coordinates(previous.propsAround(town.x, town.y, town.radius + 6)),
+        'residential use changes preserve all building footprints and entrances',
+      );
+      const residentCoordinates = (map: InfiniteWorld) =>
+        map
+          .npcsAround(town.x, town.y, town.radius)
+          .filter((npc) => npc.id.startsWith(town.id + ':') || npc.id.startsWith('origin-'))
+          .map((npc) => [npc.id, npc.x, npc.y]);
+      assert.deepEqual(residentCoordinates(world), residentCoordinates(previous));
+    }
+  }
+});
+
 test('accepting a life supplies its actual profession, home and arrival once while legacy Theo stays compatible', () => {
   const legacy = new Stichos(3886),
     savedLegacy = legacy.save();
