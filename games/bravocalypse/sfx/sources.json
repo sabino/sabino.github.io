@@ -236,5 +236,26 @@
     "license": "CC0 1.0",
     "source": "https://kenney.nl/assets/rpg-audio",
     "sha256": "d306e5b848f6843332d0ca19f8f7dfe5796aeb56d8273902b085df463273f1dc"
+  },
+  {
+    "file": "impactSoft_heavy_000.ogg",
+    "author": "Kenney",
+    "license": "CC0 1.0",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "sha256": "49e7ca88743fca974bb8676ea138b751cfd8f9033b5e7af8736c2a215d6edbc1"
+  },
+  {
+    "file": "impactSoft_heavy_001.ogg",
+    "author": "Kenney",
+    "license": "CC0 1.0",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "sha256": "4d0096364ba9e46119d2ff6df493fdc101bd2e1efae061da5e5f77a53b3fdcb6"
+  },
+  {
+    "file": "impactSoft_heavy_002.ogg",
+    "author": "Kenney",
+    "license": "CC0 1.0",
+    "source": "https://kenney.nl/assets/impact-sounds",
+    "sha256": "d130ae541951243d3f6ed963d0057450a445ffe117fbf9a084d34eb1635cb563"
   }
 ]

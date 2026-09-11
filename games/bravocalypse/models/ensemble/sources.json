@@ -1,0 +1,29 @@
+[
+  {
+    "file": "trumpet.glb",
+    "author": "jeremy",
+    "source": "https://poly.pizza/m/0Mj5XgeGtKJ",
+    "license": "CC BY 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0/",
+    "changes": "Rescaled and posed in game with adjusted material colors and finish; runtime fractures retain original surfaces.",
+    "sha256": "0129e53495495ba4a2cf19927a6e4d835b51e163db6faf370fe4379e37b2704f"
+  },
+  {
+    "file": "saxophone.glb",
+    "author": "jeremy",
+    "source": "https://poly.pizza/m/6A2UAKdCNy7",
+    "license": "CC BY 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0/",
+    "changes": "Rescaled and posed in game with adjusted material colors and finish; runtime fractures retain original surfaces.",
+    "sha256": "159068abf9e9101f15011b4cf1b523a4fac3022ec86e55cb380c06d90eb4086e"
+  },
+  {
+    "file": "drums.glb",
+    "author": "Zsky",
+    "source": "https://poly.pizza/m/qWU9Q4flfQ",
+    "license": "CC BY 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0/",
+    "changes": "Rescaled and posed in game with adjusted material colors and finish; runtime fractures retain original surfaces.",
+    "sha256": "6984789210ac9b5c1620434cc4c4edaf1d489e496de8dd997ee4bc7f330b97a2"
+  }
+]
