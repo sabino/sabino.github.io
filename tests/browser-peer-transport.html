@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stíchos — browser transport fixture</title>
+    <style>
+      body {
+        max-width: 850px;
+        margin: 36px auto;
+        padding: 0 20px;
+        color: #dce5e3;
+        background: #14232b;
+        font: 16px/1.5 system-ui;
+      }
+      button {
+        padding: 12px 24px;
+        font: inherit;
+        background: #b9d2c4;
+        color: #112126;
+        border: 0;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: #0b181f;
+        padding: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Browser transport fixture</h1>
+    <p>
+      This uses eight real PeerJS/WebRTC participants, generated legal positions and actual room
+      combat frames. It is a transport test, not a gameplay playthrough. It briefly closes only this
+      fixture host’s signalling WebSocket and verifies recovery. All connections close within 30
+      seconds.
+    </p>
+    <button id="run" type="button">Run transport test</button>
+    <pre id="result" role="status" aria-live="polite">
+Ready. Requires public PeerJS signalling and WebRTC connectivity.</pre
+    >
+    <script type="module" src="./browser-peer-transport.ts"></script>
+  </body>
+</html>
