@@ -15,6 +15,7 @@ import {
   InfiniteWorld,
   appearance,
   CHUNK_SIZE,
+  STOP_SPACING,
   ORIGIN_CITY_NAME,
   type WorldGeneration,
 } from './world.ts';
@@ -345,6 +346,26 @@ const chunkCoordinates = (key: unknown): [number, number] | null => {
     return null;
   return [x, y];
 };
+
+/** A world-addressed resident must exist; an arbitrary save label is not an employee. */
+function generatedResident(world: InfiniteWorld, id: string): Npc | undefined {
+  if (/^origin(?::resident:\d+|-(?:botanist|archivist|engineer))$/.test(id))
+    return world.npcsAround(0, 0, 28).find((n) => n.id === id);
+  const address = /^town:(-?\d+):(-?\d+):resident:\d+$/.exec(id);
+  if (!address) return undefined;
+  const gx = Number(address[1]),
+    gy = Number(address[2]);
+  if (
+    !Number.isSafeInteger(gx) ||
+    !Number.isSafeInteger(gy) ||
+    Math.abs(gx) > Number.MAX_SAFE_INTEGER / 640 ||
+    Math.abs(gy) > Number.MAX_SAFE_INTEGER / 640
+  )
+    return undefined;
+  return world
+    .npcsAround(Math.round(gx * STOP_SPACING), Math.round(gy * STOP_SPACING), 42)
+    .find((n) => n.id === id);
+}
 
 /** Persistent human-scale simulation; chunk eviction never discards a player's actions. */
 export class Stichos {
@@ -706,7 +727,9 @@ export class Stichos {
     this.progression.homes = [
       { ...candidate.home, purchasedAt: 0, furniture: {}, plots: [null, null] },
     ];
-    this.estateTrust = Object.fromEntries(THEO_ESTATE.staffIds.map((id) => [id, false]));
+    this.estateTrust = this.universeLife
+      ? {}
+      : Object.fromEntries(THEO_ESTATE.staffIds.map((id) => [id, false]));
     this.toolPacks.clear();
     this.installLifeTools(candidate);
     this.restAnchor = { ...candidate.start };
@@ -1354,7 +1377,11 @@ export class Stichos {
         this.progression.homes.find(
           (h) => h.id === (this.originCandidate?.home.id ?? THEO_ESTATE.residenceId),
         ) ?? null,
-      staffIds: this.originCandidate ? [] : [...THEO_ESTATE.staffIds],
+      staffIds: this.universeLife
+        ? this.householdWorkerIds
+        : this.originCandidate
+          ? []
+          : [...THEO_ESTATE.staffIds],
       description: this.originCandidate
         ? `${this.originCandidate.name}'s established home in ${this.originCandidate.settlement.name}. People may be hired through their own paid agreements.`
         : THEO_ESTATE.description,
@@ -1449,13 +1476,38 @@ export class Stichos {
       now: this.time,
     });
   }
+  private get householdWorkerIds(): string[] {
+    if (!this.universeLife) return [...THEO_ESTATE.staffIds];
+    return [
+      ...new Set([
+        ...(this.personalContext()?.plan.relationships.map((r) => r.npcId) ?? []),
+        ...this.orders
+          .filter((o) => o.status === 'working' || o.journey?.phase === 'returning')
+          .map((o) => o.workerId),
+      ]),
+    ];
+  }
+  private workerTrusted(workerId: string) {
+    if (this.estateTrust[workerId] !== undefined) return this.estateTrust[workerId];
+    return this.universeLife
+      ? this.personalContext()?.plan.relationships.find((r) => r.npcId === workerId)?.stance ===
+          'ally'
+      : true;
+  }
   get staff() {
-    return THEO_ESTATE.staffIds
+    return this.householdWorkerIds
       .map((id) => this.laborWorker(id))
       .filter((n): n is Npc => !!n)
       .map((npc) => ({
         ...workerProfile(npc, this.laborReputation(npc)),
-        trusted: this.estateTrust[npc.id] !== false,
+        trusted: this.workerTrusted(npc.id),
+        role: this.world.civilization?.roleNames[npc.role] ?? npc.role,
+        relationship: this.universeLife
+          ? this.personalContext()?.plan.relationships.find((r) => r.npcId === npc.id)?.reason
+          : undefined,
+        stance: this.universeLife
+          ? this.personalContext()?.plan.relationships.find((r) => r.npcId === npc.id)?.stance
+          : undefined,
         x: npc.x,
         y: npc.y,
       }));
@@ -1464,17 +1516,23 @@ export class Stichos {
     return (
       this.npcs.find((n) => n.id === id) ??
       this.npcMemory.get(id) ??
-      this.world.npcsAround(0, 0, 24).find((n) => n.id === id)
+      (this.universeLife
+        ? generatedResident(this.world, id)
+        : this.world.npcsAround(0, 0, 24).find((n) => n.id === id))
     );
   }
   chooseEstateTrust(workerId: string, trusted: boolean) {
     if (
       this.phase !== 'playing' ||
-      !THEO_ESTATE.staffIds.includes(workerId) ||
+      !this.householdWorkerIds.includes(workerId) ||
       typeof trusted !== 'boolean'
     )
       return { ok: false, message: 'Choose a named household relationship.' };
     this.estateTrust[workerId] = trusted;
+    if (this.universeLife) {
+      const worker = this.laborWorker(workerId);
+      if (worker) this.npcMemory.set(worker.id, clone(worker));
+    }
     return {
       ok: true,
       message: trusted
@@ -1510,8 +1568,8 @@ export class Stichos {
     if (
       this.phase !== 'playing' ||
       !worker ||
-      !THEO_ESTATE.staffIds.includes(workerId) ||
-      this.estateTrust[workerId] === false ||
+      !this.householdWorkerIds.includes(workerId) ||
+      !this.workerTrusted(workerId) ||
       this.occupiedNpcId === workerId ||
       this.removed.has(workerId)
     )
@@ -1562,6 +1620,13 @@ export class Stichos {
       .slice(-63);
     this.orders.push(preview.order);
     const worker = this.laborWorker(workerId)!;
+    if (this.universeLife) {
+      const belongings = this.bodyPossessions.get(worker.id) ?? this.initialPossessions(worker);
+      this.bodyPossessions.set(worker.id, {
+        ...clone(belongings),
+        coins: belongings.coins + preview.wages,
+      });
+    }
     this.beginLaborJourney(preview.order, worker);
     this.npcMemory.set(worker.id, clone(worker));
     return {
@@ -4221,6 +4286,7 @@ export class Stichos {
     }
     if (choiceId === 'personal:trust' && npc && relationship && !record.trusted) {
       record.trusted = npc.id;
+      this.estateTrust[npc.id] = true;
       this.changeReputation(npc.clan, 6);
       for (const other of plan.relationships)
         if (other.clan !== npc.clan && other.stance === 'rival')
@@ -6493,14 +6559,21 @@ function validateSave(value: unknown): SaveData {
   }
   if (value.labor !== undefined) {
     const labor = value.labor;
+    let laborWorld: InfiniteWorld | undefined;
+    const validWorker = (id: string) => {
+      if (value.worldGeneration !== 4) return THEO_ESTATE.staffIds.includes(id);
+      laborWorld ??= new InfiniteWorld(value.seed as number, 4);
+      const actual = generatedResident(laborWorld, id);
+      return !!actual && actual.role !== 'raider' && !actual.hostile;
+    };
     if (
       !object(labor) ||
       !number(labor.serial, 0, Number.MAX_SAFE_INTEGER, true) ||
       !object(labor.trust) ||
+      Object.keys(labor.trust).length > 128 ||
       Object.keys(labor.trust).some(
         (id) =>
-          !THEO_ESTATE.staffIds.includes(id) ||
-          typeof (labor.trust as Record<string, unknown>)[id] !== 'boolean',
+          !validWorker(id) || typeof (labor.trust as Record<string, unknown>)[id] !== 'boolean',
       ) ||
       !Array.isArray(labor.tools) ||
       labor.tools.length > (value.npcs as Npc[]).length + 2
@@ -6512,14 +6585,13 @@ function validateSave(value: unknown): SaveData {
         (o) =>
           o.serial > (labor.serial as number) ||
           o.startedAt > (value.time as number) ||
-          !THEO_ESTATE.staffIds.includes(o.workerId),
+          !validWorker(o.workerId),
       )
     )
       return fail();
-    const world = new InfiniteWorld(
-      value.seed as number,
-      (value.worldGeneration ?? 1) as WorldGeneration,
-    );
+    const world =
+      laborWorld ??
+      new InfiniteWorld(value.seed as number, (value.worldGeneration ?? 1) as WorldGeneration);
     for (const order of orders) {
       const journey = order.journey;
       if (
