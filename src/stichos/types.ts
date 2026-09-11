@@ -162,6 +162,8 @@ export interface Effect extends Point {
   color: string;
   heading?: number;
   text?: string;
+  /** Physical body responsible for the effect; omitted for legacy proximity-based effects. */
+  actorId?: string;
   tool?: { kind: 'axe' | 'pickaxe' | 'sickle'; seed: number };
 }
 export interface Quest {

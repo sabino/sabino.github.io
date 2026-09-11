@@ -67,3 +67,37 @@ test('contextual effects choose one actor and separate gathering from bench work
     null,
   );
 });
+
+test('identified work belongs to its physical worker even beside the player or away from the effect', () => {
+  const actors = [
+    { id: '$player', bodyId: 'priest-body', player: true, x: 0, y: 0 },
+    { id: 'worker', player: false, x: 1.3, y: 0 },
+    { id: 'bystander', player: false, x: 0.1, y: 0 },
+  ];
+  const effect: Effect = {
+    id: 2,
+    actorId: 'worker',
+    kind: 'harvest',
+    x: 0,
+    y: 0,
+    age: 0,
+    duration: 0.65,
+    color: '#abc',
+    tool: { kind: 'axe', seed: 73 },
+  };
+  assert.deepEqual(effectActor(effect, actors), { id: 'worker', kind: 'gather' });
+  assert.deepEqual(effectActor({ ...effect, x: 100 }, actors), {
+    id: 'worker',
+    kind: 'gather',
+  });
+  assert.equal(effectActor({ ...effect, actorId: 'offscreen-worker' }, actors), null);
+  assert.deepEqual(effectActor({ ...effect, actorId: 'priest-body' }, actors), {
+    id: '$player',
+    kind: 'gather',
+  });
+  assert.deepEqual(effectActor({ ...effect, kind: 'hurt' }, actors), {
+    id: 'worker',
+    kind: 'hurt',
+  });
+  assert.equal(effectActor({ ...effect, kind: 'arrow' }, actors), null);
+});

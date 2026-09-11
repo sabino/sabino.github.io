@@ -144,7 +144,7 @@ export class StichosRenderer {
     }
     this.actorActions.clear();
     const motionActors = [
-      { id: '$player', x: game.player.x, y: game.player.y, player: true },
+      { id: '$player', bodyId: game.bodyId, x: game.player.x, y: game.player.y, player: true },
       ...game.npcs
         .filter((n) => n.id !== game.occupiedNpcId)
         .map((n) => ({ id: n.id, x: n.x, y: n.y, player: false })),

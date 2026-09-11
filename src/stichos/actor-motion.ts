@@ -28,13 +28,30 @@ export function actionMotion(action: HumanoidAction | null | undefined) {
 
 export interface MotionActor extends Point {
   id: string;
+  /** Stable physical identity when the renderer uses a separate local player key. */
+  bodyId?: string;
   player: boolean;
 }
-/** Associate an effect once at onset. Gather/craft are player actions; impact chooses one body. */
+/** Explicit physical identity wins; legacy gathering defaults to the player and impacts use proximity. */
 export function effectActor(
   effect: Effect,
   actors: readonly MotionActor[],
 ): { id: string; kind: HumanoidActionKind } | null {
+  if (effect.actorId !== undefined) {
+    const actor = actors.find((a) => a.id === effect.actorId || a.bodyId === effect.actorId);
+    if (!actor) return null;
+    if (effect.kind === 'harvest')
+      return {
+        id: actor.id,
+        kind:
+          !effect.tool && Math.hypot(effect.x - actor.x, effect.y - actor.y) < 0.3
+            ? 'craft'
+            : 'gather',
+      };
+    return ['hurt', 'heal', 'ward'].includes(effect.kind)
+      ? { id: actor.id, kind: effect.kind as 'hurt' | 'heal' | 'ward' }
+      : null;
+  }
   if (effect.kind === 'harvest') {
     const player = actors.find((actor) => actor.player);
     return player
