@@ -36,6 +36,9 @@ export class StichosRenderer {
   private art = new StichosArt();
   private roofs = new Map<string, Roof>();
   private buildingBounds = new Map<string, Building>();
+  private chunkBuildings = new Map<string, Building[]>();
+  private lightSprites = new Map<string, HTMLCanvasElement>();
+  private atmosphereLayer: HTMLCanvasElement | null = null;
   private grounds = new Map<string, HTMLCanvasElement>();
   private worldSeed = -1;
   private lastTime = -1;
@@ -56,6 +59,7 @@ export class StichosRenderer {
     this.canvas.height = Math.round(this.height * this.ratio);
     this.ctx.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
     this.ctx.imageSmoothingEnabled = false;
+    this.atmosphereLayer = null;
   }
   get zoom() {
     return this.viewZoom;
@@ -93,6 +97,7 @@ export class StichosRenderer {
       this.camera = { x: game.player.x, y: game.player.y };
       this.roofs.clear();
       this.buildingBounds.clear();
+      this.chunkBuildings.clear();
       this.grounds.clear();
       this.footsteps = [];
       this.previousPlayer = null;
@@ -120,33 +125,47 @@ export class StichosRenderer {
       bottom = Math.ceil(this.camera.y + (this.height * 0.47) / unit) + 7;
     const buildings = new Map<string, Building>();
     this.drawGround(game);
-    for (let y = top; y <= bottom; y++)
-      for (let x = left; x <= right; x++) {
-        const tile = game.world.tile(x, y);
-        if (tile.building && !buildings.has(tile.building)) {
-          let b = this.buildingBounds.get(tile.building);
-          if (!b) {
-            // Resolve the full generated rectangle even when only its edge is visible.
-            // This keeps roof geometry stable while scrolling into a settlement.
-            b = {
-              id: tile.building,
-              minX: x,
-              maxX: x,
-              minY: y,
-              maxY: y,
-              clan: tile.clan ?? 0,
-              cathedral: tile.building.endsWith(':hall'),
-            };
-            while (game.world.tile(b.minX - 1, y).building === b.id && x - b.minX < 32) b.minX--;
-            while (game.world.tile(b.maxX + 1, y).building === b.id && b.maxX - x < 32) b.maxX++;
-            while (game.world.tile(x, b.minY - 1).building === b.id && y - b.minY < 32) b.minY--;
-            while (game.world.tile(x, b.maxY + 1).building === b.id && b.maxY - y < 32) b.maxY++;
-            this.buildingBounds.set(b.id, b);
-            while (this.buildingBounds.size > 128)
-              this.buildingBounds.delete(this.buildingBounds.keys().next().value!);
-          }
-          buildings.set(tile.building, b);
+    for (let cy = Math.floor(top / 16); cy <= Math.floor(bottom / 16); cy++)
+      for (let cx = Math.floor(left / 16); cx <= Math.floor(right / 16); cx++) {
+        const chunkKey = `${cx},${cy}`;
+        const cached = this.chunkBuildings.get(chunkKey);
+        if (cached) {
+          for (const building of cached) buildings.set(building.id, building);
+          continue;
         }
+        const inChunk = new Map<string, Building>();
+        for (const tile of game.world.chunk(cx, cy).tiles) {
+          const { x, y } = tile;
+          if (tile.building && !buildings.has(tile.building)) {
+            let b = this.buildingBounds.get(tile.building);
+            if (!b) {
+              // Resolve the full generated rectangle even when only its edge is visible.
+              // This keeps roof geometry stable while scrolling into a settlement.
+              b = {
+                id: tile.building,
+                minX: x,
+                maxX: x,
+                minY: y,
+                maxY: y,
+                clan: tile.clan ?? 0,
+                cathedral: tile.building.endsWith(':hall'),
+              };
+              while (game.world.tile(b.minX - 1, y).building === b.id && x - b.minX < 32) b.minX--;
+              while (game.world.tile(b.maxX + 1, y).building === b.id && b.maxX - x < 32) b.maxX++;
+              while (game.world.tile(x, b.minY - 1).building === b.id && y - b.minY < 32) b.minY--;
+              while (game.world.tile(x, b.maxY + 1).building === b.id && b.maxY - y < 32) b.maxY++;
+              this.buildingBounds.set(b.id, b);
+              while (this.buildingBounds.size > 128)
+                this.buildingBounds.delete(this.buildingBounds.keys().next().value!);
+            }
+            buildings.set(tile.building, b);
+          }
+          if (tile.building && buildings.has(tile.building))
+            inChunk.set(tile.building, buildings.get(tile.building)!);
+        }
+        this.chunkBuildings.set(chunkKey, [...inChunk.values()]);
+        while (this.chunkBuildings.size > 128)
+          this.chunkBuildings.delete(this.chunkBuildings.keys().next().value!);
       }
     this.drawFootprints(game, dt);
     const radius = Math.hypot(this.width / unit / 2, this.height / unit / 2) + 10;
@@ -177,7 +196,7 @@ export class StichosRenderer {
           p,
           (prop.kind === 'pine' ? 28 : 18) * scale,
           (prop.kind === 'pine' ? 12 : 7) * scale,
-          0.2,
+          0.12,
         );
     }
     const drawables: { depth: number; draw: () => void }[] = [];
@@ -561,6 +580,13 @@ export class StichosRenderer {
         Math.round(roof.width * s),
         Math.round(roof.height * s),
       );
+      if (b.cathedral) {
+        const center = (left.x + right.x) / 2;
+        for (const side of [-1, 1]) {
+          this.glow(center + side * 60 * s, right.y - 52 * s, 33 * s, '#f0b765', 0.24);
+          this.glow(center + side * 60 * s, right.y + 4 * s, 39 * s, '#f0b765', 0.1);
+        }
+      }
     } else {
       // Roof lifted: preserve the north wall and side walls, lower/fade the near wall.
       for (let y = b.minY; y <= b.maxY; y++)
@@ -644,6 +670,20 @@ export class StichosRenderer {
   ) {
     const rng = random(seed),
       s = width / 12;
+    ctx.save();
+    const warmth = ctx.createRadialGradient(
+      cx,
+      bottom - height * 0.4,
+      width * 0.1,
+      cx,
+      bottom - height * 0.4,
+      height * 0.6,
+    );
+    warmth.addColorStop(0, '#efbd693c');
+    warmth.addColorStop(1, '#efbd6900');
+    ctx.fillStyle = warmth;
+    ctx.fillRect(cx - height * 0.6, bottom - height * 1.1, height * 1.2, height * 1.2);
+    ctx.restore();
     const points = [
       [cx - width / 2, bottom],
       [cx - width / 2, bottom - height * 0.65],
@@ -665,7 +705,7 @@ export class StichosRenderer {
           y + s,
           2 * s,
           2 * s,
-          ['#e9c17a', '#f9dda0', '#b57d67', '#7d969f', '#d4a87d'][Math.floor(rng() * 5)],
+          ['#e9bd6b', '#ffe0a0', '#dca664', '#b98c64', '#ebc184'][Math.floor(rng() * 5)],
         );
     line(ctx, cx, bottom - height + 4 * s, cx, bottom, '#b3a079', s);
     line(
@@ -691,7 +731,235 @@ export class StichosRenderer {
     rect(ctx, cx - width * 0.65, bottom, width * 1.3, 3 * s, '#cad5df');
   }
 
+  private makeCathedral(b: Building, worldSeed: number): Roof {
+    const w = (b.maxX - b.minX + 1) * 32,
+      h = (b.maxY - b.minY + 1) * 32;
+    const canvas = document.createElement('canvas');
+    canvas.width = w + 112;
+    canvas.height = h + 338;
+    const ctx = canvas.getContext('2d')!,
+      rng = random(deriveSeed(worldSeed, b.id, 'cathedral'));
+    const x = 56,
+      top = 320,
+      front = top + h,
+      mid = x + w / 2;
+    const naveWidth = Math.min(232, w * 0.54),
+      naveX = mid - naveWidth / 2;
+    const wall = (left: number, foot: number, width: number, height: number) => {
+      rect(ctx, left, foot - height, width, height, '#263e52');
+      for (let row = 0; row < height / 9; row++)
+        for (let col = -1; col < width / 17; col++) {
+          const bx = left + col * 17 + (row % 2) * 8,
+            by = foot - height + row * 9;
+          const clippedX = Math.max(left, bx + 1),
+            end = Math.min(left + width, bx + 16);
+          if (end <= clippedX) continue;
+          const c = ['#485f74', '#50677c', '#3f586e', '#536b7f', '#455e73'][Math.floor(rng() * 5)];
+          rect(ctx, clippedX, by + 1, end - clippedX, 8, c);
+          if (rng() > 0.32)
+            rect(ctx, clippedX + 1, by + 1, Math.max(1, end - clippedX - 3), 1, color(c, 9));
+          if (rng() > 0.8) rect(ctx, clippedX + 2, by + 5, 3, 1, color(c, -9));
+        }
+      rect(ctx, left, foot - 9, width, 9, '#334d63');
+      rect(ctx, left - 2, foot - height - 3, width + 4, 5, '#adc2d7');
+      for (let i = 0; i < width / 9; i++) {
+        const bx = left + rng() * width;
+        rect(ctx, bx, foot - height - 5, 3 + rng() * 8, 3, '#d4e0ed');
+        if (rng() > 0.6) rect(ctx, bx + 2, foot - height - 1, 1, 3 + rng() * 6, '#adc8df');
+      }
+    };
+    const buttress = (bx: number, height: number, width = 16) => {
+      rect(ctx, bx - width / 2 - 4, front - height, width + 8, height, '#1e3549');
+      rect(ctx, bx - width / 2, front - height, width, height, '#61798d');
+      rect(ctx, bx + 2, front - height, width / 2 - 2, height, '#344f67');
+      for (let yy = front - 4; yy > front - height; yy -= 34) {
+        rect(ctx, bx - width / 2 - 2, yy, width + 4, 4, '#8198aa');
+        rect(ctx, bx - width / 2 - 2, yy, width + 3, 1, '#a6bccd');
+      }
+      poly(
+        ctx,
+        [
+          [bx - width / 2 - 5, front - height],
+          [bx, front - height - 29],
+          [bx + width / 2 + 5, front - height],
+        ],
+        '#3c566e',
+      );
+      line(ctx, bx - width / 2 - 5, front - height, bx, front - height - 29, '#d0dfee', 3);
+      rect(ctx, bx - 1, front - height - 40, 2, 12, '#a3ac9d');
+      rect(ctx, bx - 5, front - height - 36, 10, 2, '#a3ac9d');
+    };
+    // The side aisles retain a lower roof and wall; the center rises as a separate nave.
+    wall(x, front, w, 168);
+    for (const side of [-1, 1]) {
+      const a = side < 0 ? x : naveX + naveWidth,
+        end = side < 0 ? naveX : x + w;
+      poly(
+        ctx,
+        [
+          [a - 4, top - 18],
+          [end + 4, top - 18],
+          [end + 4, front - 169],
+          [a - 4, front - 169],
+        ],
+        '#29485f',
+      );
+      for (let yy = top - 14; yy < front - 176; yy += 8)
+        for (let xx = a; xx < end; xx += 13) {
+          rect(ctx, xx, yy, 12, 6, rng() > 0.5 ? '#385971' : '#315169');
+        }
+      for (let i = 0; i < 5; i++) {
+        const xx = a + rng() * (end - a),
+          yy = top + rng() * (front - 178 - top);
+        poly(
+          ctx,
+          [
+            [xx - 7, yy],
+            [xx + 20, yy - 4],
+            [xx + 38, yy + 2],
+            [xx + 31, yy + 8],
+            [xx - 4, yy + 6],
+          ],
+          '#bccfe2',
+        );
+      }
+      line(ctx, a - 5, front - 172, end + 4, front - 172, '#c9d9e7', 5);
+      const bayCount = Math.max(1, Math.floor((end - a) / 52));
+      for (let i = 0; i < bayCount; i++) {
+        const bx = a + ((i + 0.5) * (end - a)) / bayCount;
+        this.window(ctx, bx, front - 25, 25, 113, deriveSeed(worldSeed, b.id, side, i));
+      }
+      buttress(side < 0 ? x + 3 : x + w - 3, 199, 21);
+      // Flying arches connect the lower outer aisle to the taller central structure.
+      const outer = side < 0 ? x + 21 : x + w - 21,
+        inner = mid + side * (naveWidth / 2 - 4);
+      poly(
+        ctx,
+        [
+          [outer, front - 172],
+          [outer, front - 191],
+          [inner, front - 249],
+          [inner, front - 228],
+        ],
+        '#607b91',
+      );
+      line(ctx, outer, front - 191, inner, front - 249, '#c5d7e7', 4);
+    }
+    wall(naveX, front, naveWidth, 259);
+    poly(
+      ctx,
+      [
+        [naveX - 4, front - 259],
+        [mid, front - 345],
+        [naveX + naveWidth + 4, front - 259],
+      ],
+      '#3a536a',
+    );
+    for (let row = 0; row < 9; row++) {
+      const yy = front - 337 + row * 9,
+        half = (((yy - (front - 345)) / 86) * naveWidth) / 2;
+      line(ctx, mid - half + 5, yy, mid + half - 5, yy, '#617a8f');
+    }
+    line(ctx, naveX - 7, front - 259, mid, front - 349, '#c6d7e6', 5);
+    line(ctx, mid, front - 349, naveX + naveWidth + 7, front - 259, '#8faec5', 5);
+    buttress(naveX + 5, 285, 22);
+    buttress(naveX + naveWidth - 5, 285, 22);
+    for (const side of [-1, 1])
+      this.window(
+        ctx,
+        mid + side * 70,
+        front - 24,
+        25,
+        187,
+        deriveSeed(worldSeed, b.id, 'nave', side),
+      );
+    // Rose glass, lead tracery and a botanical rosette above the recessed portal.
+    const roseY = front - 213;
+    ctx.fillStyle = '#263b50';
+    ctx.beginPath();
+    ctx.arc(mid, roseY, 31, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = '#8da3b5';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    for (let petal = 0; petal < 8; petal++) {
+      const a = (petal / 8) * TAU;
+      poly(
+        ctx,
+        [
+          [mid + Math.cos(a) * 6, roseY + Math.sin(a) * 6],
+          [mid + Math.cos(a - 0.22) * 23, roseY + Math.sin(a - 0.22) * 23],
+          [mid + Math.cos(a) * 27, roseY + Math.sin(a) * 27],
+          [mid + Math.cos(a + 0.22) * 23, roseY + Math.sin(a + 0.22) * 23],
+        ],
+        petal % 2 ? '#eac074' : '#c68d64',
+      );
+    }
+    rect(ctx, mid - 3, roseY - 3, 6, 6, '#ffe5a2');
+    this.window(ctx, mid, front - 273, 25, 48, deriveSeed(worldSeed, b.id, 'upper'));
+    // Concentric stone archivolts give the entrance visible thickness and shadow.
+    for (let layer = 0; layer < 5; layer++) {
+      const half = 55 - layer * 5,
+        peak = 151 - layer * 7;
+      poly(
+        ctx,
+        [
+          [mid - half, front],
+          [mid - half, front - peak * 0.63],
+          [mid, front - peak],
+          [mid + half, front - peak * 0.63],
+          [mid + half, front],
+        ],
+        ['#233b50', '#8ca2b4', '#405b72', '#738b9e', '#132b3d'][layer],
+      );
+    }
+    line(ctx, mid - 59, front - 99, mid, front - 159, '#d7e2ec', 5);
+    line(ctx, mid, front - 159, mid + 59, front - 99, '#a4bfd5', 4);
+    // Cloth standards sit against blank stone, leaving the glass and central door clear.
+    for (const side of [-1, 1]) {
+      const bx = mid + side * (naveWidth / 2 + 31),
+        by = front - 143;
+      rect(ctx, bx - 17, by - 6, 35, 3, '#a88e5e');
+      poly(
+        ctx,
+        [
+          [bx - 14, by],
+          [bx + 14, by],
+          [bx + 14, by + 78],
+          [bx, by + 90],
+          [bx - 14, by + 78],
+        ],
+        '#213f4a',
+      );
+      line(ctx, bx - 12, by + 2, bx - 12, by + 76, '#b39a65');
+      line(ctx, bx + 12, by + 2, bx + 12, by + 76, '#b39a65');
+      line(ctx, bx - 12, by + 76, bx, by + 87, '#b39a65');
+      line(ctx, bx, by + 87, bx + 12, by + 76, '#b39a65');
+      line(ctx, bx, by + 19, bx, by + 65, '#c1ac7d', 2);
+      for (let j = 0; j < 5; j++)
+        for (const s of [-1, 1])
+          line(ctx, bx, by + 57 - j * 7, bx + s * (8 - j * 0.7), by + 50 - j * 7, '#c1ac7d');
+      rect(ctx, bx - 18, by - 8, 33, 2, '#d0e0ed');
+    }
+    // Warm wall lanterns are architectural fixtures, independent of ground collision.
+    for (const side of [-1, 1]) {
+      const bx = mid + side * 60;
+      rect(ctx, bx - 2, front - 62, 4, 22, '#1c303f');
+      rect(ctx, bx - 5, front - 61, 10, 15, '#bf9864');
+      rect(ctx, bx - 3, front - 58, 6, 10, '#ffe1a0');
+      rect(ctx, bx - 6, front - 64, 12, 3, '#536478');
+      rect(ctx, bx - 5, front - 46, 10, 3, '#283b4d');
+    }
+    for (let step = 0; step < 5; step++) {
+      const sw = 113 + step * 12;
+      rect(ctx, mid - sw / 2, front + step * 3, sw, 3, '#5b7389');
+      rect(ctx, mid - sw / 2, front + step * 3, sw, 1, '#b7ccdd');
+    }
+    return { sprite: { image: canvas, x: 56, y: 320 }, width: canvas.width, height: canvas.height };
+  }
+
   private makeRoof(b: Building, worldSeed: number): Roof {
+    if (b.cathedral) return this.makeCathedral(b, worldSeed);
     const cols = b.maxX - b.minX + 1,
       rows = b.maxY - b.minY + 1,
       width = cols * 32 + 48,
@@ -1013,15 +1281,25 @@ export class StichosRenderer {
 
   private glow(x: number, y: number, radius: number, tint: string, alpha: number) {
     const ctx = this.ctx;
+    let sprite = this.lightSprites.get(tint);
+    if (!sprite) {
+      sprite = document.createElement('canvas');
+      sprite.width = sprite.height = 128;
+      const light = sprite.getContext('2d')!,
+        g = light.createRadialGradient(64, 64, 0, 64, 64, 64);
+      g.addColorStop(0, tint);
+      g.addColorStop(0.35, tint + '8a');
+      g.addColorStop(1, tint + '00');
+      light.fillStyle = g;
+      light.fillRect(0, 0, 128, 128);
+      this.lightSprites.set(tint, sprite);
+      while (this.lightSprites.size > 16)
+        this.lightSprites.delete(this.lightSprites.keys().next().value!);
+    }
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
     ctx.globalAlpha = alpha;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    g.addColorStop(0, tint);
-    g.addColorStop(0.35, tint + '8a');
-    g.addColorStop(1, tint + '00');
-    ctx.fillStyle = g;
-    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    ctx.drawImage(sprite, x - radius, y - radius, radius * 2, radius * 2);
     ctx.restore();
   }
 
@@ -1121,21 +1399,40 @@ export class StichosRenderer {
   private atmosphere(game: Stichos, reduced: boolean) {
     const ctx = this.ctx;
     ctx.save();
-    ctx.fillStyle = '#1837580b';
-    ctx.fillRect(0, 0, this.width, this.height);
-    const vignette = ctx.createRadialGradient(
-      this.width * 0.5,
-      this.height * 0.5,
-      Math.min(this.width, this.height) * 0.16,
-      this.width * 0.5,
-      this.height * 0.5,
-      Math.max(this.width, this.height) * 0.72,
-    );
-    vignette.addColorStop(0, '#0a203900');
-    vignette.addColorStop(0.6, '#18314905');
-    vignette.addColorStop(1, '#08203868');
-    ctx.fillStyle = vignette;
-    ctx.fillRect(0, 0, this.width, this.height);
+    if (!this.atmosphereLayer) {
+      const canvas = document.createElement('canvas');
+      canvas.width = this.width;
+      canvas.height = this.height;
+      const layer = canvas.getContext('2d')!;
+      layer.fillStyle = '#1837580b';
+      layer.fillRect(0, 0, this.width, this.height);
+      const vignette = layer.createRadialGradient(
+        this.width * 0.5,
+        this.height * 0.5,
+        Math.min(this.width, this.height) * 0.16,
+        this.width * 0.5,
+        this.height * 0.5,
+        Math.max(this.width, this.height) * 0.72,
+      );
+      vignette.addColorStop(0, '#0a203900');
+      vignette.addColorStop(0.6, '#18314905');
+      vignette.addColorStop(1, '#08203868');
+      layer.fillStyle = vignette;
+      layer.fillRect(0, 0, this.width, this.height);
+      layer.globalAlpha = 0.04;
+      for (let i = 0; i < 3; i++) {
+        const x = this.width * (0.13 + i * 0.36),
+          y = this.height * (0.25 + i * 0.26),
+          r = this.width * 0.27;
+        const fog = layer.createRadialGradient(x, y, 0, x, y, r);
+        fog.addColorStop(0, '#c2dce5');
+        fog.addColorStop(1, '#c2dce500');
+        layer.fillStyle = fog;
+        layer.fillRect(x - r, y - r / 3, r * 2, (r * 2) / 3);
+      }
+      this.atmosphereLayer = canvas;
+    }
+    ctx.drawImage(this.atmosphereLayer, 0, 0, this.width, this.height);
     const time = reduced ? 0 : game.time;
     const rng = random(deriveSeed(game.world.seed, 'snowfall'));
     for (let i = 0; i < Math.min(220, (this.width * this.height) / 5400); i++) {
@@ -1153,17 +1450,6 @@ export class StichosRenderer {
         ) * this.height;
       ctx.globalAlpha = 0.16 + depth * 0.35;
       rect(ctx, x, y, depth > 1 ? 2 : 1, depth > 1 ? 3 : 1, '#eff6fa');
-    }
-    ctx.globalAlpha = 0.05;
-    for (let i = 0; i < 3; i++) {
-      const x = (fract(i * 0.37 + time * 0.004 - this.camera.x * 0.01) * 1.5 - 0.25) * this.width;
-      const y = this.height * (0.25 + i * 0.26),
-        r = this.width * 0.27;
-      const fog = ctx.createRadialGradient(x, y, 0, x, y, r);
-      fog.addColorStop(0, '#c2dce5');
-      fog.addColorStop(1, '#c2dce500');
-      ctx.fillStyle = fog;
-      ctx.fillRect(x - r, y - r / 3, r * 2, (r * 2) / 3);
     }
     ctx.restore();
   }

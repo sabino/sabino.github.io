@@ -12,6 +12,8 @@ Target: `.dream-loop/stichos/target.png`.
 
 The second rendering pass adds a tall Gothic cathedral façade with stained-glass bays, snow-loaded buttresses and clan standards; lower-contrast slate with irregular snow loads; broader humanoid silhouettes; stronger local lamp illumination; and movement-driven walking phases. Browser frame rate is reported separately in the QA evidence rather than inferred from these optimizations.
 
+The third pass uses the revised real cathedral footprint for a stepped central nave and lower side aisles, flying buttresses, rose glass, deep concentric portal masonry and broad stairs. Roads use a narrower tonal range, while tree spread, tier spacing and snow loading vary independently. Humanoids are composed into a bounded384-frame pose cache from their actual appearance, heading, gait and attack state; the renderer also caches building lists for128 chunks,16 lamp gradient textures and a viewport-sized atmospheric overlay. Dynamic snow, contact shadows, names, effects and occlusion remain evaluated during drawing. The reference's degree of illustrative material detail remains a visual target, not a claim about the current implementation.
+
 Original tool output: `/home/sabino/.codex/generated_images/01a08d5c-e5f4-7903-b93d-a687f2208046/exec-af0190be-36b0-4694-91fd-ced7222ecd88.png`.
 
 ## Generation prompt

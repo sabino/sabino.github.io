@@ -499,7 +499,9 @@ export class StichosArt {
         const cx = 56 + (rng() - 0.5) * 5,
           foot = 148,
           top = 10 + rng() * 15,
-          lean = (rng() - 0.5) * 8;
+          lean = (rng() - 0.5) * 15,
+          spread = 0.78 + rng() * 0.3,
+          tierSpacing = 12 + rng() * 3;
         rect(ctx, cx - 5, foot - 68, 11, 67, '#253942');
         for (let i = 0; i < 20; i++)
           rect(
@@ -513,8 +515,8 @@ export class StichosArt {
         for (const side of [-1, 1])
           line(ctx, cx, foot - 8, cx + side * (10 + rng() * 6), foot, '#53686d', 3);
         for (let tier = 0; tier < 8; tier++) {
-          const y = foot - 25 - tier * 14,
-            half = (45 - tier * 4.6) * (0.88 + rng() * 0.14),
+          const y = foot - 25 - tier * tierSpacing + (rng() - 0.5) * 7,
+            half = (45 - tier * 4.6) * spread * (0.86 + rng() * 0.2),
             offset = (lean * tier) / 8;
           const pts: number[][] = [[cx + offset, y - 40]];
           for (let j = 0; j <= 12; j++) {
@@ -540,11 +542,11 @@ export class StichosArt {
                 rng() > 0.65 ? '#6b8990' : '#315867',
               );
             }
-            if (branch % 3 !== 1 || rng() > 0.35) {
+            if (rng() > 0.31) {
               const sw = 4 + rng() * 8;
               blob(ctx, x, by - 3, sw, 3 + rng() * 3, '#a6bad4', rng);
-              blob(ctx, x - 1, by - 6, sw * 0.9, 3 + rng() * 2, '#d5e0ef', rng);
-              rect(ctx, x - sw * 0.5, by - 8, sw, 1, '#edf1f5');
+              blob(ctx, x - 1, by - 6, sw * 0.9, 3 + rng() * 2, '#cad9e9', rng);
+              if (rng() > 0.4) rect(ctx, x - sw * 0.5, by - 8, sw * 0.7, 1, '#e6eef5');
               if (rng() > 0.5) rect(ctx, x + sw * 0.5, by - 2, 1, 3 + rng() * 4, '#c5d7e6');
             }
           }
@@ -706,8 +708,80 @@ export class StichosArt {
   }
 }
 
-/** Human proportions remain stable; gait moves arms, legs, cloak and carried tools. */
+const humanFrames = new Map<string, Sprite>();
+
+/** Discrete articulated pixel poses are cached; travel selects a gait phase, never a baked actor. */
 export function drawHumanoid(
+  ctx: Ctx,
+  look: Appearance,
+  x: number,
+  y: number,
+  scale: number,
+  heading: number,
+  phase: number,
+  moving: boolean,
+  attack = 0,
+  player = false,
+) {
+  const gait = moving ? ((Math.round((phase / (Math.PI * 2)) * 8) % 8) + 8) % 8 : 0;
+  const strike = Math.round(attack * 5);
+  const key = [
+    look.seed,
+    look.coat,
+    look.trim,
+    look.skin,
+    look.hair,
+    look.hairStyle,
+    look.hat,
+    look.cloak,
+    look.height,
+    look.build,
+    look.trousers,
+    look.weapon,
+    heading,
+    gait,
+    moving,
+    strike,
+  ].join(':');
+  let frame = humanFrames.get(key);
+  if (!frame) {
+    frame = image(
+      96,
+      80,
+      (context) =>
+        drawHumanoidParts(
+          context,
+          look,
+          48,
+          68,
+          1,
+          heading,
+          (gait / 8) * Math.PI * 2,
+          moving,
+          strike / 5,
+          player,
+        ),
+      48,
+      68,
+    );
+    humanFrames.set(key, frame);
+    while (humanFrames.size > 384) humanFrames.delete(humanFrames.keys().next().value!);
+  } else {
+    humanFrames.delete(key);
+    humanFrames.set(key, frame);
+  }
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(
+    frame.image,
+    Math.round(x - frame.x * scale),
+    Math.round(y - frame.y * scale),
+    Math.round(frame.image.width * scale),
+    Math.round(frame.image.height * scale),
+  );
+}
+
+/** Human proportions remain stable; gait moves arms, legs, cloak and carried tools. */
+function drawHumanoidParts(
   ctx: Ctx,
   look: Appearance,
   x: number,
