@@ -162,6 +162,7 @@ export interface Effect extends Point {
   color: string;
   heading?: number;
   text?: string;
+  tool?: { kind: 'axe' | 'pickaxe' | 'sickle'; seed: number };
 }
 export interface Quest {
   id: string;

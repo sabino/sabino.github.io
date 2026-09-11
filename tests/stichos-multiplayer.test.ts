@@ -7,6 +7,7 @@ import { InfiniteWorld, appearance } from '../src/stichos/world.ts';
 import { MultiplayerConnection } from '../src/stichos/multiplayer.ts';
 import { resolveForge } from '../src/stichos/forge.ts';
 import { generateArtifact } from '../src/stichos/artifacts.ts';
+import { artifactToolKind } from '../src/stichos/labor.ts';
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const look = () => ({ ...appearance(42, 'pilgrim', 1), weapon: 'staff' });
@@ -99,7 +100,14 @@ test('two real sockets share humanoid presence, emotes and an atomic single-winn
     peerId: alice.welcome.peerId,
     gesture: 'wave',
   });
-  const request = { type: 'claim', propId: 'origin:cequin', kind: 'gather', x: -2, y: 5 };
+  const request = {
+    type: 'claim',
+    propId: 'origin:cequin',
+    kind: 'gather',
+    toolKind: 'sickle',
+    x: -2,
+    y: 5,
+  };
   // Both frames enter independent network connections before either winner is observed.
   alice.send({ ...request, requestId: 'alice-harvest' });
   bob.send({ ...request, requestId: 'bob-harvest' });
@@ -132,6 +140,7 @@ test('claims require a real nearby object, correct action, coordinates and harve
       requestId: id,
       propId: 'origin:cequin',
       kind: 'gather',
+      toolKind: 'sickle',
       x: -2,
       y: 5,
       ...extra,
@@ -174,11 +183,86 @@ test('claims require a real nearby object, correct action, coordinates and harve
     phase: 0,
     appearance: look(),
   });
-  assert.equal((await attempt('staff-tool', { propId: pine.id, x: pine.x, y: pine.y })).ok, true);
+  assert.equal(
+    (
+      await attempt('staff-cannot-mine', {
+        propId: pine.id,
+        x: pine.x,
+        y: pine.y,
+        toolKind: undefined,
+      })
+    ).ok,
+    false,
+  );
+  assert.equal(
+    (
+      await attempt('wrong-real-tool', {
+        propId: pine.id,
+        x: pine.x,
+        y: pine.y,
+        toolKind: 'pickaxe',
+      })
+    ).ok,
+    false,
+  );
+  assert.equal(
+    (await attempt('axe-tool', { propId: pine.id, x: pine.x, y: pine.y, toolKind: 'axe' })).ok,
+    true,
+  );
   assert.ok(
     !room.world.blocked(pine.x, pine.y, room.removed),
     'successful timber gathering opens the real shared collision cell',
   );
+});
+
+test('a generated artifact must have the actual resource specialization while legacy worlds retain their old staff contract', async (t) => {
+  const { url } = await serverFixture(t);
+  const world = new InfiniteWorld(3886, 3),
+    pine = world.propsAround(-5, 4, 1).find((p) => p.kind === 'pine')!;
+  const generated = Array.from({ length: 512 }, (_, i) => generateArtifact(`labor/tool/${i}`));
+  const axe = generated.find((g) => artifactToolKind(g) === 'axe')!;
+  const pickaxe = generated.find((g) => artifactToolKind(g) === 'pickaxe')!;
+  const modern = await join(url, {
+    position: adjacent(world, pine),
+    appearance: { ...look(), artifactDesign: pickaxe.design },
+  });
+  modern.send({
+    type: 'claim',
+    requestId: 'wrong-artifact',
+    propId: pine.id,
+    kind: 'gather',
+    x: pine.x,
+    y: pine.y,
+  });
+  assert.equal((await modern.next('claimResult')).ok, false);
+  modern.send({
+    type: 'pose',
+    ...adjacent(world, pine),
+    heading: 0,
+    phase: 0,
+    appearance: { ...look(), artifactDesign: axe.design },
+  });
+  modern.send({
+    type: 'claim',
+    requestId: 'right-artifact',
+    propId: pine.id,
+    kind: 'gather',
+    x: pine.x,
+    y: pine.y,
+  });
+  assert.equal((await modern.next('claimResult')).ok, true);
+  const oldWorld = new InfiniteWorld(3886, 1),
+    oldPine = oldWorld.propsAround(-5, 4, 1).find((p) => p.kind === 'pine')!;
+  const legacy = await join(url, { generation: 1, position: adjacent(oldWorld, oldPine) });
+  legacy.send({
+    type: 'claim',
+    requestId: 'old-staff',
+    propId: oldPine.id,
+    kind: 'gather',
+    x: oldPine.x,
+    y: oldPine.y,
+  });
+  assert.equal((await legacy.next('claimResult')).ok, true);
 });
 
 test('generated loot is opened once and door state cannot close over another connected traveler', async (t) => {
@@ -266,6 +350,7 @@ test('disconnect broadcasts departure and a private valid token restores identit
     requestId: 'before-disconnect',
     propId: 'origin:cequin',
     kind: 'gather',
+    toolKind: 'sickle',
     x: -2,
     y: 5,
   });
@@ -292,6 +377,7 @@ test('disconnect broadcasts departure and a private valid token restores identit
     requestId: 'after-disconnect',
     propId: 'origin:cequin',
     kind: 'gather',
+    toolKind: 'sickle',
     x: -2,
     y: 5,
   });
@@ -389,7 +475,7 @@ test('the actual browser client preserves gather and loot actions when given ful
   const plant = room.world.propsAround(-2, 5, 0).find((p: any) => p.id === 'origin:cequin');
   assert.ok(plant);
   assert.equal(plant.kind, 'cequin');
-  assert.equal((await client.claim(plant.id, 'gather', plant)).ok, true);
+  assert.equal((await client.claim(plant.id, 'gather', plant, 'sickle')).ok, true);
   assert.ok(room.removed.has(plant.id));
   const chest = room.world.propsAround(0, 0, 30).find((p: any) => p.kind === 'chest');
   assert.ok(chest);
@@ -405,14 +491,12 @@ test('the actual browser client preserves gather and loot actions when given ful
     ['gather', 'loot'],
   );
   for (const message of frames)
-    assert.deepEqual(Object.keys(message).sort(), [
-      'kind',
-      'propId',
-      'requestId',
-      'type',
-      'x',
-      'y',
-    ]);
+    assert.deepEqual(
+      Object.keys(message)
+        .filter((key) => key !== 'toolKind')
+        .sort(),
+      ['kind', 'propId', 'requestId', 'type', 'x', 'y'],
+    );
 });
 
 test('forged item appearance travels with the peer while invalid seeds cannot replace its body or weapon', async (t) => {

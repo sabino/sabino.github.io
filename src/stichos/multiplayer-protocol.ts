@@ -34,6 +34,7 @@ export type MultiplayerClientMessage =
       kind: 'gather' | 'loot';
       x: number;
       y: number;
+      toolKind?: 'axe' | 'pickaxe' | 'sickle';
     }
   | { type: 'door'; requestId: string; propId: string; open: boolean }
   | { type: 'emote'; gesture: MultiplayerGesture };

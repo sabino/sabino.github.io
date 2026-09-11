@@ -209,8 +209,21 @@ export class MultiplayerConnection {
       appearance,
     });
   }
-  claim(propId: string, kind: 'gather' | 'loot', point: Point) {
-    return this.request({ type: 'claim', requestId: '', propId, kind, x: point.x, y: point.y });
+  claim(
+    propId: string,
+    kind: 'gather' | 'loot',
+    point: Point,
+    toolKind?: 'axe' | 'pickaxe' | 'sickle',
+  ) {
+    return this.request({
+      type: 'claim',
+      requestId: '',
+      propId,
+      kind,
+      x: point.x,
+      y: point.y,
+      ...(toolKind === undefined ? {} : { toolKind }),
+    });
   }
   door(propId: string, open: boolean) {
     return this.request({ type: 'door', requestId: '', propId, open });

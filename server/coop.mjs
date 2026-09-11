@@ -2,7 +2,8 @@ import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import WebSocket, { WebSocketServer } from 'ws';
 import { InfiniteWorld } from '../src/stichos/world.ts';
-import { normalizeArtifactDesign } from '../src/stichos/artifacts.ts';
+import { generateArtifact, normalizeArtifactDesign } from '../src/stichos/artifacts.ts';
+import { artifactToolKind, requiredToolFor } from '../src/stichos/labor.ts';
 import { MULTIPLAYER_PROTOCOL, MAX_ROOM_PLAYERS } from '../src/stichos/multiplayer-protocol.ts';
 
 const MAX_COORDINATE = Number.MAX_SAFE_INTEGER - 4096;
@@ -374,6 +375,7 @@ export class CoopRooms {
       message.x,
       message.y,
       message.open,
+      message.toolKind,
     ]);
     const old = member.requests.get(message.requestId);
     if (old) {
@@ -439,8 +441,21 @@ export class CoopRooms {
       return result(false, 'Another traveler already gathered or searched this object.');
     if (message.kind === 'gather') {
       if (!GATHERABLE.has(prop.kind)) return result(false, 'That object cannot be gathered.');
-      if (['pine', 'rock'].includes(prop.kind) && member.appearance.weapon !== 'staff')
-        return result(false, 'Equip the staff to gather timber or ore.');
+      const required = requiredToolFor(prop.kind);
+      const artifact = member.appearance.artifactDesign
+        ? artifactToolKind(generateArtifact(member.appearance.artifactDesign))
+        : null;
+      const legacy =
+        room.generation < 3 && message.toolKind === undefined && !member.appearance.artifactDesign;
+      if (!legacy && message.toolKind !== required && artifact !== required)
+        return result(false, `This resource requires a ${required}.`);
+      if (
+        message.toolKind !== undefined &&
+        !['axe', 'pickaxe', 'sickle'].includes(message.toolKind)
+      )
+        return result(false, 'Unknown gathering tool.');
+      if (legacy && ['pine', 'rock'].includes(prop.kind) && member.appearance.weapon !== 'staff')
+        return result(false, 'Equip the legacy staff or an appropriate work tool.');
       room.removed.add(prop.id);
       result(true);
       this.broadcast(room, { type: 'world', actorId: member.id, removed: [prop.id] });
