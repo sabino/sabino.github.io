@@ -1,6 +1,6 @@
 BRAVOCALYPSE! — Third-party software notices
 
-Game assets and music have separate credits in models/CREDITS.md, songs/CREDITS.md and soundfonts/LICENSE.txt.
+Game assets, music and recorded sound effects have separate credits in models/CREDITS.md, songs/CREDITS.md, sfx/CREDITS.md and soundfonts/LICENSE.txt.
 
 
 ========================================================================
