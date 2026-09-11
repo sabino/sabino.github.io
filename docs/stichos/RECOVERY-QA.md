@@ -1,5 +1,7 @@
 # Combat death and mind recovery QA
 
+> Historical browser proof for the named pre-universe build. Its file-import/download controls are no longer part of the current main UI. Current lives use autosave and Continue; this record preserves the original fixture provenance, not a current recovery instruction.
+
 The frozen production build `app-xdAHfhHA.js` passed six actual-input checks in an isolated Agent Workspace Chromium context on 11 September 2026. The context was disposed afterward. Runtime exceptions: zero.
 
 The harness imports `before-first-encounter.json` through the visible Import save control and intercepted native file chooser. That fixture was earned by the campaign simulation’s public actions; it contains a living priest, an unreconciled first vault encounter, and a repaired radio. The browser then selects confrontation, walks 138.2 additional paces along the actual road and vault passages, and waits under real guard attacks. It never assigns gameplay state, storage, position, inventory or health. Read-only diagnostics supply collision information and assertions.

@@ -1,12 +1,24 @@
 # Release verification · 2026-09-11
 
-## Public GitHub Pages release
+## Current source and local preview
+
+The source at `c667dfd` passed **345/345 automated tests in 67.69 seconds**, plus formatting and production build checks. Its frozen output is `app-BsBd1dau.js`, CSS `app-BbuTIZnE.css`, service worker `d19dcf298d5a2831573b`. The new public-frequency, chat, tab-lock and saved-host browser acceptance is pending at this documentation checkpoint; the earlier results below must not be stretched to cover it. Publication of this newer build has not been asserted here.
+
+The previous local checkpoint `app-tZDgoFWJ.js` / `app-B_fqJ_rx.css` passed **10 universe/creation/invitation checks** and **9 constructed-production checks**, with zero runtime errors in both runs. The first uses real mobile/desktop controls, a native color picker, chosen-resident arrival, reload, cancellation, galaxy navigation, QR/link invitations and code-only joining. The second gathers real timber/ore with tools, constructs a bed for exact costs, advances an 80-second batch through active walking, prevents remote collection, awards three portions once and reloads the same life. [Universe proof](UNIVERSE-QA.md), [production proof](PRODUCTION.md).
+
+The current-source eight-participant PeerJS/RTC fixture passed **6/6 checks at 15:36 UTC**: eight fresh nonce signatures, seven remote proofs tied to the actual host DTLS fingerprints, eight verified 22,592-byte signed public checkpoints after chunked transport, combat frames up to 23,194 bytes, and signalling reconnection without losing sessions or repeating welcome. Evidence: `.dream-loop/stichos-peer-transport/fixture.json` and `fixture.png`. It used actual RTC connections in a disposable context; it is a transport proof, not eight humans or another full gameplay route.
+
+The optional native Pear package passed **4/4 integration tests in 2.027 seconds** at `fde8d7b`. Two actual Hyperswarm instances discover over an isolated local DHT, replicate signed public checkpoints, restart from disk and continue with the original writer key. Tests also reject private fields, bad signatures, conflicting revisions and malicious transport-valid blocks, and check authentication, origins and quotas. This is not an Internet reachability or packaged Pear desktop proof. [Native package](../../pear-node/README.md).
+
+Current user flows are described in [UNIVERSE.md](UNIVERSE.md). Normal life storage is automatic and browser-local. **The main UI no longer provides routine Download save or Restore a save controls.** All file-import/export browser results and scripts below are historical checks of explicitly named older builds; they are retained for provenance, not presented as current UI instructions. The unique-life preview uses actual reload/Continue for persistence. Native PWA installation and model inference have not been verified; the optional AI companion explicitly does not generate NPC dialogue.
+
+## Last verified public deployment · earlier UI
 
 **[Play Verso](https://sabino.pro/games/verso/)** is deployed from Pages commit `3db0182`, successful run `34571768214`. Public build `app-CxKixEoO.js` passed 8 real two-browser room checks (including identical raider HP and one shared defeat), 4 game/mobile/Compact/cosmetic checks, and 7 actual save/import/offline checks. Cosmetic purchase controls were present and disabled. Public JavaScript, manifest and service worker match the local build byte-for-byte. The offline cache is scoped to `https://sabino.pro/games/verso/` and contains 23 assets. [Deployment details](PAGES.md).
 
 A separate source-only eight-participant RTC fixture reassembled complete combat frames above 22 KB and signalling reconnection without duplicate welcomes, then closed all transports. Evidence: `.dream-loop/stichos-peer-transport/fixture.json`. The fixture does not stand in for eight human players on separate networks.
 
-The full automated suite passed **315/315** in **74.754 seconds**, with no failures or skipped tests. Output: `.dream-loop/release-tests.log`. Coverage includes the complete 24-lead campaign with timed tool work, generated terrain and artifacts, body possessions, physical household workers, payment mocks, strict save imports, shared combat, and the Winter Compact.
+That earlier release’s full automated suite passed **315/315** in **74.754 seconds**, with no failures or skipped tests. Output: `.dream-loop/release-tests.log`. Coverage includes the complete 24-lead campaign with timed tool work, generated terrain and artifacts, body possessions, physical household workers, payment mocks, strict save imports, shared combat, and the Winter Compact.
 
 Before publication, the tested production checkpoint was **`app-fJn9TLqE.js`**, with `app-DrgXZaZt.css`, served at `http://localhost:4174/`. Eight real-browser PeerJS checks passed using public signalling and actual RTC data channels: two travelers connected, moved and waved; only one body received the final-stroke harvest; both saw the same raider wound at 55 HP and its eventual defeat; reconnect preserved exhausted resources; and host departure disconnected the visitor explicitly. There were no browser exceptions. Evidence: [room results](../../.dream-loop/stichos-peer-rooms/results.json) and [shared defeat](../../.dream-loop/stichos-peer-rooms/03-shared-raider-defeat.png).
 
@@ -134,9 +146,9 @@ Screenshots and detailed results: [full route evidence](../../.dream-loop/sticho
 
 The full-route sample was 53.9 foreground RAF FPS. Round05 measured 55.6 FPS at default zoom and 50.1 FPS at minimum zoom0.65 near the cathedral. After the expedition, the dense forest at (−80,40) measured 58.0 foreground FPS at zoom0.65, with 519 unique organic sprites in the viewport plus sprite-margin footprint. CPU profiles accompany both wide-view samples. These observations describe this isolated browser session rather than a controlled hardware benchmark. [Round05 scene](../../.dream-loop/stichos/round-05.png), [equipment panel](../../.dream-loop/stichos/round-05-gear.png), and [dense forest](../../.dream-loop/stichos-expedition/10-dense-forest-minimum-zoom.png) are preserved separately. Audio listening quality, prolonged combat balance, and the southern-wall visual cutaway remain unverified. Browser-driven combat death and stable-signal mind recovery were subsequently verified in [Recovery QA](RECOVERY-QA.md); clinic revival remains a separate unverified browser branch.
 
-## Repeat
+## Historical harness reproduction
 
-Discover the active workspace-owned endpoint with `workspace_browser_targets`, then run:
+These commands document the older UI checkpoints below. Several require removed title or file-import controls and are not the current main-UI acceptance route. Use `browser-universe.mjs`, `browser-production.mjs` and `browser-peer-rooms.mjs` against a verified workspace endpoint for the current flows. Reproduce an archived run only against its corresponding checkout/build:
 
 ```sh
 node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/' --atlas
@@ -148,9 +160,9 @@ node scripts/browser-multiplayer-check.mjs http://127.0.0.1:PORT 'http://localho
 node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/' --visual --visual-name=round-05 --mobile --profile
 ```
 
-The endpoint is ephemeral. Full QA creates and closes its own tab on the localhost QA origin; `--possession` continues its legitimately played save. Full QA also downloads a reusable campaign save to the workspace mount and copies it into ignored evidence; both paths are recorded in `results.json`. Import through the game's Restore a save control if needed. `--visual` and `--expedition` create and dispose separate browser contexts, preserving the completed campaign. The storage harness also uses a separate context. Add `--smoke` for only opening, controls, mobile, and saved continuation. Each run writes ignored results; a full run writes `REPORT.md` there instead of replacing this combined review.
+The endpoint is ephemeral. Full QA creates and closes its own tab on the localhost QA origin; `--possession` continues its legitimately played save. Full QA also downloads a reusable campaign save to the workspace mount and copies it into ignored evidence; both paths are recorded in `results.json`. The archived harness used that build’s now-removed Restore a save control. `--visual` and `--expedition` create and dispose separate browser contexts, preserving the completed campaign. The storage harness also uses a separate context. Add `--smoke` for only opening, controls, mobile, and saved continuation. Each run writes ignored results; a full run writes `REPORT.md` there instead of replacing this combined review.
 
-The current generation-3 checks are `--atlas`, `--visual`, and storage. The full-route harness chooses a 240-tile journey for generation 3 and 110 tiles for older worlds; the current full opening chain has not yet been repeated end-to-end after the spacing change. The archived `--expedition` route expects the generation-2 checkpoint recorded above, including its former 80-tile road lattice; it is not a current-generation atlas test.
+At that archived checkpoint, the generation-3 checks were `--atlas`, `--visual`, and storage. The full-route harness chooses a 240-tile journey for generation 3 and 110 tiles for older worlds; the current full opening chain has not yet been repeated end-to-end after the spacing change. The archived `--expedition` route expects the generation-2 checkpoint recorded above, including its former 80-tile road lattice; it is not a current-generation atlas test.
 
 ## Campaign, ending and free-life browser checkpoint
 
@@ -160,7 +172,7 @@ Verified with real mouse/keyboard input: the Calling page hides the ending befor
 
 Evidence is in `.dream-loop/stichos-campaign-browser/results.json` and numbered screenshots. `08b-furnished-interior.png` follows an actual walk through the owned inn's south doorway. `04-ending.png` shows the final acknowledgement; `10-remembered-pages.png` shows the distinct memory record in another body.
 
-Reproduce after generating the action-earned fixtures:
+For the archived file-import UI, the recorded fixture-generation and reproduction commands were:
 
 ```sh
 VERSO_QA_FIXTURES=1 node --experimental-strip-types --test --test-name-pattern='whole generation-three' tests/stichos-campaign.test.ts
@@ -185,4 +197,4 @@ Evidence: [structured results](../../.dream-loop/stichos-forge-browser/results.j
 node scripts/browser-stichos-campaign.mjs http://127.0.0.1:WORKSPACE_CDP_PORT http://localhost:4174/ --forge
 ```
 
-The fixtures must first be generated with the command above. This mode uses only actual UI input and read-only diagnostics, creates its own browser context, and removes its temporary mounted import copies after closing it.
+For its archived UI, the fixtures were first generated with the command above. That mode uses only actual UI input and read-only diagnostics, creates its own browser context, and removes its temporary mounted import copies after closing it.

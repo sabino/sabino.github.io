@@ -1,48 +1,69 @@
-# Verso — Destino: Stíchos
+# Verso
 
-A continuous browser RPG based on Sabino's **Destino: Stíchos** story. Stíchos is the planet; **Vespera** is the starting city. You are Theo Bishop, an exceptionally intelligent traveler from the future, stranded for twenty local years in a priest's body. In the cold, cequin keeps people breathing. Six families compete over botanical knowledge, industrial production, and the future. The Sallas secret may explain the silence from home.
+A browser RPG of borrowed humanoid lives, botanical work and shared worlds. Choose a generated resident, customize their appearance, enter their existing home and profession, gather supplies, construct production, trade, explore and meet other players. The galaxy chart gives seeded planets shared addresses; live play happens in rooms of up to eight people.
 
-Walk beyond the cathedral, follow roads into other settlements, gather plants and materials, prepare medicine, trade, fight, and make promises to the people you meet. The terrain streams as you travel. There is no physical rift or extraction gate in this experience. Mind travel inhabits another living humanoid in the world.
+**Destino: Stíchos** remains a separate story start. Stíchos is the planet and **Vespera** its opening city. Theo Bishop, a traveler from the future, has spent twenty local years in a priest’s body after a failed signal. His Sallas investigation and the later Winter Compact remain playable alongside the livelihood systems.
 
-## Play
+## Play and run
 
-**[Play Verso in your browser](https://sabino.pro/games/verso/)**. The published edition supports offline solo play after its first complete load and browser-hosted cooperative rooms through **Together**. To carry progress from localhost, use **Pause → Download save**, then **Pause → Restore a save** on the published site.
+**[Published game](https://sabino.pro/games/verso/)**. [PAGES.md](docs/stichos/PAGES.md) records the last verified public deployment; the source and local preview can be newer. The current life/universe and construction browser proofs are recorded in [QA.md](docs/stichos/QA.md).
 
-Use **Node.js 26** (the verified runtime for this build).
+Use **Node.js 26**, the verified development runtime:
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open **http://localhost:4173**. For the production build:
+Open **http://localhost:4173**. For a static production build:
 
 ```sh
 npm run build
 npm run preview
 ```
 
-Open **http://localhost:4174**. This is now the default experience. The production `dist/` directory can be served by a static server, including beneath a URL subpath. Solo play works without an account, external assets, or model API. **Together → Browser-hosted room** also works from a static frontend: one browser hosts the room through PeerJS signalling and WebRTC. The host must keep the game open; share its seed, geography version and room code with friends.
+Open **http://localhost:4174**. `dist/` supports static hosting beneath a subpath. The base game needs neither an account nor a model API.
 
-For the optional dedicated room server and prepared cosmetic shop, keep another terminal running:
+## A continuing life
+
+**Choose a life** opens a rerollable resident preview. Name, age, profession, existing home, starting activity, body and initial supplies are generated from the planet and candidate index. Customize the name, colors, hair, headwear, cloak and build, then accept the person through the arrival sequence. Their professional strengths and finite kit affect play. **Theo Bishop’s story · Stíchos** starts the established priest instead; it does not replace an already remembered life on that planet.
+
+**Continue this life** resumes the browser’s current person. The **Galaxy** chart pans, zooms, changes sectors and selects planets. Visiting another planet privately retains the previous planet’s life; returning restores it, with its possessions and production. Physical inventory does not travel between planets. The same planet address currently uses the same cold botanical generation grammar, with seeded geography and inhabitants; these are not wholly different planetary simulations.
+
+**Pause → Leave this body** asks for confirmation before a new resident is accepted. Backing out keeps the present person. World changes and established possessions remain; a new body supplies its own identity and belongings. One tab may hold the continuing life when the browser supports Web Locks. This is browser-local continuity, not a cloud account or an anticheat guarantee. [Life and universe contract](docs/stichos/UNIVERSE.md).
+
+## Meet other players
+
+Open **Room**, leave its code blank to host a **Browser room**, and share the code, link or QR. A full invitation selects the correct planet and geography; code-only discovery can also find an online host’s world before life creation. PeerJS provides signalling and WebRTC carries the room traffic. The host must keep the game open. **Galaxy → Open public frequency** uses a deterministic rendezvous code for that planet, joining an available host or attempting to host it. A planet on the chart is not evidence of online players or an always-on service.
+
+Rooms share presence, gestures, Local/Room chat, hostile combat, doors, finite resource claims and registered production platforms. Personal health, inventory, tool condition, progression and story remain local. No PvP, global population simulation, authoritative MMO economy or automatic host migration is implemented.
+
+For an optional dedicated WebSocket room server:
 
 ```sh
 npm run server
 ```
 
-Select the game-server mode in **Together** to create or join an eight-person room on `ws://localhost:4175/ws`. A friend on your network opens `http://YOUR-LAN-IP:4173`, starts the same seed/geography, and uses your room code. Both transports share hostile raiders and vault guards, their health and attacks, resource claims and doors. Each player's story, body possessions and survival remain personal. Pausing withdraws that player from targeting while others continue. Read [MULTIPLAYER.md](docs/stichos/MULTIPLAYER.md) for room lifetime, reconnect receipts and hosting setup.
+Select **Room → Connection options → Dedicated world node** and use `ws://localhost:4175/ws` locally. Remote hosting needs suitable HTTPS/WSS and origin configuration. Signed checkpoints retain shared changes; restoring authority requires its private owner storage. [Multiplayer](docs/stichos/MULTIPLAYER.md) and [world persistence](docs/stichos/WORLD-PERSISTENCE.md) describe the boundaries.
 
-**Life → Cosmetic shop** previews three real-money outfits. Purchases are disabled until the owner configures Stripe prices, keys and a webhook. Paid ownership is verified by the server and can be restored with a private recovery code. No payment account was used or charged during development. Read [PAYMENTS.md](docs/stichos/PAYMENTS.md).
+The optional [native Pear node](pear-node/README.md) uses actual Corestore/Hypercore and Hyperswarm to replicate signed **public** checkpoints. It runs separately in Node; it is neither browser WebAssembly nor a packaged Pear desktop app. Someone must operate and retain it. A public replica contains no owner private key or reconnect credentials and cannot replace that private backup.
 
-The opening has six recollections, advanced at your pace with **Continue** or the arrow keys. **Begin in 3886** skips directly to play. The failed transmission happened in **3866**; play resumes in **3886**, after twenty stíchoi, equivalent to ten Earth years. The name or number entered on the title screen determines the world; the same seed reproduces its initial geography, inhabitants, resources, and equipment properties.
+## Install and optional services
+
+**Install app** is available on the title and pause menu. Supporting browsers show their native installation prompt; otherwise the game explains the browser menu or iOS Add to Home Screen path. The production service worker supports offline solo play after a complete online load. Installing does not create cloud synchronization, a bundled native multiplayer server, or offline multiplayer. Actual iOS installation and a complete installed-PWA lifecycle have not been browser-verified.
+
+**Pause → AI companion** can pair with an optional locally running Codex companion and report installation and authentication status. **NPC model inference is unavailable in this release.** No Codex WebAssembly runtime or model turn runs in the game. Existing dialogue remains authored/procedural; successful local authentication does not unlock generated conversations. [Capability and safety contract](docs/stichos/AI-COMPANION.md).
+
+**Life → Cosmetic shop** previews optional outfits. Real-money purchasing remains disabled until a separately operated payment server is configured. Server-verified cosmetic wallet recovery is separate from continuing-life storage. No real payment was made during development. [Payments](docs/stichos/PAYMENTS.md).
 
 ## Things to do
 
+- **Construct production:** **Work** places propagation beds, sawmills and ore sorters on clear ground. Build with actual materials, load finite inputs, let batches advance while you play, and approach to collect. Shared sawmills and sorters claim real nearby sources through the room authority. [Production rules and browser proof](docs/stichos/PRODUCTION.md).
 - **Explore:** square-tile terrain continues across positive and negative coordinates. Roads and bridges connect generated settlements. Frostwood, tundra, marshes, and highlands contain different resources and terrain. There is no enclosing island boundary.
 - **Travel between distinct places:** major cities occupy a 640-tile lattice, with one church per city. Smaller villages and hamlets break up the journey, usually about 190–237 tiles apart on trunk routes. Homes, inns, workshops, greenhouses, storehouses, and civic halls have distinct generated footprints, facades, and useful interiors.
-- **Uncover the atlas:** explored terrain and discovered places stay in Theo’s memory across saves and body changes. Pan, zoom, locate coordinates, fit the whole explored region, and mark a direction to follow. Unvisited country remains dark.
-- **Read a life already lived:** Theo’s bound notebook contains eighteen dated entries from 3866–3886, four illustrated botanical studies, a searchable glossary, and the current investigation. His scientific habits, mistakes, concealed identity, public compromises, and Sallas hypotheses develop over ten Earth years. The priest physically keeps the paper book; another host can recall its words without acquiring it.
-- **Manage an established household:** Theo starts with a real residence, 240 coins, three body-owned working tools and three named paid relationships. Choose whom to trust, commission forestry/quarry/garden work, and collect the agreed yield after time passes. Workers consume actual nearby resources. **Life → Household & tools** manages tools, repairs, trust and assignments. Assignments currently operate in solo play.
+- **Uncover the atlas:** explored terrain and discovered places stay in your current life’s memory across saves and body changes. Pan, zoom, locate coordinates, fit the whole explored region, and mark a direction to follow. Unvisited country remains dark.
+- **Follow Theo’s story:** Theo’s bound notebook contains eighteen dated entries from 3866–3886, four illustrated botanical studies, a searchable glossary, and the current investigation. His scientific habits, mistakes, concealed identity, public compromises, and Sallas hypotheses develop over ten Earth years. The priest physically keeps the paper book; another host can recall its words without acquiring it.
+- **Manage a household:** Theo starts with a real residence, 240 coins, three body-owned working tools and three named paid relationships. Choose whom to trust, commission forestry/quarry/garden work, and follow workers as they walk to reserved resources, perform actual tool strokes, return, and make the finite yield available for collection. **Life → Household & tools** manages tools, repairs, trust and assignments. Assignments currently operate in solo play.
 - **Work for supplies:** select an axe, pickaxe or sickle in the satchel. Each click or E performs one stroke; trees need 4–7, minerals 5–9, and plants two. Recovery, energy and tool condition constrain the work. Repairs consume coins, timber and ore at a workbench.
 - **Gather and prepare:** cequin supports breathing, heartleaf becomes medicine, emberroot restores warmth. Timber and conductive ore supply equipment and radio repairs. Gathering changes the actual world, and harvested objects stay removed when you leave and return.
 - **Recognize botanical varieties:** stems, branches, leaf arrangement, buds, and roots are generated together. Wild varieties yield different amounts according to their visible growth. Hover or approach to inspect the harvest before gathering.
@@ -57,7 +78,7 @@ The opening has six recollections, advanced at your pace with **Continue** or th
 - **Invent beyond the recipe list:** **Life → Invent** generates connected assemblies from new seed-addressed sketches or arbitrary design phrases. Branches, shafts, blades, chambers, rings and living tissues determine shape, material costs, combat delivery and restorative properties. Make, carry, equip, use or salvage the actual object. New designs are not selected from the 81-recipe Forge menu; the supported interaction verbs remain contact, projectile, pulse and consumption.
 - **Make a home:** buy an actual house or inn room, furnish its rest, hearth, workshop and garden slots, and cultivate cequin, heartleaf and emberroot. Procedural furniture and plants appear inside the building. Growing time advances through living and rest; plots, improvements and harvests persist.
 - **Choose your clothing:** six earned patterns and three optional premium outfits alter colors, hats and cloaks while preserving anatomy and equipment strength. Each host remembers its own outfit.
-- **Inhabit another person:** after restoring the mind signal, concentrate at a shrine. The candidate is an existing living human with a name, location, appearance, and clan. Your consciousness moves into that body; the previous body remains in the world. The occupied character is not duplicated. Each body keeps its own supplies, coins, and weapons; returning restores what you left with that person. Your knowledge, experience, investigation, and the world's changes follow your mind.
+- **Inhabit another person:** after restoring the mind signal, concentrate at a shrine. The candidate is an existing living human with a name, location, appearance, and clan. Your consciousness moves into that body; the previous body remains in the world. The occupied character is not duplicated. Each body keeps its own supplies, coins, and weapons; returning restores what you left with that person. Knowledge, experience and investigation persist within that planet’s life. **Pause → Leave this body** also offers a new resident outside a shared room; it preserves the planet and existing belongings.
 
 <details>
 <summary>Opening investigation hints</summary>
@@ -74,41 +95,34 @@ For the first excavation in a new generation-3 life, take the road south to the 
 
 ## Controls
 
-| Input                    | Action                                             |
-| ------------------------ | -------------------------------------------------- |
-| WASD / arrow keys        | Walk                                               |
-| Shift                    | Run while energy lasts                             |
-| Click ground             | Follow a path                                      |
-| Click a person or object | Approach and interact when reachable               |
-| E                        | Talk, gather, open, read, or use the nearby object |
-| Mouse                    | Aim                                                |
-| F / 1 / right mouse      | Use the equipped weapon                            |
-| Q / 2                    | Botanical ward                                     |
-| 3 / 4 / 5 / 6            | Cequin / salve / warming tonic / food              |
-| I / B                    | Satchel / preparation recipes                      |
-| K                        | Inspect this body’s generated equipment            |
-| L                        | Callings, professions, homes, clothing and shop    |
-| J / M                    | Notebook / map                                     |
-| Escape                   | Close conversation, close a panel, or pause        |
-| Mouse wheel              | Zoom                                               |
+| Input                        | Action                                                  |
+| ---------------------------- | ------------------------------------------------------- |
+| WASD / arrows                | Walk                                                    |
+| Shift                        | Run while energy lasts                                  |
+| Click ground                 | Follow a path                                           |
+| Click a person or object / E | Approach or interact; each resource stroke is real work |
+| Mouse                        | Aim                                                     |
+| F / 1 / right mouse          | Equipped attack                                         |
+| Q / 2                        | Botanical ward                                          |
+| 3 / 4 / 5 / 6                | Cequin / salve / warming tonic / food                   |
+| I / B                        | Satchel / preparation                                   |
+| K / L                        | Equipment / professions, homes and clothing             |
+| J / M / G                    | Notebook / world atlas / galaxy                         |
+| Enter                        | Focus chat                                              |
+| Escape                       | Close conversation or panel, then pause                 |
+| Mouse wheel                  | Zoom                                                    |
 
-Touch controls provide movement, interaction, attacks, medicine, and the satchel. Desktop equipment buttons select weapons you own; buy additional types from a merchant. The journal records quest details and clan trust. Choose **Follow this thread** to track an active task in the sidebar and on the map. Click an inventory item to read what it does. Lens preparation requires a workbench; botanical preparations can be made while traveling.
+The satchel’s tool buttons select axe, pickaxe or sickle. **Work** opens construction and production; click a built platform to inspect its batches. Touch controls expose movement and actions. Closed doors block bodies and attacks; click a door or reachable ground beyond it to open and continue through the actual doorway.
 
-Closed doors block bodies, arrows, melee and wards. Use **E** or click a door to open it. A click on reachable ground beyond a door opens it as you approach and continues the route; in a cooperative room this waits for the server's reply. A door cannot close over an occupying body.
+The priest carries a physical notebook: open its cover, read, close and put it away. Other bodies recall the knowledge without receiving that paper object. The world atlas reveals actual travel and permits panning, coordinate search and a tracked bearing; searching does not reveal terrain or teleport. A wrapping globe is not implemented. [Atlas](docs/stichos/ATLAS.md).
 
-**J** or the satchel’s notebook button brings out the priest’s closed book. **Open notebook** unfolds it; **Close book** folds the cover shut, and **Put away**, **J**, or **Escape** returns to the world. Use the contents, leaf arrows, and section tabs to read. **Plain type** switches the handwriting to a reading font. **Remember the beginning** replays the introduction without restarting the life. In another body, the same control opens clearly identified remembered pages; the physical notebook remains with the priest. Current threads and fresh observations continue to follow Theo’s knowledge.
+## Continuity and offline use
 
-Press **M** for the atlas. Drag or focus the chart and use arrow keys to pan; scroll or press **+ / −** to zoom. **My body** recenters, **All explored** fits the remembered world, and known-place buttons locate discovered settlements. Coordinate search changes the view without revealing terrain. Click a point and choose **Follow this mark** for a bearing in your field notes; this does not teleport or automatically walk the character. The current view and chart mark last for the active life in this page; discovered terrain and places are saved. The atlas represents the continuous world as a plane; a wrapping globe is not implemented.
+Normal actions autosave the current life under `verso.stichos.v1`; visited planets also retain a private life record in this origin. **Continue this life** resumes, **Galaxy** returns to another remembered planet, and leaving a body preserves the existing world. The current main UI has no routine Download save or Restore a save controls. Historical file-based QA is evidence for its recorded older build, not instructions for this UI.
 
-## Saving and offline use
+Browser profiles and origins are distinct identities: different ports, `localhost`, `127.0.0.1` and the published site do not share progress. Clearing site data removes local life and ownership records; no cloud recovery of a life is supplied. The prepared cosmetic wallet has its own recovery mechanism and cannot restore the game world.
 
-Progress autosaves to this browser under `verso.stichos.v1`. **Continue this life** resumes it. The pause menu can **Download save** or **Restore a save**; invalid files leave the current run intact. The previous prototypes use separate save keys.
-
-The save records its world-generation version. Earlier lives retain their wilderness, settlement spacing, and established harvests. **Start a new life for generation 3’s distant cities and varied buildings**; export an existing life first if you want to retain both. Existing lives also receive the atlas, reconstructing a coarse explored trail only from their saved visited chunks.
-
-Older saves made before doors gained collision keep their exact body and rest positions: only doors overlapping those saved bodies or anchors are opened during migration. New saves retain their physical door state strictly.
-
-Storage belongs to a browser and origin: different ports, `localhost`, and `127.0.0.1` have different saves. Export before changing addresses or clearing browser data. The production service worker caches a build after a complete online load. Updates wait for existing sessions to close; they do not reload a live game automatically.
+Records preserve their world-generation version. Earlier worlds retain their geography and established changes; compatibility migrations retain prior lives. The production service worker caches a complete build and waits for old clients to close before adopting an update. Offline solo play requires that cache; room discovery and live shared play require connectivity.
 
 ## Generation and rendering
 
@@ -132,18 +146,18 @@ npm run build
 npm run format:check
 ```
 
-World tests cover reproducibility across chunk seams and load orders, negative and distant coordinates, a bounded chunk cache, settlement access, starting resources, and uninterrupted **3,200-tile road walks in both axes across three seeds**. Session tests exercise actual movement, gathering, crafting, trade, story choices, radio repair, combat effects, body possession and return, saves, corrupted files, and long exploration.
-
-The browser harness uses actual input in an isolated Agent Workspace Chromium and read-only diagnostics:
+Current focused real-input harnesses use a previously verified, isolated Agent Workspace Chromium endpoint:
 
 ```sh
-node scripts/browser-stichos-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
-node scripts/browser-stichos-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/ --atlas
-node scripts/browser-notebook-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
+node scripts/browser-universe.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
+node scripts/browser-production.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
+node scripts/browser-peer-rooms.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
 ```
 
-The QA report distinguishes what was verified in the browser from simulation tests. Save download/import, invalid-file preservation, and service-worker offline reload and play are also exercised by `scripts/browser-stichos-storage.mjs`. Physical gamepads are not currently integrated into Stíchos. The Sallas campaign has a playable resolution and continuing activities. With timed tool work and earned repairs, a rushed simulation completed its twenty-four leads in about **68 minutes**, without reading time or optional professions/homes/commissions; this measurement does not include the new Winter Compact. **Four hours of human play has not been verified.** Shared PvE has pure simulation and real-socket tests; the actual public-signalling browser baseline separately verifies presence, harvest and host departure. [Multiplayer verification](docs/stichos/MULTIPLAYER.md#verification) records the integrated combat browser status. Large-scale war, a wrapping globe, a public account service and live billing are not implemented. The mechanics take inspiration from Vagabond; this is not a feature-complete reproduction of that game.
+The local `app-tZDgoFWJ.js` checkpoint passed **10 universe/creation/invitation checks** and **9 production checks**, with zero runtime errors. Production proof uses actual tool strokes, construction/input costs, 80 active seconds, nearby collection and reload. Four native Pear integration tests establish actual local-DHT replication, disk restart, signature filtering and request limits; run `npm test` inside `pear-node/`. Those checks do not prove Internet-wide availability.
+
+[QA.md](docs/stichos/QA.md) separates current local evidence, previous public deployments and historical harnesses. The current source suite passed **345/345 tests** in **67.69 seconds**, with formatting and build checks passing at `c667dfd` (`app-BsBd1dau.js`, `app-BbuTIZnE.css`). The earlier universe/production browser checks identify their own frozen build; they are not automatic acceptance of every newer UI change. The action-earned main investigation plus all 24 Compact projects measured **3.548 active simulated hours**, excluding rest jumps. **Four hours of human play remains unverified.** Physical gamepads, large-scale war, a wrapping globe, global accounts and live billing are not implemented. This is not a feature-complete reproduction of Vagabond.
 
 ## Earlier work
 
-The [earlier visual chapter](docs/VISUAL-STUDY.md) remains available with `?study=1`. The [procedural anatomy lab](docs/PROCEDURAL-LAB.md) remains at `?lab=1` (or `?generative=1`). They are development references with their own controls and saves. Stíchos is the main game now.
+The [earlier visual chapter](docs/VISUAL-STUDY.md) remains at `?study=1`; the [procedural anatomy lab](docs/PROCEDURAL-LAB.md) remains at `?lab=1` or `?generative=1`. Their controls and save keys belong to those development references, not the current main life interface.
