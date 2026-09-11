@@ -297,6 +297,13 @@ test('a whole generation-three campaign resolves through actual movement, harves
         click(game, step.target);
         game.choose(`campaign:${step.answer}`);
       } else {
+        if (step.kind === 'ending') {
+          const alternative = Stichos.restore(game.save());
+          alternative.interact(step.target.id);
+          alternative.choose('campaign:stay');
+          assert.equal(alternative.campaign.ending, 'stay');
+          assert.equal(Stichos.restore(alternative.save()).endingSummary!.choice, 'stay');
+        }
         const choice = step.choices![0];
         decisions.push(choice.id);
         game.choose(`campaign:${choice.id}`);
@@ -341,6 +348,140 @@ test('a whole generation-three campaign resolves through actual movement, harves
     game.transferCandidates.some((n) => ['botanist', 'merchant', 'engineer'].includes(n.role)),
     'The resolved protocol permits other willing professions.',
   );
+  const priestId = `body:theo-priest:${game.world.seed}`;
+  const priestInventory = { ...game.inventory };
+  const distant = game.knownIdentities.find(
+    (n) => n.role === 'engineer' && distance(n, game.player) > 500,
+  );
+  assert.ok(distant, 'An actually encountered distant engineer is remembered.');
+  for (const role of ['engineer', 'botanist', 'archivist']) {
+    walk(game, { x: -2, y: -2 });
+    const person = game.knownIdentities
+      .filter((n) => n.role === role && n.available)
+      .sort((a, b) => distance(b, game.player) - distance(a, game.player))[0]!;
+    assert.ok(person);
+    game.reincarnate(person.id);
+    assert.equal(game.occupiedNpcId, person.id);
+    assert.equal(game.hasNotebook, false);
+    assert.ok(distance(game.player, person) < 0.01);
+    const town = game.world
+      .settlementsAround(game.player.x, game.player.y, 128)
+      .sort((a, b) => distance(a, game.player) - distance(b, game.player))[0]!;
+    walk(game, { x: town.x - 2, y: town.y - 2 });
+    game = Stichos.restore(game.save());
+    assert.ok(
+      game.transferCandidates.some((n) => n.id === priestId),
+      'The original living body remains selectable across distance.',
+    );
+    game.reincarnate(priestId);
+    assert.equal(game.occupiedNpcId, priestId);
+    assert.equal(game.hasNotebook, true);
+    assert.deepEqual(game.inventory, priestInventory);
+  }
+  assert.equal(game.freeLife.milestones.find((m) => m.id === 'life:identity')!.complete, true);
+  const board = { id: 'origin:notice', x: -2, y: 1 };
+  let completed = 0;
+  for (let attempt = 0; attempt < 12 && completed < 2; attempt++) {
+    click(game, board);
+    game.choose('life:contract');
+    game.choose('close');
+    const job = game.freeLife.contract!;
+    assert.ok(job);
+    assert.equal(job.progress, 0);
+    assert.ok(game.quests.some((q) => q.id === job.id && q.target));
+    if (job.kind !== 'workshop') {
+      click(game, board);
+      game.choose('life:cancel');
+      game.choose('close');
+      continue;
+    }
+    click(game, board);
+    const beforeEarly = game.player.coins;
+    game.choose('life:claim');
+    assert.equal(game.player.coins, beforeEarly, 'Unperformed work cannot be claimed.');
+    game.choose('close');
+    const recipe = RECIPES.find((r) => r.result === job.item)!;
+    while (game.freeLife.contract!.progress < job.required) {
+      stock(game, recipe.cost, { x: 0, y: 0 });
+      game.craft(recipe.id);
+    }
+    stock(game, { [job.item!]: job.required }, { x: 0, y: 0 });
+    const before = game.player.coins;
+    click(game, board);
+    game.choose('life:claim');
+    assert.equal(game.player.coins, before + job.reward);
+    game.choose('life:claim');
+    assert.equal(game.player.coins, before + job.reward);
+    game.choose('close');
+    assert.equal(game.freeLife.contract!.status, 'complete');
+    completed++;
+    const save = game.save();
+    game = Stichos.restore(save);
+    assert.deepEqual(game.freeLife.contract, save.freeLife.commission);
+  }
+  assert.equal(completed, 2);
+  assert.equal(game.freeLife.contractsCompleted, 2);
+  stock(game, { wood: 17, ore: 5, heartleaf: 1, cequin: 4 }, { x: 0, y: 0 });
+  walk(game, { x: -13, y: 13 });
+  const address = game.nearbyHomes[0]!;
+  assert.equal(game.progress({ kind: 'buy-home', address }).ok, true);
+  for (const furnitureId of ['woven-cot', 'iron-stove', 'field-bench', 'raised-beds'])
+    assert.equal(game.progress({ kind: 'furnish', homeId: address.id, furnitureId }).ok, true);
+  assert.equal(game.freeLife.milestones.find((m) => m.id === 'life:home')!.complete, true);
+  for (let plot = 0; plot < 4; plot++)
+    assert.equal(
+      game.progress({ kind: 'plant', homeId: address.id, plot, plant: 'cequin' }).ok,
+      true,
+    );
+  let gardenJob = game.freeLife.contract;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    click(game, board);
+    game.choose('life:contract');
+    game.choose('close');
+    gardenJob = game.freeLife.contract!;
+    if (gardenJob.kind === 'garden') break;
+    click(game, board);
+    game.choose('life:cancel');
+    game.choose('close');
+  }
+  assert.equal(gardenJob!.kind, 'garden');
+  for (
+    let cycle = 0;
+    cycle < 4 && !game.freeLife.milestones.find((m) => m.id === 'life:garden')!.complete;
+    cycle++
+  ) {
+    walk(game, address);
+    game = Stichos.restore(game.save());
+    const home = game.progression.homes.find((h) => h.id === address.id)!;
+    if (cycle > 0)
+      for (let plot = 0; plot < 4; plot++)
+        assert.equal(
+          game.progress({ kind: 'plant', homeId: address.id, plot, plant: 'cequin' }).ok,
+          true,
+        );
+    const ready = Math.max(...home.plots.map((p) => p?.readyAt ?? 0));
+    assert.equal(
+      game.progress({ kind: 'harvest', homeId: address.id, plot: 0 }).ok,
+      false,
+      'Growing plants cannot be harvested early.',
+    );
+    while (game.time < ready + 0.1) {
+      game.update(0.25, { x: 0, y: 0, run: false });
+      sustain(game);
+    }
+    for (let plot = 0; plot < 4; plot++)
+      assert.equal(game.progress({ kind: 'harvest', homeId: address.id, plot }).ok, true);
+  }
+  assert.equal(game.freeLife.milestones.find((m) => m.id === 'life:garden')!.complete, true);
+  const beforeGarden = game.player.coins;
+  click(game, board);
+  game.choose('life:claim');
+  assert.equal(game.player.coins, beforeGarden + gardenJob!.reward);
+  game.choose('close');
+  assert.equal(game.freeLife.contractsCompleted, 3);
+  const final = Stichos.restore(game.save());
+  assert.equal(final.freeLife.milestones.find((m) => m.id === 'life:home')!.rewarded, true);
+  assert.equal(final.freeLife.milestones.find((m) => m.id === 'life:garden')!.rewarded, true);
 });
 
 test('legacy radio saves gain an actionable lead while malformed or skipped campaign evidence is rejected', () => {

@@ -9,6 +9,12 @@ import { deriveSeed } from '../procedural/random.ts';
 import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
 import {
+  createFreeLife,
+  restoreFreeLife,
+  createCommission,
+  freeLifeMilestones,
+} from './free-life.ts';
+import {
   createProgression,
   restoreProgression,
   grantPractice,
@@ -281,6 +287,7 @@ export class Stichos {
   private campaignOrdinary = false;
   progression: ProgressionState;
   private cosmeticEntitlements: string[] = [];
+  private freeLifeState = createFreeLife();
   private npcMemory = new Map<string, Npc>();
   private npcRuntime = new Map<string, Npc>();
   private supplyJobs = new Map<string, SupplyJob>();
@@ -457,7 +464,14 @@ export class Stichos {
       candidates.set(npc.id, npc);
     }
     for (const npc of [...this.npcMemory.values(), ...this.npcs]) candidates.set(npc.id, npc);
-    const priority = (npc: Npc) => (npc.role === 'pilgrim' ? 0 : npc.role === 'refugee' ? 1 : 2);
+    const priority = (npc: Npc) =>
+      this.campaignState.ending && npc.id === `body:theo-priest:${this.seed}`
+        ? -1
+        : npc.role === 'pilgrim'
+          ? 0
+          : npc.role === 'refugee'
+            ? 1
+            : 2;
     return [...candidates.values()]
       .filter(
         (npc) =>
@@ -468,11 +482,21 @@ export class Stichos {
           (this.campaignState.ending !== null ||
             ['pilgrim', 'refugee', 'guard'].includes(npc.role)) &&
           !(npc.role === 'guard' && this.reputation[npc.clan] < -24) &&
-          distance(npc, center) <= 14 &&
+          (distance(npc, center) <= 14 ||
+            (this.campaignState.ending !== null &&
+              this.freeLifeState.knownHosts.includes(npc.id))) &&
           this.clear(npc),
       )
-      .sort((a, b) => priority(a) - priority(b) || distance(a, center) - distance(b, center))
-      .slice(0, this.campaignState.ending ? 12 : 3)
+      .sort((a, b) =>
+        this.campaignState.ending
+          ? Number(b.id === `body:theo-priest:${this.seed}`) -
+              Number(a.id === `body:theo-priest:${this.seed}`) ||
+            Number(distance(b, center) <= 14) - Number(distance(a, center) <= 14) ||
+            priority(a) - priority(b) ||
+            distance(a, center) - distance(b, center)
+          : priority(a) - priority(b) || distance(a, center) - distance(b, center),
+      )
+      .slice(0, this.campaignState.ending ? 128 : 3)
       .map((npc) => clone(npc));
   }
   get bodyId() {
@@ -567,6 +591,12 @@ export class Stichos {
     const result = applyProgression(this.progression, wallet, action, this.progressionContext());
     if (result.ok) {
       this.player.coins = wallet.coins;
+      if (action.kind === 'harvest' && result.gained)
+        for (const [item, amount] of Object.entries(result.gained)) {
+          this.freeLifeState.gardenProduce += amount ?? 0;
+          this.recordFreeLife('garden', item, amount ?? 0);
+        }
+      this.syncFreeLife();
       this.event('quest', result.message);
       if (action.kind === 'buy-home')
         this.entry(
@@ -723,6 +753,8 @@ export class Stichos {
     this.npcs = [...candidates.values()]
       .sort((a, b) => distance(a, this.player) - distance(b, this.player))
       .slice(0, 64);
+    if (this.campaignState.ending)
+      for (const npc of this.npcs) if (distance(npc, this.player) < 6) this.rememberIdentity(npc);
   }
 
   private rememberNpc(npc: Npc) {
@@ -878,6 +910,237 @@ export class Stichos {
     );
   }
 
+  get endingSummary() {
+    if (!this.campaignState.ending) return null;
+    this.campaignPlan ??= buildCampaign(this.world);
+    const ending = this.campaignPlan.steps[23].choices!.find(
+      (c) => c.id === this.campaignState.ending,
+    )!;
+    return {
+      choice: this.campaignState.ending,
+      title: ending.label,
+      text: ending.text,
+      decisions: this.campaignPlan.steps
+        .filter((s) => s.choices && this.campaignState.choices[s.id])
+        .map((s) => ({
+          title: s.title,
+          text: s.choices!.find((c) => c.id === this.campaignState.choices[s.id])?.text ?? s.result,
+        })),
+    };
+  }
+  get freeLife() {
+    const supplies = this.quests.filter((q) => q.id.startsWith('supply:') && q.complete).length;
+    const dispatches = this.quests.filter(
+      (q) =>
+        q.id.startsWith('correspondence:') &&
+        q.complete &&
+        !q.objective.startsWith('Dispatch withdrawn'),
+    ).length;
+    return {
+      unlocked: this.campaignState.ending !== null,
+      milestones: freeLifeMilestones(this.freeLifeState, this.progression, supplies, dispatches),
+      contract: this.freeLifeState.commission ? clone(this.freeLifeState.commission) : null,
+      contractsCompleted: this.freeLifeState.completed,
+    };
+  }
+  get knownIdentities() {
+    return this.freeLifeState.knownHosts
+      .map((id) => this.npcs.find((n) => n.id === id) ?? this.npcMemory.get(id))
+      .filter(
+        (n): n is Npc =>
+          !!n && n.hp > 0 && !n.hostile && !this.removed.has(n.id) && n.id !== this.occupiedNpcId,
+      )
+      .map((n) => ({
+        ...clone(n),
+        consent: 'Willing while peaceful and alive; a quiet shrine is required.',
+        available:
+          this.campaignState.ending !== null &&
+          !(n.role === 'guard' && this.reputation[n.clan] < -24) &&
+          this.clear(n),
+      }));
+  }
+  private rememberIdentity(npc: Npc) {
+    if (npc.hp <= 0 || npc.hostile || this.removed.has(npc.id)) return;
+    if (!this.freeLifeState.knownHosts.includes(npc.id)) {
+      if (this.freeLifeState.knownHosts.length >= 128) {
+        if (npc.id !== `body:theo-priest:${this.seed}`) return;
+        this.freeLifeState.knownHosts.pop();
+      }
+      this.freeLifeState.knownHosts.push(npc.id);
+    }
+    this.npcMemory.set(npc.id, clone(npc));
+  }
+  private addFreeLifeChoices(board: Prop) {
+    if (!this.dialogue) return;
+    const job = this.freeLifeState.commission;
+    if (job?.status === 'active') {
+      if (job.boardId === board.id)
+        this.dialogue.choices.unshift({
+          id: 'life:claim',
+          label: `Report: ${job.title}`,
+          detail: `${job.progress}/${job.required} · ${job.reward} coins`,
+          disabled:
+            job.progress < job.required || (!!job.item && !this.has({ [job.item]: job.required })),
+        });
+      this.dialogue.choices.unshift({
+        id: 'life:cancel',
+        label: 'Withdraw the current local commission',
+        detail: 'No reward; another seeded commission can be chosen.',
+      });
+    } else
+      this.dialogue.choices.unshift({
+        id: 'life:contract',
+        label: 'Choose a local guild commission',
+        detail: 'Fieldwork, medicine preparation, cultivation or an identified road threat.',
+      });
+  }
+  private chooseFreeLife(id: string, board: Prop) {
+    if (!this.campaignState.ending) return;
+    const job = this.freeLifeState.commission;
+    if (id === 'life:contract' && job?.status !== 'active') {
+      const town = this.world
+        .settlementsAround(board.x, board.y, 128)
+        .sort((a, b) => distance(a, board) - distance(b, board))[0];
+      if (!town) return;
+      const plants = this.world
+        .propsAround(town.x, town.y, 48)
+        .filter(
+          (p) => ['cequin', 'heartleaf', 'emberroot'].includes(p.kind) && !this.removed.has(p.id),
+        );
+      const enemies = this.world
+        .npcsAround(town.x, town.y, 48)
+        .map((n) => this.npcMemory.get(n.id) ?? n)
+        .filter((n) => n.role === 'raider' && n.hostile && n.hp > 0 && !this.removed.has(n.id))
+        .sort((a, b) => distance(a, board) - distance(b, board));
+      const home = this.progression.homes.find((h) => h.plots.some((p) => p !== null));
+      const crop = home?.plots.find((p) => p !== null);
+      const garden = home && crop ? { x: home.x, y: home.y, plant: crop.plant } : undefined;
+      this.freeLifeState.serial++;
+      const next = createCommission(
+        this.seed,
+        this.freeLifeState.serial,
+        town,
+        board,
+        plants,
+        enemies,
+        garden,
+      );
+      this.freeLifeState.commission = next;
+      this.addQuest({
+        id: next.id,
+        title: next.title,
+        description: next.description,
+        objective: `${next.description} Progress0/${next.required}. Reward${next.reward}coins.`,
+        stage: 0,
+        complete: false,
+        target: { ...next.target },
+      });
+      this.entry(
+        'A freely chosen commission',
+        `${next.description} Report to ${town.name} when the work and supplies are ready.`,
+      );
+      this.reply(
+        `${next.description} Reward: ${next.reward} coins. The actual work site is marked.`,
+      );
+    } else if (
+      id === 'life:claim' &&
+      job?.status === 'active' &&
+      job.boardId === board.id &&
+      job.progress >= job.required
+    ) {
+      if (job.item && !this.spend({ [job.item]: job.required })) return;
+      job.status = 'complete';
+      this.freeLifeState.completed++;
+      this.player.coins += job.reward;
+      this.awardXp(24);
+      this.changeReputation(job.clan, 5);
+      this.complete(job.id);
+      this.entry(
+        job.title,
+        'The commission was fulfilled and paid once. Its supplies and consequences remain in the world.',
+      );
+      this.reply(
+        `The work is accepted. ${job.reward} coins and local trust. Another commission can be requested when you choose.`,
+      );
+      this.syncFreeLife();
+    } else if (id === 'life:cancel' && job?.status === 'active') {
+      job.status = 'cancelled';
+      this.complete(job.id);
+      const quest = this.quests.find((q) => q.id === job.id);
+      if (quest) quest.objective = 'Withdrawn without payment.';
+      this.reply('The commission is withdrawn. No fee or reward was claimed.');
+    }
+  }
+  private recordFreeLife(
+    kind: 'field' | 'workshop' | 'garden' | 'watch',
+    item: string,
+    amount: number,
+  ) {
+    const job = this.freeLifeState.commission;
+    if (
+      job?.status === 'active' &&
+      job.kind === kind &&
+      (kind === 'watch' ? job.targets.includes(item) : job.item === item)
+    )
+      job.progress = Math.min(job.required, job.progress + amount);
+    this.syncFreeLife();
+  }
+  private syncFreeLife() {
+    if (!this.campaignState.ending) return;
+    const job = this.freeLifeState.commission;
+    if (job?.status === 'active') {
+      if (job.kind === 'watch')
+        job.progress = job.targets.filter((id) => this.removed.has(id)).length;
+      if (job.progress >= job.required) job.target = { ...job.board };
+      else if (job.kind === 'field') {
+        const plots = this.world
+          .propsAround(job.board.x, job.board.y, 48)
+          .filter((p) => p.kind === job.item && !this.removed.has(p.id));
+        if (!plots.some((p) => distance(p, job.target) < 0.1)) {
+          const plot = plots.sort((a, b) => distance(a, this.player) - distance(b, this.player))[0];
+          if (plot) job.target = { x: plot.x, y: plot.y };
+        }
+      } else if (job.kind === 'watch') {
+        const target = job.targets
+          .map((id) => this.npcs.find((n) => n.id === id) ?? this.npcMemory.get(id))
+          .find((n) => n && n.hp > 0 && !this.removed.has(n.id));
+        if (target) job.target = { x: Math.round(target.x), y: Math.round(target.y) };
+      }
+      const quest = this.quests.find((q) => q.id === job.id);
+      if (quest)
+        Object.assign(quest, {
+          target: { ...job.target },
+          objective: `${job.description} ${job.progress}/${job.required} completed. ${job.progress >= job.required ? 'Return to the issuing noticeboard with the requested supplies.' : ''}`,
+        });
+    }
+    for (const milestone of this.freeLife.milestones) {
+      let quest = this.quests.find((q) => q.id === milestone.id);
+      if (!quest) {
+        this.addQuest({
+          id: milestone.id,
+          title: milestone.title,
+          description: milestone.description,
+          objective: `${milestone.progress}/${milestone.goal} · ${milestone.description}`,
+          complete: false,
+          stage: 0,
+        });
+        quest = this.quests.find((q) => q.id === milestone.id);
+      }
+      if (quest)
+        quest.objective = `${milestone.progress}/${milestone.goal} · ${milestone.description}`;
+      if (milestone.complete && !this.freeLifeState.rewarded.includes(milestone.id)) {
+        this.freeLifeState.rewarded.push(milestone.id);
+        this.complete(milestone.id);
+        this.player.coins += 35;
+        this.awardXp(50);
+        this.entry(
+          milestone.title,
+          'A purpose chosen freely, fulfilled through lived work. The community recognized it with thirty-five coins and fifty experience.',
+        );
+      }
+    }
+  }
+
   /** Read-only preflight for atomic multiplayer claims; the local transaction rechecks all rules. */
   interactionAvailability(propId: string): { ok: boolean; reason?: string } {
     if (this.phase !== 'playing') return { ok: false, reason: 'This body cannot act.' };
@@ -901,6 +1164,13 @@ export class Stichos {
         : ['pine', 'rock'].includes(prop.kind)
           ? 2
           : 0;
+    if (
+      prop.kind === 'door' &&
+      this.removed.has(prop.id) &&
+      (distance(this.player, prop) < 0.85 ||
+        this.npcs.some((n) => n.hp > 0 && distance(n, prop) < 0.7))
+    )
+      return { ok: false, reason: 'Step clear of the doorway before closing it.' };
     if (this.carried + amount > this.capacity) return { ok: false, reason: 'Your pack is full.' };
     return { ok: true };
   }
@@ -1191,6 +1461,7 @@ export class Stichos {
       this.event('dialogue', 'Move closer to interact.');
       return;
     }
+    if ('role' in found) this.rememberIdentity(found);
     if (!this.campaignOrdinary && this.campaignInteraction(found)) return;
     this.campaignOrdinary = false;
     if ('role' in found) {
@@ -1364,6 +1635,7 @@ export class Stichos {
           label: 'Mark the vault in my journal',
         });
       else this.addDispatchChoices(prop);
+      if (this.campaignState.ending) this.addFreeLifeChoices(prop);
     }
     this.event('dialogue');
   }
@@ -1402,6 +1674,7 @@ export class Stichos {
     if (!this.gain({ [item]: amount })) return;
     this.removed.add(prop.id);
     if (botanical) grantPractice(this.progression, 'botany', 3);
+    this.recordFreeLife('field', item, amount);
     this.effect('harvest', prop, '#d2efa8');
     this.event(
       'harvest',
@@ -1503,6 +1776,10 @@ export class Stichos {
     if (!npc && !prop) {
       this.dialogue = null;
       this.event('dialogue', 'Move closer to continue.');
+      return;
+    }
+    if (choiceId.startsWith('life:') && prop?.kind === 'notice') {
+      this.chooseFreeLife(choiceId, prop);
       return;
     }
     if (choiceId.startsWith('campaign:')) {
@@ -2199,6 +2476,7 @@ export class Stichos {
     if (npc.hp <= 0) {
       this.removed.add(npc.id);
       if (npc.role === 'raider') {
+        this.recordFreeLife('watch', npc.id, 1);
         grantPractice(this.progression, 'combat', 6);
         this.player.coins += 4;
         this.awardXp(16);
@@ -2295,6 +2573,7 @@ export class Stichos {
     this.spend(recipe.cost);
     this.gain({ [recipe.result]: amount });
     grantPractice(this.progression, 'crafting', 4);
+    this.recordFreeLife('workshop', recipe.result, amount);
     this.effect('harvest', this.player, '#d5dca4');
     this.event('harvest', `Prepared ${amount} ${recipe.name.toLowerCase()}.`);
   }
@@ -2402,6 +2681,10 @@ export class Stichos {
       for (const weapon of belongings.weapons) this.weapons.add(weapon);
       this.occupiedBody = clone(target);
       this.occupiedNpcId = target.id;
+      this.rememberIdentity(previous);
+      this.rememberIdentity(target);
+      if (this.campaignState.ending && !this.freeLifeState.hostProfessions.includes(target.role))
+        this.freeLifeState.hostProfessions.push(target.role);
       this.lifeCount++;
       this.player.x = target.x;
       this.player.y = target.y;
@@ -2439,6 +2722,7 @@ export class Stichos {
     this.visit();
     this.effect('mind', previousPosition, '#c1d9ff', 2);
     this.effect('mind', this.player, '#c1d9ff', 2);
+    this.syncFreeLife();
     this.event(
       'transfer',
       target
@@ -2693,6 +2977,9 @@ export class Stichos {
 
   save() {
     this.syncCampaign();
+    this.syncFreeLife();
+    if (this.campaignState.ending)
+      for (const npc of this.npcs) if (distance(npc, this.player) < 6) this.rememberIdentity(npc);
     for (const npc of this.npcs) this.rememberNpc(npc);
     return clone({
       version: 1,
@@ -2703,6 +2990,7 @@ export class Stichos {
       notebook: this.notebook,
       campaign: this.campaignState,
       progression: this.progression,
+      freeLife: this.freeLifeState,
       inventory: this.inventory,
       removed: [...this.removed],
       opened: [...this.opened],
@@ -2802,6 +3090,13 @@ export class Stichos {
     game.campaignState = data.campaign
       ? validateCampaignState(data.campaign)
       : createCampaignState();
+    game.freeLifeState = restoreFreeLife(data.freeLife);
+    if (data.freeLife === undefined)
+      game.freeLifeState.knownHosts = [...game.npcMemory.values()]
+        .filter((n) => n.hp > 0 && !n.hostile && !game.removed.has(n.id))
+        .sort((a, b) => Number(b.id === priestBodyId) - Number(a.id === priestBodyId))
+        .slice(0, 128)
+        .map((n) => n.id);
     game.phase = data.phase;
     game.restAnchor = { ...data.restAnchor };
     game.lifeCount = data.lifeCount;
@@ -2881,6 +3176,7 @@ export class Stichos {
       throw new Error('Saved position is inside blocked terrain.');
     game.refreshNpcs();
     game.syncCampaign();
+    game.syncFreeLife();
     game.revealExploration();
     game.events = [];
     game.dialogue = null;
@@ -3171,6 +3467,15 @@ function validateSave(value: unknown): SaveData {
       const id = `sallas:${i.toString().padStart(2, '0')}`;
       if (!(value.quests as Quest[]).some((q) => q.id === id && q.complete)) return fail();
     }
+  }
+  if (value.freeLife !== undefined) {
+    const freeLife = restoreFreeLife(value.freeLife);
+    if (
+      freeLife.knownHosts.some(
+        (id) => !(value.npcs as Npc[]).some((n) => n.id === id) && id !== value.occupiedNpcId,
+      )
+    )
+      return fail();
   }
   return value as unknown as SaveData;
 }
