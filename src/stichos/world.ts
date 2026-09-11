@@ -148,7 +148,7 @@ export class InfiniteWorld {
       {
         id: `${settlement.id}:hall`,
         x,
-        y: y - 9,
+        y: y - (origin ? 5 : 9),
         halfX: origin ? 4 : 3 + Math.floor(rng() * 2),
         halfY: origin ? 4 : 3,
         name: settlement.kind === 'cathedral' ? 'Winter cathedral' : 'Assembly hall',
