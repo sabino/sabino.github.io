@@ -305,7 +305,7 @@ export const GLOSSARY: readonly GlossaryEntry[] = [
   {
     term: 'Vespera',
     definition:
-      'The adaptation’s starting city and the location of Theo’s cathedral, clinic, and first present-day inquiries. Its name distinguishes a local home from the planet.',
+      'The city where Theo has lived in the priest’s body. Its cathedral, clinic, and familiar streets are a small part of the planet beyond them.',
   },
   {
     term: 'Stíchoi',
@@ -340,7 +340,7 @@ export const GLOSSARY: readonly GlossaryEntry[] = [
   {
     term: 'The six families',
     definition:
-      'The great clans through which political, religious, and economic loyalties are organized. Brown and Sallas are established story names; the remaining generated names belong to the adaptation.',
+      'The great clans through which political, religious, and economic loyalties are organized. Their priests direct them, but households within a family can disagree about whom to trust and what their obligations require.',
   },
   {
     term: 'Orlando Brown',
@@ -350,17 +350,17 @@ export const GLOSSARY: readonly GlossaryEntry[] = [
   {
     term: 'Sallas',
     definition:
-      'The family whose secret attracted Theo’s investigation and may offer hope of return. Records and alignments in the playable story are leads; neither the failed arrival nor the larger secret has been explained.',
+      'The family whose secret attracted Theo’s investigation and may offer hope of return. Its records and alignments give him questions to pursue. They have not explained the failed arrival or established a way home.',
   },
   {
     term: 'Pure plants',
     definition:
-      'The story’s highly developed botanical basis for food and medicine. The phrase does not imply that cultivation is effortless, universally accessible, or free of political control.',
+      'The highly developed botanical basis of food and medicine on Stíchos. Cultivation requires knowledge and labor; access to plants can be controlled as tightly as access to a factory.',
   },
   {
     term: 'Cequin',
     definition:
-      'The rosemary-like plant that sustains breathing in Stíchos’s cold. Its narrative importance comes from the source story; exact doses, durations, and recipes are gameplay adaptations.',
+      'The rosemary-like plant that sustains breathing in Stíchos’s cold. Theo keeps a supply for his lungs and records the portions needed for tonics and dressings, since one bundle cannot meet every need at once.',
   },
   {
     term: 'Rømer',
@@ -370,7 +370,12 @@ export const GLOSSARY: readonly GlossaryEntry[] = [
   {
     term: 'Mind transmission',
     definition:
-      'Travel experienced through another being’s body, not a physical doorway. The playable signal permits nearby human possession; bodily belongings remain in place while Theo carries memories and unfinished commitments.',
+      'The passage of a mind into another being’s body. An answering human signal may offer Theo another host. The body’s belongings remain where they are; he carries memories and unfinished commitments.',
+  },
+  {
+    term: 'Private notebook',
+    definition:
+      'The priest’s physical notebook, filled with Theo’s private observations. It stays among that body’s belongings when Theo leaves. He can remember its contents through another life, but the paper must be found where it was left.',
   },
 ];
 
