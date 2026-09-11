@@ -65,7 +65,7 @@ export function regionalGroundColor(tile: Tile) {
   if (tile.terrain === 'ice') return '#92b6c8';
   if (tile.terrain === 'water') return blendColor('#376b79', '#284f56', wet);
   if (tile.terrain === 'sand') return blendColor('#c3ad79', '#bb936e', wet);
-  if (tile.terrain === 'basalt') return '#55505b';
+  if (tile.terrain === 'basalt') return '#55595c';
   if (tile.terrain === 'mud') return blendColor('#756d55', '#425e54', wet);
   if (tile.terrain === 'bridge') return tile.architecture?.woodColor ?? '#76634f';
   if (tile.terrain === 'wall' || tile.terrain === 'floor')
@@ -76,6 +76,57 @@ export function regionalGroundColor(tile: Tile) {
   return blendColor(grass, '#8a9fa1', Math.max(0, Math.min(0.8, (4 - tile.temperature) / 30)));
 }
 
+// A world-space cellular surface: fractures and stones continue across tile edges.
+function mineralSurface(c: Ctx, tile: Tile, base: string, basalt: boolean) {
+  const sx = basalt ? 35 : 13,
+    sy = basalt ? 29 : 9,
+    ox = tile.x * 32,
+    oy = tile.y * 32;
+  const hash = (x: number, y: number) => {
+    let n = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ (basalt ? 12713 : 919);
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return (n ^ (n >>> 16)) >>> 0;
+  };
+  const cells: { x: number; y: number; seed: number }[] = [];
+  for (let yy = Math.floor(oy / sy) - 1; yy <= Math.floor((oy + 31) / sy) + 1; yy++)
+    for (let xx = Math.floor(ox / sx) - 1; xx <= Math.floor((ox + 31) / sx) + 1; xx++) {
+      const h = hash(xx, yy);
+      cells.push({
+        x: (xx + 0.18 + ((h & 255) / 255) * 0.64) * sx,
+        y: (yy + 0.18 + (((h >>> 8) & 255) / 255) * 0.64) * sy,
+        seed: h,
+      });
+    }
+  for (let y = 0; y < 32; y++)
+    for (let x = 0; x < 32; x++) {
+      let first = Infinity,
+        second = Infinity,
+        chosen = cells[0];
+      for (const cell of cells) {
+        const dx = (x + ox - cell.x) / sx,
+          dy = (y + oy - cell.y) / sy,
+          d = dx * dx + dy * dy;
+        if (d < first) {
+          second = first;
+          first = d;
+          chosen = cell;
+        } else if (d < second) second = d;
+      }
+      const gap = second - first,
+        grain = hash(x + ox, y + oy),
+        rim = basalt ? 0.026 : 0.046;
+      let light = (chosen.seed % 23) - 11 + (grain % 7) - 3;
+      if (gap < rim) light = basalt ? -29 : -22;
+      else if (gap < rim * 2.1) light += x + ox < chosen.x && y + oy < chosen.y ? 19 : -8;
+      const hot =
+        basalt &&
+        (tile.ecology?.geothermal ?? 0) > 0.72 &&
+        chosen.seed % 11 === 0 &&
+        gap < rim * 0.55;
+      rect(c, x, y, 1, 1, hot ? '#ad7150' : shade(base, light));
+    }
+}
+
 export function makeRegionalGround(tile: Tile): Sprite {
   const r = random(deriveSeed(tile.seed % 32, 'ground-v4', tile.terrain)),
     base = regionalGroundColor(tile);
@@ -83,6 +134,27 @@ export function makeRegionalGround(tile: Tile): Sprite {
     rect(c, 0, 0, 32, 32, base);
     if (['road', 'floor', 'wall'].includes(tile.terrain)) {
       const wood = tile.architecture?.wallMaterial === 'timber' && !!tile.building;
+      if (
+        !wood &&
+        (tile.architecture?.technology ?? 0) > 0.62 &&
+        ['metal', 'glass', 'composite'].includes(tile.architecture?.wallMaterial ?? '')
+      ) {
+        const dark = shade(base, -18);
+        rect(c, 0, 0, 32, 32, shade(base, (tile.seed % 7) - 3));
+        rect(c, 0, 0, 32, 1, dark);
+        rect(c, 0, 0, 1, 32, dark);
+        rect(c, 2, 2, 28, 1, shade(base, 12));
+        rect(c, 2, 3, 1, 27, shade(base, 7));
+        if (tile.building) {
+          for (const x of [4, 27]) for (const y of [4, 27]) rect(c, x, y, 1, 1, shade(base, -26));
+        }
+        for (let n = 0; n < 15; n++) rect(c, r() * 32, r() * 32, 1, 1, shade(base, r() * 12 - 6));
+        return;
+      }
+      if (!wood) {
+        mineralSurface(c, tile, base, false);
+        return;
+      }
       for (let y = -1, row = 0; y < 32; y += wood ? 5 : 7, row++)
         for (let x = -10; x < 32; x += wood ? 34 : 11) {
           const xx = x + (row % 2) * 5,
@@ -97,13 +169,7 @@ export function makeRegionalGround(tile: Tile): Sprite {
           rect(c, x, yy + Math.sin(x / 8 + i) * 2, 3, 1, shade(base, i % 2 ? 8 : -9));
       }
     } else if (tile.terrain === 'basalt') {
-      for (let i = 0; i < 5; i++) {
-        const x = r() * 32,
-          y = r() * 32;
-        line(c, x, y, x + 9, y + 3, shade(base, -16));
-        line(c, x + 9, y + 3, x + 12, y + 11, shade(base, -16));
-        if ((tile.ecology?.geothermal ?? 0) > 0.7) line(c, x + 1, y + 1, x + 6, y + 3, '#a77554');
-      }
+      mineralSurface(c, tile, base, true);
     } else if (tile.terrain === 'water' || tile.terrain === 'ice') {
       for (let i = 0; i < 8; i++)
         rect(c, r() * 32, r() * 32, 3 + r() * 10, 1, shade(base, r() * 24 - 5));
@@ -189,7 +255,7 @@ export function treeConstruction(seed: number, form: TreeForm): TreeConstruction
     form,
     height,
     spread,
-    trunk: 4 + Math.floor(r() * 4),
+    trunk: 6 + Math.floor(r() * 4),
     branches,
     leaf: shade(leaf, r() * 18 - 9),
     bark: form === 'cactus' ? '#598474' : form === 'broadleaf' && r() > 0.5 ? '#aaa99a' : '#796951',
@@ -301,7 +367,7 @@ export function makeRegionalTree(form: TreeForm, seed: number): Sprite {
           2 + r() * 3,
           shade(g.leaf, lit * 19 + r() * 25 - 12),
         );
-        if (r() > 0.65) rect(c, xx + dx, yy + dy, 2, 1, shade(g.leaf, lit * 12 + 26));
+        if (r() > 0.84 && lit > 0.3) rect(c, xx + dx, yy + dy, 2, 1, shade(g.leaf, lit * 15 + 26));
       }
     };
     if (form === 'conifer') {
@@ -311,6 +377,8 @@ export function makeRegionalTree(form: TreeForm, seed: number): Sprite {
         clump(x, yy + 8, span, 13);
       }
     } else {
+      // Dark connected crown establishes depth before overlapping sunlit lobes.
+      clump(x, foot - g.height * 0.69, g.spread * 0.88, g.spread * 0.61);
       for (const b of [...g.branches].sort((a, b) => a.y - b.y))
         clump(
           x + b.x,
@@ -329,6 +397,12 @@ export function makeRegionalTree(form: TreeForm, seed: number): Sprite {
         for (let d = 1; d < len; d += 3)
           rect(c, xx + Math.sin(n + d * 0.1) * 3, yy + d, 2, 3, shade(g.leaf, r() * 22));
       }
+    for (let n = 0; n < 14; n++) {
+      const xx = x + (r() - 0.5) * 31,
+        yy = foot - 1 + r() * 5;
+      rect(c, xx, yy, 3 + r() * 4, 2, shade(g.leaf, -23));
+      line(c, xx + 2, yy, xx + 1, yy - 3 - r() * 4, shade(g.leaf, 9));
+    }
     line(c, x - 4, foot - 3, x - 12, foot, g.bark, 2);
     line(c, x + 3, foot - 4, x + 10, foot, g.bark, 2);
   });

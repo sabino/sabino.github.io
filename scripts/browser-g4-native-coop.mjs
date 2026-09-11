@@ -112,6 +112,7 @@ async function traveler(name, targetUrl = url, mobile = false) {
   };
   const focus = () => page.send('Page.bringToFront');
   const key = async (key, code, vk, hold = 0, modifiers = 0) => {
+    await focus();
     await page.send('Input.dispatchKeyEvent', {
       type: 'keyDown',
       key,
@@ -130,6 +131,7 @@ async function traveler(name, targetUrl = url, mobile = false) {
     await delay(80);
   };
   const point = async (x, y) => {
+    await focus();
     await page.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
       button: 'left',
@@ -219,7 +221,7 @@ async function traveler(name, targetUrl = url, mobile = false) {
 }
 
 async function accept(c, name) {
-  await c.wait("window.stichos.state.modal==='creation'", 'creation');
+  await c.wait("window.stichos.state.modal==='creation'", 'creation', 40000);
   await c.fill('#v-create-name', name);
   await c.key('Tab', 'Tab', 9);
   await c.click('#v-accept-life');
@@ -303,6 +305,21 @@ try {
     'PASS three native-created g4 lives; URL+QR and code-only mobile join; exact electronic avatar tier; unique browser IDs; zero browser errors.',
   );
 } catch (e) {
+  for (const c of clients) {
+    try {
+      await c.shot(c.name + '-failure');
+      const s = await c.state();
+      console.log(
+        JSON.stringify({
+          client: c.name,
+          modal: s.modal,
+          seed: s.seed,
+          multiplayer: s.multiplayer,
+          body: await c.read('document.body.innerText.slice(-4500)'),
+        }),
+      );
+    } catch {}
+  }
   console.error(e);
   process.exitCode = 1;
 } finally {

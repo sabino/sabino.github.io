@@ -612,7 +612,7 @@ export class StichosArt {
   ground(tile: Tile): Sprite {
     if (tile.ecology)
       return this.get(
-        `regional-ground:${tile.terrain}:${tile.seed % 32}:${regionalGroundColor(tile)}:${tile.architecture?.wallMaterial}:${!!tile.building}`,
+        `regional-ground:${tile.terrain}:${tile.seed}:${regionalGroundColor(tile)}:${tile.architecture?.wallMaterial}:${!!tile.building}`,
         () => makeRegionalGround(tile),
       );
     const terrain = tile.terrain === 'wall' ? 'floor' : tile.terrain;

@@ -112,6 +112,7 @@ async function traveler(name, targetUrl = url, mobile = false) {
   };
   const focus = () => page.send('Page.bringToFront');
   const key = async (key, code, vk, hold = 0, modifiers = 0) => {
+    await focus();
     await page.send('Input.dispatchKeyEvent', {
       type: 'keyDown',
       key,
@@ -130,6 +131,7 @@ async function traveler(name, targetUrl = url, mobile = false) {
     await delay(80);
   };
   const point = async (x, y) => {
+    await focus();
     await page.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
       button: 'left',
@@ -244,6 +246,9 @@ try {
   console.error(e);
   process.exitCode = 1;
 } finally {
-  for (const c of clients) c.page.close();
+  for (const c of clients) {
+    c.page.close();
+    await browser?.send('Target.disposeBrowserContext',{browserContextId:c.browserContextId}).catch(()=>{});
+  }
   browser?.close();
 }

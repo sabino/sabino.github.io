@@ -268,6 +268,32 @@ export class StichosRenderer {
           this.chunkSiteWalls.delete(old);
         }
       }
+    // Upper-left daylight is shared by every generated upright structure and tree.
+    if (game.world.generation >= 4) {
+      ctx.save();
+      ctx.fillStyle = '#15282e';
+      ctx.globalAlpha = 0.23;
+      for (const b of buildings.values()) {
+        const a = this.worldToScreen({ x: b.minX - 0.5, y: b.minY - 0.5 }),
+          z = this.worldToScreen({ x: b.maxX + 0.5, y: b.maxY + 0.5 }),
+          sx = (b.cathedral ? 42 : 29) * scale,
+          sy = (b.cathedral ? 26 : 19) * scale;
+        poly(
+          ctx,
+          [
+            [a.x, a.y],
+            [z.x, a.y],
+            [z.x + sx, a.y + sy],
+            [z.x + sx, z.y + sy],
+            [a.x + sx, z.y + sy],
+            [a.x, z.y],
+          ],
+          '#15282e',
+        );
+        rect(ctx, a.x - 3 * scale, z.y - 3 * scale, z.x - a.x + 6 * scale, 11 * scale, '#172a2c');
+      }
+      ctx.restore();
+    }
     this.drawFootprints(game, dt);
     const radius = Math.hypot(this.width / unit / 2, this.height / unit / 2) + 10;
     const props = game.world.propsAround(this.camera.x, this.camera.y, radius).filter((p) => {
@@ -292,7 +318,34 @@ export class StichosRenderer {
           prop.kind === 'heartleaf' ? '#a79de5' : prop.kind === 'emberroot' ? '#da967a' : '#84c7bd',
           0.13,
         );
-      if (prop.kind === 'rock') this.shadow(p, 18 * scale, 7 * scale, 0.12);
+      if (prop.kind === 'pine' && game.world.generation >= 4) {
+        const shape = this.art.prop(
+          prop.kind,
+          prop.seed,
+          false,
+          undefined,
+          undefined,
+          false,
+          prop.vegetation,
+        );
+        ctx.save();
+        ctx.globalAlpha = 0.21;
+        ctx.translate(p.x + 6 * scale, p.y + 5 * scale);
+        ctx.transform(1, 0, -0.75, -0.31, 0, 0);
+        // The alpha mask comes from the actual tree silhouette; a cached mask avoids per-frame composition.
+        const mask = this.treeShadow(prop.seed, shape.image);
+        ctx.drawImage(
+          mask,
+          -shape.x * scale,
+          -shape.y * scale,
+          shape.image.width * scale,
+          shape.image.height * scale,
+        );
+        ctx.restore();
+        this.shadow(p, 25 * scale, 9 * scale, 0.29);
+      }
+      if (prop.kind === 'rock')
+        this.shadow({ x: p.x + 7 * scale, y: p.y + 3 * scale }, 23 * scale, 9 * scale, 0.25);
       if (prop.kind === 'workbench') {
         this.shadow({ x: p.x + 4 * scale, y: p.y }, 23 * scale, 7 * scale, 0.23);
         this.glow(p.x + 14 * scale, p.y + 3 * scale, 48 * scale, '#ecc080', 0.16);
@@ -855,6 +908,23 @@ export class StichosRenderer {
     this.ctx.restore();
   }
 
+  private treeShadows = new Map<number, HTMLCanvasElement>();
+  private treeShadow(seed: number, source: HTMLCanvasElement) {
+    const existing = this.treeShadows.get(seed);
+    if (existing) return existing;
+    const mask = document.createElement('canvas');
+    mask.width = source.width;
+    mask.height = source.height;
+    const c = mask.getContext('2d')!;
+    c.drawImage(source, 0, 0);
+    c.globalCompositeOperation = 'source-in';
+    c.fillStyle = '#102b2d';
+    c.fillRect(0, 0, mask.width, mask.height);
+    this.treeShadows.set(seed, mask);
+    while (this.treeShadows.size > 192)
+      this.treeShadows.delete(this.treeShadows.keys().next().value!);
+    return mask;
+  }
   private shadow(p: Point, width: number, height: number, alpha: number) {
     const ctx = this.ctx;
     if (!this.contactTexture) {
@@ -1003,7 +1073,10 @@ export class StichosRenderer {
     const breath = this.reducedMotion
       ? 0.5
       : fract(game.time * 0.36 + (person.appearance.seed % 13));
-    if (breath < 0.4) {
+    if (
+      breath < 0.4 &&
+      (game.world.generation < 4 || game.world.tile(person.x, person.y).temperature < 5)
+    ) {
       ctx.save();
       ctx.globalAlpha = 0.22 * Math.sin((breath / 0.4) * Math.PI);
       const side = Math.cos(person.heading),
