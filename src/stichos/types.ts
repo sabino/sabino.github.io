@@ -134,6 +134,8 @@ export type NpcRole =
   | 'raider'
   | 'pilgrim';
 export interface Appearance {
+  /** Civilization construction tier; present even when this resident carries no weapon. */
+  technology?: 0 | 1 | 2 | 3;
   /** Body-owned forged item seed; never changes this person's anatomy. */
   weaponSeed?: number;
   /** A generated physical object; anatomy still derives from seed. */

@@ -787,6 +787,7 @@ export class InfiniteWorld {
             : role === 'botanist' && gear() < 0.24
               ? 'staff'
               : 'none';
+      look.technology = civilizationTechnologyTier(this.civilization!);
       if (look.weapon !== 'none')
         look.weaponSeed = technologyWeaponSeed(
           deriveSeed(seed, 'v4-resident-weapon', role),

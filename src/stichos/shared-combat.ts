@@ -184,7 +184,8 @@ const optionalText = (v: unknown) => v === undefined || text(v);
 const appearance = (v: unknown) =>
   object(v) &&
   integer(v.seed, -0xffffffff, 0xffffffff) &&
-  (v.weaponSeed === undefined || integer(v.weaponSeed, 0, 0xffffffff)) &&
+  (v.technology === undefined || integer(v.technology, 0, 3)) &&
+  (v.weaponSeed === undefined || integer(v.weaponSeed, 0, 0x4ffffffff)) &&
   (v.artifactDesign === undefined || design(v.artifactDesign)) &&
   ['skin', 'hair', 'coat', 'trim', 'trousers'].every((key) => color(v[key])) &&
   finite(v.height, 0.5, 2) &&
@@ -474,7 +475,7 @@ export class SharedCombat {
       throw Error('Invalid equipped body.');
     if (
       look.weaponSeed !== undefined &&
-      (!Number.isInteger(look.weaponSeed) || look.weaponSeed < 0 || look.weaponSeed > 0xffffffff)
+      (!Number.isInteger(look.weaponSeed) || look.weaponSeed < 0 || look.weaponSeed > 0x4ffffffff)
     )
       throw Error('Invalid weapon construction.');
     if (
@@ -502,7 +503,7 @@ export class SharedCombat {
       throw Error('Invalid equipped body.');
     if (
       look.weaponSeed !== undefined &&
-      (!Number.isInteger(look.weaponSeed) || look.weaponSeed < 0 || look.weaponSeed > 0xffffffff)
+      (!Number.isInteger(look.weaponSeed) || look.weaponSeed < 0 || look.weaponSeed > 0x4ffffffff)
     )
       throw Error('Invalid weapon construction.');
     if (look.artifactDesign !== undefined) {
@@ -518,9 +519,8 @@ export class SharedCombat {
         artifactDesign: artifact.design,
       };
     }
-    if (!['staff', 'sword', 'bow', 'none'].includes(look.weapon))
-      throw Error('Invalid equipped weapon.');
-    const kind = look.weapon === 'none' ? 'staff' : look.weapon;
+    if (!['staff', 'sword', 'bow'].includes(look.weapon)) throw Error('Invalid equipped weapon.');
+    const kind = look.weapon as 'staff' | 'sword' | 'bow';
     const state = createProgression(look.seed);
     state.xp.combat = progression?.combatXp ?? 0;
     const skill = skillBonuses(state),
@@ -650,7 +650,20 @@ export class SharedCombat {
       return this.result(false, 'A living, active traveler on clear ground is required.');
     let profile: ReturnType<SharedCombat['profile']>;
     try {
-      profile = this.profile(peer.appearance, peer.progression);
+      profile =
+        kind === 'ward' &&
+        peer.appearance?.weapon === 'none' &&
+        !peer.appearance.artifactDesign &&
+        appearance(peer.appearance) &&
+        (peer.progression === undefined || validSharedCombatProgression(peer.progression))
+          ? {
+              damage: 14 + (peer.progression?.level ?? 1),
+              range: 2.7,
+              cooldown: 8,
+              delivery: 'pulse',
+              color: '#9abde9',
+            }
+          : this.profile(peer.appearance, peer.progression);
     } catch (error) {
       return this.result(false, error instanceof Error ? error.message : 'Invalid weapon.');
     }
@@ -743,7 +756,7 @@ export class SharedCombat {
       .find((p) => p.id === `${group}:notice` && p.kind === 'notice');
     if (!notice || distance(peer, notice) > 1.9 || !this.lineOfSight(peer, notice))
       return this.result(false, 'Speak at the actual vault notice.');
-    const spacing = this.world.generation === 3 ? STOP_SPACING : 80;
+    const spacing = this.world.generation >= 3 ? STOP_SPACING : 80;
     const center = {
       x: Math.round((Number(match[1]) + 0.5) * spacing),
       y: Math.round((Number(match[2]) + 0.5) * spacing),
@@ -860,7 +873,13 @@ export class SharedCombat {
       const destination = target ?? npc.home;
       const d = distance(npc, destination);
       const kind = npc.appearance.weapon === 'bow' ? 'arrow' : 'slash';
-      const profile = this.profile(npc.appearance);
+      // Old saves and disarmed residents can contain an unarmed hostile.
+      // Give that NPC only close physical striking reach; never fabricate a staff.
+      // Player intents still require an owned weapon or implement via profile().
+      const profile =
+        npc.appearance.weapon === 'none' && !npc.appearance.artifactDesign
+          ? { damage: 8, range: 1.15, cooldown: 0.7, color: npc.appearance.skin }
+          : this.profile(npc.appearance);
       const reach = profile.range * 0.78;
       const canAim = !!target && d <= reach && this.lineOfSight(npc, target);
       if (canAim && npc.cooldown <= 0) {

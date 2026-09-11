@@ -253,6 +253,8 @@ export function generateLifeCandidate(
   }
   // Occupation, rather than character creation, determines what this resident carries.
   look.weapon = resident.appearance.weapon;
+  if (resident.appearance.technology !== undefined)
+    look.technology = resident.appearance.technology;
   if (look.weapon !== 'none')
     look.weaponSeed =
       resident.appearance.weaponSeed ?? deriveSeed(candidateSeed, 'owned-equipment', look.weapon);

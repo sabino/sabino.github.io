@@ -14,6 +14,7 @@ const only = (value, keys) =>
 const appearance = (value) =>
   only(value, [
     'seed',
+    'technology',
     'skin',
     'hair',
     'coat',

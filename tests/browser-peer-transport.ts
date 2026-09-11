@@ -2,20 +2,36 @@ import { createPeerTransport, type RoomTransport } from '../src/stichos/peer-tra
 import { MULTIPLAYER_PROTOCOL } from '../src/stichos/multiplayer-protocol.ts';
 import { validSharedCombatFrame, type SharedCombatFrame } from '../src/stichos/shared-combat.ts';
 import { InfiniteWorld, appearance } from '../src/stichos/world.ts';
+import type { Appearance } from '../src/stichos/types.ts';
+import { technologyWeaponSeed } from '../src/stichos/equipment.ts';
 import { verifyRoomHello, verifyRoomCheckpoint } from '../src/stichos/room-checkpoint.ts';
 
 // These are real clear coordinates in world3886/gen3. Their union exposes49 generated raiders.
 // No invented NPCs, padded packets, or direct game/storage assignment participate.
-const positions = [
-  { x: -352, y: -448 },
-  { x: 192, y: -480 },
-  { x: -384, y: -416 },
-  { x: -128, y: -352 },
-  { x: 448, y: -352 },
-  { x: 0, y: -256 },
-  { x: 320, y: -160 },
-  { x: -480, y: -128 },
-];
+const generation = new URLSearchParams(location.search).get('generation') === '4' ? 4 : 3;
+const worldSeed = generation === 4 ? 8 : 3886;
+const positions =
+  generation === 4
+    ? [
+        { x: 96, y: -32 },
+        { x: 288, y: -224 },
+        { x: -352, y: -160 },
+        { x: -160, y: -416 },
+        { x: -160, y: -352 },
+        { x: -224, y: -32 },
+        { x: 96, y: 32 },
+        { x: 352, y: 288 },
+      ]
+    : [
+        { x: -352, y: -448 },
+        { x: 192, y: -480 },
+        { x: -384, y: -416 },
+        { x: -128, y: -352 },
+        { x: 448, y: -352 },
+        { x: 0, y: -256 },
+        { x: 320, y: -160 },
+        { x: -480, y: -128 },
+      ];
 interface Client {
   wire: RoomTransport;
   peerId: string;
@@ -28,6 +44,8 @@ interface Client {
   proofVerified: boolean;
   binding: string;
   checkpointBytes: number;
+  exactGear: Set<number>;
+  electronicEnemies: boolean;
 }
 interface Report {
   status: 'RUNNING' | 'PASS' | 'FAIL';
@@ -97,6 +115,17 @@ button.onclick = async () => {
     publish();
   };
   const look = { ...appearance(42, 'pilgrim', 1), weapon: 'staff' as const };
+  const looks: Appearance[] = positions.map((_, index) =>
+    generation === 4
+      ? {
+          ...appearance(42 + index, 'guard', 1),
+          technology: 3 as const,
+          weapon: (['staff', 'sword', 'bow'] as const)[index % 3],
+          weaponSeed: technologyWeaponSeed(0xfffffff0 + index, 3),
+        }
+      : look,
+  );
+  const expectedGear = new Set(looks.map((l) => l.weaponSeed));
   const makeClient = (index: number, room = '') => {
     const wire = createPeerTransport(room);
     const c: Client = {
@@ -111,6 +140,8 @@ button.onclick = async () => {
       proofVerified: false,
       binding: '',
       checkpointBytes: 0,
+      exactGear: new Set(),
+      electronicEnemies: false,
     };
     const challenge = [...crypto.getRandomValues(new Uint8Array(32))]
       .map((b) => b.toString(16).padStart(2, '0'))
@@ -122,10 +153,10 @@ button.onclick = async () => {
           type: 'join',
           protocol: MULTIPLAYER_PROTOCOL,
           challenge,
-          seed: 3886,
-          generation: 3,
+          seed: worldSeed,
+          generation,
           name: `Transport witness ${index + 1}`,
-          appearance: look,
+          appearance: looks[index],
           position: positions[index],
           combatActive: true,
           bodyId: `fixture-body-${index}`,
@@ -147,6 +178,19 @@ button.onclick = async () => {
           fail(`Authority error: ${message.code}: ${message.reason}`);
           return;
         }
+        if (generation === 4) {
+          const peers =
+            message.type === 'welcome'
+              ? message.peers
+              : ['peerJoined', 'pose'].includes(message.type)
+                ? [message.peer]
+                : [];
+          for (const peer of peers) {
+            if (!expectedGear.has(peer.appearance.weaponSeed) || peer.appearance.technology !== 3)
+              fail('RTC peer lost or truncated its civilization/equipment descriptor.');
+            else c.exactGear.add(peer.appearance.weaponSeed);
+          }
+        }
         if (message.type === 'welcome') {
           c.welcomed++;
           c.peerId = message.peerId;
@@ -162,6 +206,18 @@ button.onclick = async () => {
           });
         }
         if (message.type === 'checkpoint') {
+          if (
+            message.checkpoint.state.generation !== generation ||
+            message.checkpoint.state.seed !== worldSeed
+          )
+            fail('Checkpoint crossed world generation or seed.');
+          if (
+            generation === 4 &&
+            message.checkpoint.state.combat.snapshot.enemies.some(
+              (n: any) => n.appearance.weaponSeed > 0xffffffff && n.appearance.technology === 3,
+            )
+          )
+            c.electronicEnemies = true;
           if (message.checkpoint.state.chat.some((m: { channel: string }) => m.channel !== 'world'))
             fail('Public replica exposed local speech.');
           void verifyRoomCheckpoint(message.checkpoint).then((ok) => {
@@ -210,7 +266,7 @@ button.onclick = async () => {
     window.WebSocket = NativeWebSocket;
   }, 30000);
   try {
-    const world = new InfiniteWorld(3886, 3);
+    const world = new InfiniteWorld(worldSeed, generation);
     if (positions.some((p) => world.blocked(p.x, p.y)))
       throw Error('A fixture position is not clear in this generated world.');
     note('All eight fixture positions are legal generated terrain', positions);
@@ -227,7 +283,7 @@ button.onclick = async () => {
               ...positions[i],
               heading: 0,
               phase: 0,
-              appearance: look,
+              appearance: looks[i],
               combatActive: true,
               bodyId: `fixture-body-${i}`,
               progression: { level: 1, combatXp: 0, upgrade: 0 },
@@ -255,6 +311,13 @@ button.onclick = async () => {
       'All eight participants received and verified chunked signed public world checkpoints',
       clients.map((c) => c.checkpointBytes),
     );
+    if (generation === 4) {
+      await wait(() => clients.every((c) => c.exactGear.size === 8 && c.electronicEnemies));
+      note(
+        'Every RTC peer and signed hostile checkpoint retains exact35-bit equipment and civilization context',
+        clients.map((c) => ({ seeds: [...c.exactGear], electronicEnemies: c.electronicEnemies })),
+      );
+    }
     const hostSignal = signals.find(
       (s) =>
         s.readyState === NativeWebSocket.OPEN &&

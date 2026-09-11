@@ -7,7 +7,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 const endpoint = process.argv[2],
-  url = process.argv[3] || 'http://localhost:4174/';
+  url = process.argv[3] || 'http://localhost:4174/',
+  generation = process.argv[4] === '4' ? 4 : 3;
 if (
   !endpoint ||
   !['127.0.0.1', 'localhost'].includes(new URL(endpoint).hostname) ||
@@ -15,7 +16,7 @@ if (
 )
   throw Error('Use the verified workspace endpoint and the local or published Verso frontend.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, '.dream-loop/stichos-peer-transport');
+const out = path.join(root, `.dream-loop/stichos-peer-transport${generation === 4 ? '-g4' : ''}`);
 fs.mkdirSync(out, { recursive: true });
 const started = new Date(),
   results = [],
@@ -243,7 +244,12 @@ try {
     newWindow: true,
   });
   const targets = await (await fetch(`${endpoint}/json/list`)).json();
-  const page = await connect(targets.find((t) => t.id === targetId).webSocketDebuggerUrl);
+  const page = await connect(
+    targets.find((t) => t.id === targetId).webSocketDebuggerUrl,
+    (method, params) => {
+      if (method === 'Runtime.exceptionThrown') errors.push(params.exceptionDetails);
+    },
+  );
   const read = async (expression) => {
     const r = await page.send('Runtime.evaluate', { expression, returnByValue: true });
     if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails));
@@ -251,8 +257,10 @@ try {
   };
   clients.push({ page, browserContextId });
   await page.send('Page.enable');
+  await page.send('Runtime.enable');
+  await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
   await page.send('Page.navigate', {
-    url: 'http://localhost:4173/tests/browser-peer-transport.html',
+    url: `http://localhost:4173/tests/browser-peer-transport.html?generation=${generation}`,
   });
   await page.send('Page.bringToFront');
   for (
@@ -261,6 +269,12 @@ try {
     i++
   )
     await delay(100);
+  assert.equal(
+    await read('typeof document.querySelector("#run")?.onclick'),
+    'function',
+    JSON.stringify(errors),
+  );
+  await page.send('Page.bringToFront');
   const box = await read(
     '(()=>{let r=document.querySelector("#run").getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()',
   );
@@ -288,7 +302,11 @@ try {
   );
   const shot = await page.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(out, 'fixture.png'), Buffer.from(shot.data, 'base64'));
-  assert.equal(report?.status, 'PASS', JSON.stringify(report));
+  assert.equal(
+    report?.status,
+    'PASS',
+    JSON.stringify(report ?? { error: 'Fixture did not start', exceptions: errors }),
+  );
   for (const check of report.checks) pass(check.name, JSON.stringify(check.detail));
 } catch (error) {
   failure = error;

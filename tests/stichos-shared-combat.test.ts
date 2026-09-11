@@ -490,3 +490,39 @@ test('one procedural pulse shares its strike receipt across targets while ordina
   assert.equal(validSharedCombatFrame(pulse), true);
   assert.equal(validSharedCombatFrame(ward), true);
 });
+
+test('unarmed legacy hostiles simulate physical strikes without granting hidden player equipment', () => {
+  const unarmed = enemy('disarmed-hostile', 0.7, 0, 'none'),
+    p = peer('civilian', 0, 0, 'none');
+  const a = arena([unarmed]);
+  assert.equal(a.combat.attack(p, 0).ok, false);
+  let hits = 0;
+  for (let i = 0; i < 12; i++) {
+    a.advance(50);
+    const frame = a.combat.tick(0.05, [p]);
+    assert(validSharedCombatFrame(frame));
+    hits += frame.hits.filter((h) => h.target === 'peer').length;
+  }
+  assert(hits > 0, 'The unarmed hostile can strike only at close physical reach.');
+  const stored = a.combat.checkpoint();
+  assert.equal(stored.snapshot.enemies[0].appearance.weapon, 'none');
+  assert.equal(stored.snapshot.enemies[0].appearance.weaponSeed, undefined);
+  assert.equal(
+    a.combat.attack(p, 0, 'ward').ok,
+    true,
+    'A mental defensive ward does not require a weapon.',
+  );
+  assert.equal(
+    a.combat.attack(p, 0, 'ward').ok,
+    false,
+    'The existing ward cooldown still applies.',
+  );
+  const b = arena([enemy('far-disarmed', 1.2, 0, 'none')]);
+  const first = b.combat.tick(0.02, [peer()]);
+  assert.equal(first.hits.length, 0);
+  assert.equal(
+    first.snapshot.enemies[0].intent,
+    undefined,
+    'No staff reach is invented for the unarmed body.',
+  );
+});

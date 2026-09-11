@@ -511,7 +511,7 @@ test('forged item appearance travels with the peer while invalid seeds cannot re
   assert.equal(shown.appearance.weaponSeed, forged.seed);
   assert.equal(shown.appearance.seed, look().seed);
   const member = server.hub.rooms.get(owner.welcome.room).members.get(owner.welcome.peerId);
-  for (const weaponSeed of [-1, 0x100000000, 3.5, '42']) {
+  for (const weaponSeed of [-1, 0x500000000, 3.5, '42']) {
     owner.send({
       type: 'pose',
       x: 0,

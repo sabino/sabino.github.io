@@ -57,6 +57,68 @@ async function checkpoint(node, topic) {
 }
 
 test(
+  'generation-four electronic enemy equipment and clothing context replicate exactly between native nodes and survive restart',
+  { timeout: 45000 },
+  async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), 'verso-pear-g4-')),
+      network = await createTestnet(3);
+    let writer, reader;
+    const options = (name) => ({
+      directory: join(directory, name),
+      token: TOKEN,
+      bootstrap: network.bootstrap,
+      onError: () => {},
+    });
+    t.after(async () => {
+      await writer?.close();
+      await reader?.close();
+      await network.destroy();
+      await rm(directory, { recursive: true, force: true });
+    });
+    writer = await createPearBridge(options('writer'));
+    reader = await createPearBridge(options('reader'));
+    const npc = new InfiniteWorld(8, 4).npcsAround(96, -32, 16).find((n) => n.role === 'raider');
+    assert(npc.appearance.weaponSeed > 0xffffffff);
+    assert.equal(npc.appearance.technology, 3);
+    npc.hp -= 7;
+    const state = { ...emptyState(), seed: 8, generation: 4, room: 'G4PEAR88' };
+    state.combat.snapshot.enemies = [npc];
+    state.combat.records = [npc];
+    const key = await createRoomSigningIdentity(),
+      first = await signRoomCheckpoint(state, key);
+    const published = await post(writer, '/api/checkpoints', first);
+    assert.equal(published.status, 201);
+    const receipt = await published.json();
+    assert.equal((await post(reader, '/api/replicas', { key: receipt.key })).status, 201);
+    const replicated = await until(async () => {
+      const value = await checkpoint(reader, receipt.topic);
+      return value?.hash === first.hash ? value : null;
+    });
+    assert.deepEqual(replicated.state.combat.records[0].appearance, npc.appearance);
+    assert.equal(replicated.state.generation, 4);
+    await writer.close();
+    await reader.close();
+    writer = await createPearBridge(options('writer'));
+    reader = await createPearBridge(options('reader'));
+    for (const node of [writer, reader]) {
+      const restored = await checkpoint(node, receipt.topic);
+      assert.equal(
+        restored.state.combat.records[0].appearance.weaponSeed,
+        npc.appearance.weaponSeed,
+      );
+      assert.equal(restored.state.combat.records[0].appearance.technology, 3);
+      assert.equal(restored.state.combat.records[0].hp, npc.hp);
+    }
+    const nextState = structuredClone(state);
+    nextState.combat.records[0].hp = npc.hp - 3;
+    nextState.combat.snapshot.enemies[0].hp = npc.hp - 3;
+    const second = await signRoomCheckpoint(nextState, key, first);
+    assert.equal((await post(writer, '/api/checkpoints', second)).status, 201);
+    await until(async () => (await checkpoint(reader, receipt.topic))?.hash === second.hash);
+  },
+);
+
+test(
   'two native nodes discover over a local DHT, replicate signed updates, and both resume their disk state',
   { timeout: 45000 },
   async (t) => {

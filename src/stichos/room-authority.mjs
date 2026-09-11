@@ -46,7 +46,8 @@ const artifactDesignValid = (value) => {
 const appearanceValid = (value) =>
   object(value) &&
   integer(value.seed, -0xffffffff, 0xffffffff) &&
-  (value.weaponSeed === undefined || integer(value.weaponSeed, 0, 0xffffffff)) &&
+  (value.technology === undefined || integer(value.technology, 0, 3)) &&
+  (value.weaponSeed === undefined || integer(value.weaponSeed, 0, 0x4ffffffff)) &&
   artifactDesignValid(value.artifactDesign) &&
   ['skin', 'hair', 'coat', 'trim', 'trousers'].every(
     (key) =>
@@ -76,6 +77,7 @@ const copyAppearance = (value) => ({
       'weapon',
     ].map((key) => [key, value[key]]),
   ),
+  ...(value.technology === undefined ? {} : { technology: value.technology }),
   ...(value.weaponSeed === undefined ? {} : { weaponSeed: value.weaponSeed }),
   ...(value.artifactDesign === undefined ? {} : { artifactDesign: value.artifactDesign }),
 });
@@ -425,7 +427,7 @@ export class CoopRooms {
     if (
       message.protocol !== MULTIPLAYER_PROTOCOL ||
       !integer(message.seed, 0, 0xffffffff) ||
-      ![1, 2, 3].includes(message.generation) ||
+      ![1, 2, 3, 4].includes(message.generation) ||
       !text(message.name, 1, 64) ||
       !message.name.trim() ||
       !appearanceValid(message.appearance) ||
