@@ -2498,7 +2498,8 @@ export class Stichos {
     this.effect('slash', p, profile.color, 0.22, p.heading);
     const range = profile.range;
     const candidates = this.npcs.filter(
-      (n) => n.hp > 0 && distance(n, p) <= range && this.inCone(n, p.heading),
+      (n) =>
+        n.hp > 0 && distance(n, p) <= range && this.inCone(n, p.heading) && this.lineOfSight(p, n),
     );
     candidates.sort((a, b) => distance(a, p) - distance(b, p));
     if (candidates[0]) this.damageNpc(candidates[0], profile.damage, profile.effect);
@@ -2512,7 +2513,9 @@ export class Stichos {
     this.effect('ward', p, '#9abde9', 0.75);
     this.event('ward', 'The ward steadies your breath and repels attackers.');
     p.breath = clamp(p.breath + 5);
-    for (const npc of this.npcs.filter((n) => n.hostile && n.hp > 0 && distance(n, p) < 2.7)) {
+    for (const npc of this.npcs.filter(
+      (n) => n.hostile && n.hp > 0 && distance(n, p) < 2.7 && this.lineOfSight(p, n),
+    )) {
       this.damageNpc(npc, 14 + p.level);
       const range = Math.max(0.01, distance(npc, p));
       this.move(npc, ((npc.x - p.x) / range) * 0.7, ((npc.y - p.y) / range) * 0.7);
@@ -3101,6 +3104,7 @@ export class Stichos {
     return clone({
       version: 1,
       terrainRevision: 3,
+      doorRevision: 1,
       worldGeneration: this.world.generation,
       seed: this.seed,
       player: this.player,
@@ -3266,6 +3270,30 @@ export class Stichos {
             ` for ${job.recipientName} in ${ORIGIN_CITY_NAME}.`,
           );
     }
+    if (data.doorRevision === undefined) {
+      // Earlier builds drew closed doors without collision. Preserve bodies and rest
+      // anchors exactly by opening only doors that overlap their existing footprint.
+      const keepFooting = (point: Point) => {
+        for (const door of game.world.propsAround(point.x, point.y, 1)) {
+          if (
+            door.kind === 'door' &&
+            Math.abs(point.x - door.x) < 0.72 &&
+            Math.abs(point.y - door.y) < 0.72
+          ) {
+            game.removed.add(door.id);
+            game.opened.add(door.id);
+          }
+        }
+      };
+      keepFooting(game.player);
+      keepFooting(game.restAnchor);
+      for (const npc of game.npcMemory.values()) {
+        if (npc.hp > 0 && !game.removed.has(npc.id)) {
+          keepFooting(npc);
+          keepFooting(npc.home);
+        }
+      }
+    }
     if ((data.terrainRevision ?? 1) < 3) {
       // Revisions 2 and 3 widen only the origin cathedral and move its houses.
       // Preserve exact positions everywhere else and every already-clear legacy position.
@@ -3342,6 +3370,7 @@ function validateSave(value: unknown): SaveData {
     ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
   if (!object(value) || value.version !== 1 || !number(value.seed, 0, 0xffffffff, true))
     return fail();
+  if (value.doorRevision !== undefined && value.doorRevision !== 1) fail();
   if (value.terrainRevision !== undefined && ![1, 2, 3].includes(value.terrainRevision as number))
     return fail();
   if (value.worldGeneration !== undefined && ![1, 2, 3].includes(value.worldGeneration as number))

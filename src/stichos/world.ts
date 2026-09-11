@@ -1109,13 +1109,18 @@ export class InfiniteWorld {
       }
     return result;
   }
-  blocked(x: number, y: number, removed: Set<string> = new Set()): boolean {
+  /** Planning may treat doors as open; movement and projectiles use their actual state. */
+  blocked(x: number, y: number, removed: Set<string> = new Set(), doorsOpen = false): boolean {
     x = integer(x);
     y = integer(y);
     const tile = this.tile(x, y);
     if (tile.terrain === 'wall' || tile.terrain === 'water') return true;
     return this.chunk(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE)).props.some(
-      (p) => p.solid && p.x === x && p.y === y && !removed.has(p.id),
+      (p) =>
+        (p.solid || (p.kind === 'door' && !doorsOpen)) &&
+        p.x === x &&
+        p.y === y &&
+        !removed.has(p.id),
     );
   }
 }

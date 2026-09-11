@@ -11,15 +11,28 @@ import type { ProgressionAction, Profession } from './progression';
 import { drawPortrait } from './portrait';
 import { weaponIcon } from './equipment';
 import { furnitureIcon } from './progression-art';
+import { FORGE_MATERIALS, FORGE_CORES, FORGE_SPANS } from './forge';
+import type { ForgeRecipe } from './forge';
 
 const esc = (value: unknown) =>
   String(value).replace(
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
-type LifeTab = 'purpose' | 'skills' | 'homes' | 'wardrobe' | 'store';
-export function mountLife(container: HTMLElement, game: Stichos, onChange: () => void) {
-  let tab: LifeTab = 'purpose';
+type LifeTab = 'purpose' | 'skills' | 'forge' | 'homes' | 'wardrobe' | 'store';
+export function mountLife(
+  container: HTMLElement,
+  game: Stichos,
+  onChange: () => void,
+  initialTab: LifeTab = 'purpose',
+) {
+  let tab: LifeTab = initialTab;
+  const forgeRecipe: ForgeRecipe = {
+    kind: game.player.appearance.weapon === 'none' ? 'staff' : game.player.appearance.weapon,
+    material: 0,
+    core: 'breath',
+    span: 'balanced',
+  };
   let selectedHome = game.progression.homes[0]?.id ?? '';
   let message = '';
   let revision = 0;
@@ -77,9 +90,21 @@ export function mountLife(container: HTMLElement, game: Stichos, onChange: () =>
       .map((weapon) => {
         const p = game.weaponProfile(weapon),
           rank = upgradeBonuses(game.progression, game.bodyId, weapon).rank;
-        return `<article>${weaponIcon(game.player.appearance.seed, weapon, 84)}<h3>${esc(p.name)}</h3><p>Rank ${rank}/3 · ${p.damage} strength<br>${p.range.toFixed(2)} reach · ${p.cooldown.toFixed(2)}s recovery</p>${actionButton({ kind: 'upgrade', weapon }, rank === 3 ? 'Fully improved' : 'Improve weapon')}</article>`;
+        return `<article>${weaponIcon(game.weaponSeed(weapon), weapon, 84)}<h3>${esc(p.name)}</h3><p>Rank ${rank}/3 · ${p.damage} strength<br>${p.range.toFixed(2)} reach · ${p.cooldown.toFixed(2)}s recovery</p>${actionButton({ kind: 'upgrade', weapon }, rank === 3 ? 'Fully improved' : 'Improve weapon')}</article>`;
       })
       .join('')}</div>`;
+  }
+  function forge() {
+    const preview = game.forgePreview(forgeRecipe),
+      resolved = preview.construction;
+    const current = game.weaponProfile(forgeRecipe.kind);
+    const price = resolved
+      ? [
+          `${resolved.cost.coins} coins`,
+          ...Object.entries(resolved.cost.items).map(([item, amount]) => `${amount} ${item}`),
+        ].join(' · ')
+      : '';
+    return `<p>Build a weapon from its parts. Material sets mass, proportions shape reach and recovery, and a living core changes what a successful hit does. Your choices resolve into an actual generated weapon.</p><div class="s-forge-layout"><div class="s-forge-controls"><label>Weapon<select id="s-forge-kind">${(['staff', 'sword', 'bow'] as const).map((kind) => `<option value="${kind}" ${forgeRecipe.kind === kind ? 'selected' : ''}>${kind}</option>`).join('')}</select></label><label>Structural material<select id="s-forge-material">${FORGE_MATERIALS[forgeRecipe.kind].map((material, index) => `<option value="${index}" ${forgeRecipe.material === index ? 'selected' : ''}>${esc(material)}</option>`).join('')}</select></label><label>Living core<select id="s-forge-core">${FORGE_CORES.map((core) => `<option value="${core.id}" ${forgeRecipe.core === core.id ? 'selected' : ''}>${esc(core.name)}</option>`).join('')}</select></label><label>Proportions<select id="s-forge-span">${FORGE_SPANS.map((span) => `<option value="${span.id}" ${forgeRecipe.span === span.id ? 'selected' : ''}>${esc(span.name)}</option>`).join('')}</select></label><p>${esc(FORGE_SPANS.find((span) => span.id === forgeRecipe.span)!.description)}</p></div><article class="s-forge-preview">${resolved ? `${weaponIcon(resolved.seed, forgeRecipe.kind, 160)}<small>${esc(resolved.profile.construction)}</small><h3>${esc(resolved.profile.name)}</h3><dl><div><dt>Strength</dt><dd>${resolved.profile.damage} <small>current ${current.damage}</small></dd></div><div><dt>Reach</dt><dd>${resolved.profile.range.toFixed(2)} <small>current ${current.range.toFixed(2)}</small></dd></div><div><dt>Recovery</dt><dd>${resolved.profile.cooldown.toFixed(2)}s <small>current ${current.cooldown.toFixed(2)}s</small></dd></div></dl><p>${esc(resolved.profile.effectDescription)}</p>` : '<p>This construction could not be resolved. Choose another combination.</p>'}</article></div><p class="s-forge-price">${esc(price)}</p><button id="s-forge-build" class="s-primary" ${preview.ok ? '' : 'disabled'}>Forge and equip this construction</button><p id="s-forge-requirement">${esc(preview.message)}</p><p>The work requires crafting level 2 and a nearby field or home workbench. Its materials and coins leave this body’s pack. The completed weapon stays with this body when Theo travels.</p>`;
   }
   function homes() {
     const owned = game.progression.homes,
@@ -115,8 +140,13 @@ export function mountLife(container: HTMLElement, game: Stichos, onChange: () =>
   }
   function render() {
     const current = ++revision;
+    const active = container.contains(document.activeElement)
+      ? (document.activeElement as HTMLElement)
+      : null;
+    const focusId = active?.id,
+      focusTab = active?.dataset.lifeTab;
     actions.length = 0;
-    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['purpose', 'skills', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', skills: 'Professions', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'purpose' ? purpose() : tab === 'skills' ? skills() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
+    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['purpose', 'skills', 'forge', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', skills: 'Professions', forge: 'Forge', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'purpose' ? purpose() : tab === 'skills' ? skills() : tab === 'forge' ? forge() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
     container.querySelectorAll<HTMLButtonElement>('[data-life-tab]').forEach(
       (button) =>
         (button.onclick = () => {
@@ -148,6 +178,26 @@ export function mountLife(container: HTMLElement, game: Stichos, onChange: () =>
         selectedHome = select.value;
         render();
       };
+    for (const key of ['kind', 'material', 'core', 'span'] as const) {
+      const control = container.querySelector<HTMLSelectElement>(`#s-forge-${key}`);
+      if (control)
+        control.onchange = () => {
+          if (key === 'material')
+            forgeRecipe.material = Number(control.value) as ForgeRecipe['material'];
+          else if (key === 'kind') forgeRecipe.kind = control.value as ForgeRecipe['kind'];
+          else if (key === 'core') forgeRecipe.core = control.value as ForgeRecipe['core'];
+          else forgeRecipe.span = control.value as ForgeRecipe['span'];
+          message = '';
+          render();
+        };
+    }
+    const build = container.querySelector<HTMLButtonElement>('#s-forge-build');
+    if (build)
+      build.onclick = () => {
+        message = game.forge(forgeRecipe).message;
+        onChange();
+        render();
+      };
     const rest = container.querySelector<HTMLButtonElement>('#s-home-rest');
     if (rest)
       rest.onclick = () => {
@@ -173,6 +223,13 @@ export function mountLife(container: HTMLElement, game: Stichos, onChange: () =>
         if (current === revision && container.isConnected)
           void mountStore(container.querySelector<HTMLElement>('#s-life-panel')!, game, onChange);
       });
+    const restoredFocus = focusId
+      ? container.querySelector<HTMLElement>(`#${focusId}`)
+      : focusTab
+        ? container.querySelector<HTMLElement>(`[data-life-tab="${focusTab}"]`)
+        : null;
+    if (restoredFocus && !(restoredFocus as HTMLButtonElement).disabled)
+      restoredFocus.focus({ preventScroll: true });
   }
   render();
 }

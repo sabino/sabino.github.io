@@ -8,6 +8,7 @@
  * Add --possession to Continue a completed QA save and verify actual NPC mind transfer.
  * Add --atlas for the current generation-three map and smaller-settlement road route.
  * --expedition exercises the archived generation-two excavation checkpoint.
+ * --doors checks solid thresholds and automatic door opening along click routes.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,6 +22,7 @@ const visualOnly = process.argv.includes('--visual');
 const possessionOnly = process.argv.includes('--possession');
 const expeditionOnly = process.argv.includes('--expedition');
 const atlasOnly = process.argv.includes('--atlas');
+const doorsOnly = process.argv.includes('--doors');
 const visualName =
   process.argv.find((arg) => arg.startsWith('--visual-name='))?.split('=')[1] ?? 'round-02';
 const profileVisual = process.argv.includes('--profile');
@@ -33,15 +35,17 @@ if (baseUrl.hostname !== 'localhost')
   throw new Error('Use localhost to protect the developer’s 127.0.0.1 save.');
 const out = path.join(
   root,
-  atlasOnly
-    ? '.dream-loop/stichos-atlas'
-    : expeditionOnly
-      ? '.dream-loop/stichos-expedition'
-      : possessionOnly
-        ? '.dream-loop/stichos-possession'
-        : visualOnly
-          ? '.dream-loop/stichos'
-          : '.dream-loop/stichos-qa',
+  doorsOnly
+    ? '.dream-loop/stichos-doors-browser'
+    : atlasOnly
+      ? '.dream-loop/stichos-atlas'
+      : expeditionOnly
+        ? '.dream-loop/stichos-expedition'
+        : possessionOnly
+          ? '.dream-loop/stichos-possession'
+          : visualOnly
+            ? '.dream-loop/stichos'
+            : '.dream-loop/stichos-qa',
 );
 fs.mkdirSync(out, { recursive: true });
 const downloadFolder = `verso-stichos-campaign-${Date.now()}`;
@@ -1097,14 +1101,59 @@ async function possessionChecks() {
   await tap('Escape');
 }
 
+async function doorChecks() {
+  const id = 'origin:hall:door:1';
+  const door = await read(`window.stichos.props(0,-1,0).find(p=>p.id===${JSON.stringify(id)})`);
+  assert(door, 'The cathedral has a real generated threshold.');
+  await keyWalkNear({ x: 0, y: 1 }, 0.15);
+  await setKeys(['w']);
+  await delay(1100);
+  await setKeys([]);
+  let s = await state();
+  assert(
+    s.player.y > door.y + 0.65 && s.player.y < door.y + 0.9,
+    'Keyboard motion must stop at the closed door with body clearance.',
+  );
+  assert(!s.opened.includes(id), 'Walking into a door does not silently open it.');
+  log('Closed generated cathedral door blocks keyboard movement');
+  await screenshot('04-stopped-at-threshold');
+
+  await clickWalk({ x: 0, y: -4 }, 0.25, 'Automatic door click route');
+  s = await state();
+  assert(s.opened.includes(id) && s.removed.includes(id), 'The click route opens the door.');
+  log('One interior floor click opens the approached door and completes the route');
+  await screenshot('05-entered-cathedral');
+
+  await keyWalkNear({ x: 0, y: -2.15 }, 0.15);
+  await worldClick({ x: door.x, y: door.y - 0.25 });
+  await waitFor(
+    `!window.stichos.state.opened.includes(${JSON.stringify(id)})`,
+    'closed door inside',
+  );
+  await clickWalk({ x: 0, y: 2 }, 0.25, 'Exit door click route');
+  assert((await state()).opened.includes(id), 'The same route works from the interior.');
+  log('Closing from inside restores collision; an exterior click reopens and exits');
+
+  await tap('Escape');
+  await page.send('Page.reload', { ignoreCache: true });
+  await waitFor('document.querySelector("#s-continue")', 'saved doorway continuation');
+  await click('#s-continue');
+  await waitFor('!window.stichos.state.paused', 'continued doorway state');
+  assert((await state()).opened.includes(id), 'Opened doorway state survives normal save/reload.');
+  log('Door state persists through Save and Continue');
+  assert(errors.length === 0, `Browser reported ${errors.length} console/runtime errors`);
+  log('No browser console or runtime errors');
+  await screenshot('06-door-state-restored');
+}
+
 try {
   const version = await (await fetch(`${endpoint}/json/version`)).json();
   browser = await connect(version.webSocketDebuggerUrl, (method, params) => {
     if (method.startsWith('Browser.download')) downloads.push({ method, ...params });
   });
-  if (visualOnly || expeditionOnly || atlasOnly)
+  if (visualOnly || expeditionOnly || atlasOnly || doorsOnly)
     ({ browserContextId: contextId } = await browser.send('Target.createBrowserContext'));
-  if (!visualOnly && !possessionOnly && !expeditionOnly && !atlasOnly && !smoke) {
+  if (!visualOnly && !possessionOnly && !expeditionOnly && !atlasOnly && !doorsOnly && !smoke) {
     fs.mkdirSync(downloadHost, { recursive: true });
     await browser.send('Browser.setDownloadBehavior', {
       behavior: 'allow',
@@ -1169,7 +1218,9 @@ try {
     );
     await screenshot('03-cathedral-world');
     log('Seed entry, visible mind-transfer sequence, skip button, and humanoid staff host');
-    if (atlasOnly) {
+    if (doorsOnly) {
+      await doorChecks();
+    } else if (atlasOnly) {
       await atlasChecks();
     } else if (expeditionOnly) {
       await expeditionChecks();
@@ -1574,17 +1625,19 @@ try {
   const report = {
     started,
     finished: new Date(),
-    mode: atlasOnly
-      ? 'atlas'
-      : expeditionOnly
-        ? 'expedition'
-        : possessionOnly
-          ? 'possession'
-          : visualOnly
-            ? 'visual'
-            : smoke
-              ? 'smoke'
-              : 'full',
+    mode: doorsOnly
+      ? 'doors'
+      : atlasOnly
+        ? 'atlas'
+        : expeditionOnly
+          ? 'expedition'
+          : possessionOnly
+            ? 'possession'
+            : visualOnly
+              ? 'visual'
+              : smoke
+                ? 'smoke'
+                : 'full',
     endpoint,
     baseUrl: baseUrl.href,
     targetId,
@@ -1602,7 +1655,7 @@ try {
     path.join(out, visualOnly ? `${visualName}-results.json` : 'results.json'),
     JSON.stringify(report, null, 2),
   );
-  if (!visualOnly && !possessionOnly && !expeditionOnly && !atlasOnly)
+  if (!visualOnly && !possessionOnly && !expeditionOnly && !atlasOnly && !doorsOnly)
     fs.writeFileSync(
       path.join(out, 'REPORT.md'),
       `# Stíchos browser QA\n\nRun: ${started.toISOString()}. ${failure ? '**FAIL** — ' + failure.message : findings.length ? '**Checks passed; findings remain.**' : '**PASS**'}. Mode: ${smoke ? 'smoke' : 'full'}.\n\nThe harness uses an isolated Agent Workspace Chromium tab, real CDP keyboard/mouse input, and read-only \`window.stichos\` diagnostics. It does not inject game state or directly write or clear browser storage; save changes come from normal game actions. The game runs on the separate localhost origin.\n\n## Verified\n\n${results.map((r) => '- ' + r.name + (r.details ? ': ' + r.details : '')).join('\n')}\n\n## Findings\n\n${findings.length ? findings.map((f) => '- ' + f).join('\n') : 'None observed.'}\n\n## Evidence and limits\n\nScreenshots and detailed results: [../../.dream-loop/stichos-qa/](../../.dream-loop/stichos-qa/). Browser errors: ${errors.length}. Desktop: 1600×1000. Mobile: 390×844. The FPS observation describes this isolated browser session; it is not a hardware benchmark. Audio quality, prolonged combat balance, death/mind-transfer recovery, and file import/export need separate checks.\n\n## Repeat\n\nDiscover the active workspace-owned endpoint with \`workspace_browser_targets\`, then run:\n\n\`\`\`sh\nnode scripts/browser-stichos-check.mjs http://127.0.0.1:PORT '${baseUrl.href}'${smoke ? ' --smoke' : ''}\n\`\`\`\n\nThe endpoint is ephemeral. The script creates and closes its own tab. Omit \`--smoke\` to include gathering, crafting, trading and 110-tile travel.\n`,
@@ -1613,7 +1666,15 @@ try {
     await browser
       .send('Target.disposeBrowserContext', { browserContextId: contextId })
       .catch(() => {});
-  if (browser && !visualOnly && !possessionOnly && !expeditionOnly && !atlasOnly && !smoke)
+  if (
+    browser &&
+    !visualOnly &&
+    !possessionOnly &&
+    !expeditionOnly &&
+    !atlasOnly &&
+    !doorsOnly &&
+    !smoke
+  )
     await browser.send('Browser.setDownloadBehavior', { behavior: 'default' }).catch(() => {});
   page?.close();
   browser?.close();

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHmac } from 'node:crypto';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createStoreHandler, verifyStripeSignature } from '../server/payments.mjs';
@@ -317,4 +317,33 @@ test('rotating a recovery code revokes the previous code and recovery attempts a
   assert.equal((await post('recover', { recoveryCode: 'VR1-' + 'b'.repeat(64) })).status, 400);
   assert.equal((await post('recover', { recoveryCode: next.recoveryCode })).status, 429);
   assert.equal(f.requests.length, 0);
+});
+
+test('a failed ledger write closes fulfillment and preserves the last durable wallet for safe retry', async (t) => {
+  const f = await fixture(t);
+  await f.checkout();
+  const backup = f.storageDir + '-preserved';
+  await rename(f.storageDir, backup);
+  await writeFile(f.storageDir, 'unavailable test storage');
+  try {
+    assert.equal((await f.webhook(f.completion())).status, 503);
+    const response = await fetch(`${f.base}/api/store/wallet`, { headers: { Cookie: f.cookie } });
+    assert.equal(
+      response.status,
+      503,
+      'unpersisted ownership is never served after storage failure',
+    );
+    const ledger = JSON.parse(await readFile(path.join(backup, 'wallets.json'), 'utf8'));
+    assert.deepEqual(
+      Object.values(ledger.wallets).flatMap((wallet: any) => wallet.entitlements),
+      [],
+    );
+  } finally {
+    await rm(f.storageDir);
+    await rename(backup, f.storageDir);
+  }
+  f.reload();
+  assert.deepEqual(await f.owned(), []);
+  assert.equal((await f.webhook(f.completion())).status, 200);
+  assert.deepEqual(await f.owned(), ['aurora-mantle']);
 });

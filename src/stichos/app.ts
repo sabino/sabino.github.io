@@ -394,7 +394,7 @@ function pauseMenu() {
   el('s-resume').onclick = closeModal;
   el('s-new').onclick = title;
   el('s-pause-help').onclick = controls;
-  el('s-pause-life').onclick = lifeMenu;
+  el('s-pause-life').onclick = () => lifeMenu();
   el('s-pause-together').onclick = togetherMenu;
   el('s-save-file').onclick = () => {
     const blob = new Blob([JSON.stringify(game.save(), null, 2)], { type: 'application/json' });
@@ -431,11 +431,14 @@ function equipmentMenu() {
       .map((kind) => {
         const p = game.weaponProfile(kind);
         const owned = game.weapons.has(kind);
-        return `<article>${weaponIcon(game.player.appearance.seed, kind, 112)}<small>${owned ? (game.player.appearance.weapon === kind ? 'Equipped' : 'In this body’s keeping') : 'Available from merchants'}</small><h3>${esc(p.name)}</h3><dl><div><dt>Strength</dt><dd>${p.damage}</dd></div><div><dt>Reach</dt><dd>${p.range.toFixed(2)}</dd></div><div><dt>Recovery</dt><dd>${p.cooldown.toFixed(2)}s</dd></div></dl><p>${esc(p.effectDescription)}</p><button data-equip="${kind}" ${!owned ? 'disabled' : ''}>${owned ? 'Equip' : 'Not owned'}</button></article>`;
+        return `<article>${weaponIcon(game.weaponSeed(kind), kind, 112)}<small>${owned ? (game.player.appearance.weapon === kind ? 'Equipped' : 'In this body’s keeping') : 'Available from merchants'}</small><h3>${esc(p.name)}</h3><dl><div><dt>Strength</dt><dd>${p.damage}</dd></div><div><dt>Reach</dt><dd>${p.range.toFixed(2)}</dd></div><div><dt>Recovery</dt><dd>${p.cooldown.toFixed(2)}s</dd></div></dl><p>${esc(p.effectDescription)}</p><button data-equip="${kind}" ${!owned ? 'disabled' : ''}>${owned ? 'Equip' : 'Not owned'}</button></article>`;
       })
-      .join('')}</div><button id="s-gear-return" class="s-primary">Return to this life</button>`,
+      .join(
+        '',
+      )}</div><button id="s-open-forge">Build from parts</button><button id="s-gear-return" class="s-primary">Return to this life</button>`,
   );
   el('s-gear-return').onclick = closeModal;
+  el('s-open-forge').onclick = () => lifeMenu('forge');
 }
 function controls() {
   openModal(
@@ -816,7 +819,7 @@ function updateUI() {
   document
     .querySelectorAll<HTMLElement>('[data-count]')
     .forEach((n) => (n.textContent = String(game.inventory[n.dataset.count as ItemId] ?? 0)));
-  const equipmentKey = `${p.appearance.seed}:${p.appearance.weapon}`;
+  const equipmentKey = `${p.appearance.seed}:${p.appearance.weapon}:${(['staff', 'sword', 'bow'] as const).map((kind) => game.weaponSeed(kind)).join(':')}`;
   const equipmentChanged = equipmentSignature !== equipmentKey;
   equipmentSignature = equipmentKey;
   if (equipmentChanged) {
@@ -824,12 +827,18 @@ function updateUI() {
     document
       .querySelector('[data-action="attack"] svg')
       ?.replaceWith(
-        document.createRange().createContextualFragment(weaponIcon(p.appearance.seed, kind, 30)),
+        document
+          .createRange()
+          .createContextualFragment(weaponIcon(game.weaponSeed(kind), kind, 30)),
       );
   }
   document.querySelectorAll<HTMLButtonElement>('[data-equip]').forEach((n) => {
     if (equipmentChanged)
-      n.innerHTML = weaponIcon(p.appearance.seed, n.dataset.equip as WeaponKind, 38);
+      n.innerHTML = weaponIcon(
+        game.weaponSeed(n.dataset.equip as WeaponKind),
+        n.dataset.equip as WeaponKind,
+        38,
+      );
     n.classList.toggle('equipped', n.dataset.equip === p.appearance.weapon);
     n.disabled = !game.weapons.has(n.dataset.equip as 'staff' | 'sword' | 'bow');
     n.title = n.disabled ? `Buy a ${n.dataset.equip} from a merchant` : `Equip ${n.dataset.equip}`;
@@ -855,16 +864,21 @@ function drawMap(target = el<HTMLCanvasElement>('s-map'), scale = 5) {
   atlasPainter.draw(target, atlasSource(), { x: game.player.x, y: game.player.y, scale }, false);
 }
 
-function lifeMenu() {
+function lifeMenu(initialTab: 'purpose' | 'forge' = 'purpose') {
   if (sharedActionPending) return;
   openModal(
     'life',
     '<span class="s-chapter">A life of your choosing</span><h2>What will you make of it?</h2><div id="s-life-content"></div><button id="s-life-return" class="s-primary">Return to the world</button>',
   );
-  mountLife(el('s-life-content'), game, () => {
-    updateUI();
-    save();
-  });
+  mountLife(
+    el('s-life-content'),
+    game,
+    () => {
+      updateUI();
+      save();
+    },
+    initialTab,
+  );
   el('s-life-return').onclick = closeModal;
 }
 function endingMenu() {
@@ -876,7 +890,7 @@ function endingMenu() {
     `<div class="s-ending-mark" aria-hidden="true">◇</div><span class="s-chapter">Destino: Stíchos · A choice made awake</span><h2>${esc(ending.title)}</h2><p class="s-ending-prose">${esc(ending.text)}</p><p>For twenty stíchoi, I waited for permission to return. Today I answered for myself. Whatever waits beyond the signal, the people here are no longer a history I can stand outside.</p><p class="s-ending-signature">Theo Bishop · 3886</p><p>Your investigation is complete. Stíchos remains open: choose a profession, cultivate a home, take commissions, travel with friends, or visit a quiet shrine to enter another remembered, willing life.</p><div class="s-menu-buttons"><button id="s-ending-continue" class="s-primary">Keep living on Stíchos</button><button id="s-ending-life">Choose my next calling</button><button id="s-ending-journal">Write the next page</button></div>`,
   );
   el('s-ending-continue').onclick = closeModal;
-  el('s-ending-life').onclick = lifeMenu;
+  el('s-ending-life').onclick = () => lifeMenu();
   el('s-ending-journal').onclick = () => journal('threads');
 }
 function roomIdentity() {
@@ -999,7 +1013,7 @@ multiplayer.onWorld = (change) => {
     }
   save();
 };
-async function interactShared(id?: string) {
+async function interactShared(id?: string, keepRoute = false) {
   if (sharedActionPending || game.phase !== 'playing') return;
   const target = id
     ? (game.world.propsAround(game.player.x, game.player.y, 2.2).find((p) => p.id === id) ??
@@ -1027,6 +1041,7 @@ async function interactShared(id?: string) {
     return;
   }
   if (multiplayer.status !== 'online') {
+    if (keepRoute) walk = [];
     toast('Reconnect from Together, or leave the room before gathering alone.');
     return;
   }
@@ -1043,6 +1058,7 @@ async function interactShared(id?: string) {
   }
   const available = game.interactionAvailability(target.id);
   if (!available.ok) {
+    if (keepRoute) walk = [];
     toast(available.reason ?? 'This cannot be gathered yet.');
     return;
   }
@@ -1050,7 +1066,7 @@ async function interactShared(id?: string) {
     desiredOpen = !game.opened.has(target.id);
   sharedActionPending = true;
   keys.clear();
-  walk = [];
+  if (!keepRoute) walk = [];
   setInert(true);
   multiplayer.pose(game.player, game.displayAppearance, true);
   try {
@@ -1068,7 +1084,10 @@ async function interactShared(id?: string) {
         game.interact(target.id);
       updateUI();
       save();
-    } else toast(result.reason ?? 'Another traveler reached it first.');
+    } else {
+      if (keepRoute) walk = [];
+      toast(result.reason ?? 'Another traveler reached it first.');
+    }
   } finally {
     sharedActionPending = false;
     if (!modal && !transferStarted) setInert(false);
@@ -1097,7 +1116,7 @@ function pathTo(goal: Point): Point[] {
   const key = (p: Point) => `${p.x},${p.y}`;
   const queue = [start],
     parents = new Map<string, Point | null>([[key(start), null]]);
-  if (game.world.blocked(end.x, end.y, game.removed)) return [];
+  if (game.world.blocked(end.x, end.y, game.removed, true)) return [];
   for (let i = 0; i < queue.length && i < 5500; i++) {
     const p = queue[i];
     if (key(p) === key(end)) {
@@ -1121,7 +1140,7 @@ function pathTo(goal: Point): Point[] {
         Math.abs(n.x - start.x) > 52 ||
         Math.abs(n.y - start.y) > 52 ||
         parents.has(key(n)) ||
-        game.world.blocked(n.x, n.y, game.removed)
+        game.world.blocked(n.x, n.y, game.removed, true)
       )
         continue;
       parents.set(key(n), p);
@@ -1280,7 +1299,7 @@ root.addEventListener('click', (event) => {
     if (!previousEnding && game.campaign.ending) endingMenu();
   }
 });
-el('s-life').onclick = lifeMenu;
+el('s-life').onclick = () => lifeMenu();
 el('s-together').onclick = togetherMenu;
 el('s-context').onclick = () => act('interact');
 el('s-pause').onclick = pauseMenu;
@@ -1466,8 +1485,21 @@ function frame(now: number) {
           void interactShared(target);
         }
       } else {
-        x = (dx / d) * Math.min(1, d / (game.player.speed * Math.max(dt, 0.001)));
-        y = (dy / d) * Math.min(1, d / (game.player.speed * Math.max(dt, 0.001)));
+        const door =
+          d < 1.6
+            ? game.world
+                .propsAround(next.x, next.y, 0)
+                .find((p) => p.kind === 'door' && !game.removed.has(p.id))
+            : undefined;
+        if (door) {
+          // This goes through the same server acknowledgement as an explicit E press.
+          // Keep the route while waiting, but never move through an unconfirmed door.
+          void interactShared(door.id, true);
+          walkStuck = 0;
+        } else {
+          x = (dx / d) * Math.min(1, d / (game.player.speed * Math.max(dt, 0.001)));
+          y = (dy / d) * Math.min(1, d / (game.player.speed * Math.max(dt, 0.001)));
+        }
       }
       if (Math.hypot(game.player.x - walkLast.x, game.player.y - walkLast.y) < 0.001)
         walkStuck += dt;
