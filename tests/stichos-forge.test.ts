@@ -82,6 +82,11 @@ test('forge resolution is stable across cache eviction, caller mutation and play
   assert.equal(experienced.profile.range, baseline.profile.range);
   assert.equal(experienced.profile.cooldown, baseline.profile.cooldown);
   assert.notEqual(resolveForge(3887, recipe)!.seed, baseline.seed);
+  assert.deepEqual(
+    resolveForge(-0xffffffff, recipe),
+    resolveForge(1, recipe),
+    'Legacy signed owner seeds keep their original 32-bit identity',
+  );
 });
 
 test('invalid parts cannot produce a preview or recipe cost, including inherited object names', () => {

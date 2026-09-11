@@ -130,7 +130,7 @@ export function resolveForge(
 ): ForgeResult | null {
   if (
     !Number.isInteger(ownerSeed) ||
-    ownerSeed < -0x80000000 ||
+    ownerSeed < -0xffffffff ||
     ownerSeed > 0xffffffff ||
     !Number.isInteger(level) ||
     level < 1 ||
