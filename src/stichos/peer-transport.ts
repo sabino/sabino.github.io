@@ -80,6 +80,7 @@ export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomT
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectAttempts = 0;
   const pendingChannels = new Set<DataConnection>();
+  const offerTimers = new Map<DataConnection, ReturnType<typeof setTimeout>>();
   let channel: DataConnection | undefined;
   let local: HostSocket | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -106,6 +107,8 @@ export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomT
       clearTimeout(reconnectTimer);
       for (const pending of pendingChannels) pending.close();
       pendingChannels.clear();
+      for (const timer of offerTimers.values()) clearTimeout(timer);
+      offerTimers.clear();
       for (const socket of sockets) socket.close();
       sockets.clear();
       channel?.close();
@@ -188,13 +191,25 @@ export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomT
   peer.on('connection', (connection) => {
     if (!hub || closed || sockets.size + pendingChannels.size >= 32) return connection.close();
     pendingChannels.add(connection);
-    connection.on('close', () => pendingChannels.delete(connection));
-    connection.on('error', () => {
+    const releaseOffer = () => {
       pendingChannels.delete(connection);
+      clearTimeout(offerTimers.get(connection));
+      offerTimers.delete(connection);
+    };
+    offerTimers.set(
+      connection,
+      setTimeout(() => {
+        releaseOffer();
+        connection.close();
+      }, 20000),
+    );
+    connection.on('close', releaseOffer);
+    connection.on('error', () => {
+      releaseOffer();
       connection.close();
     });
     connection.on('open', () => {
-      pendingChannels.delete(connection);
+      releaseOffer();
       if (closed || sockets.size >= 32) return connection.close();
       const socket = new HostSocket(
         (message) => connection.send(message),

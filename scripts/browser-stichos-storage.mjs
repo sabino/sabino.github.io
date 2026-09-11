@@ -11,9 +11,9 @@ const endpoint = process.argv[2],
 if (
   !endpoint ||
   !['localhost', '127.0.0.1'].includes(new URL(endpoint).hostname) ||
-  new URL(url).hostname !== 'localhost'
+  !['localhost', 'sabino.pro'].includes(new URL(url).hostname)
 )
-  throw Error('Use isolated workspace CDP and the localhost game origin.');
+  throw Error('Use isolated workspace CDP and the local or published Verso origin.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const folder = `verso-stichos-storage-${Date.now()}`;
 const hostDir = `/home/sabino/.local/share/agent-workspace-linux/files/${folder}`;

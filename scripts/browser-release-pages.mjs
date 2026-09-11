@@ -15,7 +15,7 @@ if (
 )
   throw Error('Use the verified workspace endpoint and the local or published Verso frontend.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, '.dream-loop/stichos-peer-rooms');
+const out = path.join(root, '.dream-loop/stichos-release-pages');
 fs.mkdirSync(out, { recursive: true });
 const started = new Date(),
   results = [],
@@ -233,170 +233,84 @@ async function traveler(name, seed = '3886') {
   return c;
 }
 
-async function room(c, code = '') {
-  await c.focus();
-  await c.click('#s-together');
-  await c.fill('#s-room-name', c.name);
-  await c.click('#s-room-mode');
-  await c.key('Home', 'Home', 36);
-  await c.key('Enter', 'Enter', 13);
-  await c.fill('#s-room-code', code);
-  await c.click('#s-room-form button[type=submit]');
-  await c.wait("window.stichos.state.multiplayer.status==='online'", 'browser room joined', 30000);
-  const id = (await c.state()).multiplayer.room;
-  await c.click('#s-room-return');
-  return id;
-}
 try {
   const version = await (await fetch(`${endpoint}/json/version`)).json();
   browser = await connect(version.webSocketDebuggerUrl);
-  const a = await traveler('Theo browser host'),
-    b = await traveler('Mira browser visitor');
-  const code = await room(a);
-  await room(b, code);
-  await a.wait('window.stichos.state.multiplayer.peers.length===1', 'visitor arrived');
-  assert.equal((await b.state()).multiplayer.peers[0].name, a.name);
-  pass('Two browser rooms connect using real PeerJS signalling and RTC data channels', code);
-  await a.move({ x: -1, y: 5 });
-  await b.move({ x: 1, y: 5 });
-  await b.wait(
-    'Math.abs(window.stichos.state.multiplayer.peers[0].x+1)<.3',
-    'remote host movement',
+  const c = await traveler('Release traveler');
+  await c.move({ x: 3, y: 5 });
+  pass('Published game starts and accepts actual walking input');
+  await c.click('#s-life');
+  await c.click('[data-life-tab="compact"]');
+  await c.wait(
+    "document.querySelector('.s-compact-heading')?.textContent.includes('72')",
+    'Winter Compact renders',
   );
-  await b.shot('01-public-signalling-peers');
-  await a.click('#s-together');
-  await a.click('[data-room-emote=wave]');
-  await b.wait(
-    "document.querySelector('#s-toast').textContent.includes('Hello!')",
-    'visible peer wave',
+  await c.shot('01-winter-compact');
+  const id = await c.read(
+    "document.querySelector('.s-compact-witnesses [data-compact-track]').dataset.compactTrack",
   );
-  pass('Actual movement and emotes cross browser-hosted room');
-  await b.move({ x: -1, y: 5 });
-  const beforeA = await a.state(),
-    beforeB = await b.state();
-  await a.worldClick({ x: -2, y: 5 });
-  await b.worldClick({ x: -2, y: 5 });
-  await delay(800);
+  await c.click('.s-compact-witnesses [data-compact-track]');
+  const mark = (await c.state()).mapWaypoint;
+  assert(mark, 'Track sets actual atlas bearing');
+  await c.worldClick(mark);
+  await c.wait(
+    `Math.hypot(window.stichos.state.player.x-${mark.x},window.stichos.state.player.y-${mark.y})<1.8`,
+    'Approach the actual witness',
+  );
+  await c.click('#s-life');
+  await c.click('[data-life-tab="compact"]');
+  await c.click('[data-compact-survey="' + id + '"]');
+  await c.wait(
+    "document.querySelector('.s-compact-witnesses blockquote')?.textContent.length>30",
+    'actual nearby witness account recorded',
+  );
+  pass('Winter Compact tracks an actual witness and records the nearby account');
+  await c.shot('02-account-recorded');
+  await c.page.send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
+  await delay(300);
   assert(
-    !(await a.state()).removed.includes('origin:cequin'),
-    'A preliminary stroke removed shared plant',
+    await c.read('document.documentElement.scrollWidth<=innerWidth+1'),
+    'No page width overflow on mobile',
   );
-  assert(
-    !(await b.state()).removed.includes('origin:cequin'),
-    'B preliminary stroke removed shared plant',
+  await c.shot('03-mobile-compact');
+  await c.click('#s-life-return');
+  await c.click('#s-life');
+  await c.click('[data-life-tab="store"]');
+  await c.wait(
+    "document.querySelector('#s-life-panel')?.textContent.includes('Cosmetic') || document.querySelector('#s-life-panel')?.textContent.includes('cosmetic')",
+    'Cosmetic previews loaded',
   );
-  await a.worldClick({ x: -2, y: 5 });
-  await b.worldClick({ x: -2, y: 5 });
-  await a.wait(
-    "window.stichos.state.removed.includes('origin:cequin')",
-    'host sees consumed plant',
-  );
-  await b.wait(
-    "window.stichos.state.removed.includes('origin:cequin')",
-    'visitor sees consumed plant',
-  );
-  const afterA = await a.state(),
-    afterB = await b.state();
-  assert.equal(
-    (afterA.inventory.cequin ?? 0) +
-      (afterB.inventory.cequin ?? 0) -
-      (beforeA.inventory.cequin ?? 0) -
-      (beforeB.inventory.cequin ?? 0),
-    3,
-  );
-  pass(
-    'Only final tool stroke claims the shared plant and exactly one body earns its three portions',
-  );
-  await a.shot('02-single-winner-harvest');
-  if ((await a.state()).modal === 'together') await a.click('#s-room-return');
-  for (const c of [a, b]) {
-    const merchant = (await c.state()).npcs.find((n) => n.id === 'origin:resident:3');
-    await c.worldClick(merchant);
-    await c.wait("window.stichos.state.dialogue?.role==='merchant'", 'actual merchant trade');
-    await c.click('[data-choice="weapon:bow"]');
-    await c.click('[data-choice="close"]');
-    assert((await c.state()).weapons.includes('bow'), 'Bow bought with actual coins');
-    await c.click('[data-equip=bow]');
-    await c.move({ x: 6, y: 5 });
-    await c.move({ x: 10, y: 0 });
-    await c.move({ x: 18, y: 0 });
-    await c.move({ x: 24, y: 0 });
-  }
-  for (const c of [a, b]) await c.move({ x: 28, y: 0 });
-  const foeId = 'wanderer:35:3';
-  await a.wait(
-    `window.stichos.state.npcs.some(n=>n.id===${JSON.stringify(foeId)})`,
-    'shared raider visible',
-  );
-  const shoot = async (c) => {
-    await c.focus();
-    await delay(120);
-    const foe = (await c.state()).npcs.find((n) => n.id === foeId);
-    if (!foe || foe.hp <= 0) return;
-    const pt = await c.read(
-      `(()=>{const p=window.stichos.worldToScreen(${JSON.stringify(foe)}),r=document.querySelector('canvas').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top}})()`,
+  if (new URL(url).protocol === 'https:') {
+    await c.wait(
+      "document.querySelector('#s-life-panel')?.textContent.includes('not active')",
+      'Static shop clearly inactive',
     );
-    await c.page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pt });
-    await delay(80);
-    await c.key('f', 'KeyF', 70);
-    await c.wait('!window.stichos.state.multiplayer.pending', 'combat acknowledgment');
-  };
-  await shoot(a);
-  await a.wait(
-    `window.stichos.state.npcs.some(n=>n.id===${JSON.stringify(foeId)}&&n.hp<75&&n.hp>0)`,
-    'first actual shared arrow wound',
-  );
-  const wounded = (await a.state()).npcs.find((n) => n.id === foeId).hp;
-  await b.wait(
-    `window.stichos.state.npcs.some(n=>n.id===${JSON.stringify(foeId)}&&n.hp===${wounded})`,
-    'visitor observes identical wounded HP',
-  );
-  pass('Both browsers observe the same raider wound after a real aimed arrow', String(wounded));
-  await shoot(b);
-  for (let i = 0; i < 8 && !(await a.state()).removed.includes(foeId); i++) {
-    await delay(850);
-    await shoot(i % 2 ? a : b);
+    assert(
+      await c.read("[...document.querySelectorAll('[data-purchase]')].every(b=>b.disabled)"),
+      'No active real-money purchase button',
+    );
+    pass('Static edition presents cosmetic previews with purchases explicitly inactive');
   }
-  await a.wait(
-    `window.stichos.state.removed.includes(${JSON.stringify(foeId)})`,
-    'host confirms shared defeat',
-  );
-  await b.wait(
-    `window.stichos.state.removed.includes(${JSON.stringify(foeId)})`,
-    'visitor confirms same shared defeat',
-  );
-  pass('Two travelers contribute attacks to one shared raider defeat');
-  await a.shot('03-shared-raider-defeat');
-
-  await b.click('#s-together');
-  await b.click('#s-room-leave');
-  await b.click('#s-room-return');
-  await a.wait('window.stichos.state.multiplayer.peers.length===0', 'visitor departure');
-  await room(b, code);
-  await b.wait(
-    "window.stichos.state.removed.includes('origin:cequin')",
-    'rejoined world retains depletion',
-  );
-  pass('Visitor can leave and rejoin the live host without restoring exhausted resources');
-  await a.click('#s-together');
-  await a.click('#s-room-leave');
-  await b.wait(
-    "window.stichos.state.multiplayer.status==='disconnected'",
-    'host closure ends room',
-  );
-  assert(!(await b.state()).multiplayer.pending, 'No stranded shared claim after host closure');
-  pass(
-    'Host departure clearly disconnects the visitor instead of silently continuing a divergent shared world',
+  await c.shot('04-mobile-cosmetics');
+  await c.click('#s-life-return');
+  await c.wait(
+    "window.stichos.state.modal===''&&!window.stichos.state.paused",
+    'Life closes and movement resumes',
   );
   assert.deepEqual(errors, []);
-  pass('No browser exceptions or error logs');
+  pass('Mobile views close cleanly and browser reports no errors');
 } catch (error) {
   failure = error;
   console.error(error.stack);
   for (const c of clients) {
-    await c.shot(`FAIL-${c.name.split(' ')[0]}`).catch(() => {});
+    await c.shot('FAIL').catch(() => {});
     fs.writeFileSync(
-      path.join(out, `FAIL-${c.name.split(' ')[0]}.json`),
+      path.join(out, 'FAIL.json'),
       JSON.stringify(await c.state().catch(() => null), null, 2),
     );
   }
