@@ -45,6 +45,8 @@ const text = (v: unknown, max = 160): v is string =>
   !['__proto__', 'constructor', 'prototype'].includes(v);
 const strings = (v: unknown, max = 16384): v is string[] =>
   Array.isArray(v) && v.length <= max && v.every((x) => text(x)) && new Set(v).size === v.length;
+const onlyKeys = (v: Record<string, unknown>, keys: string[]) =>
+  Object.keys(v).every((k) => keys.includes(k));
 export function validRoomChat(v: unknown): v is RoomChat {
   return (
     object(v) &&
@@ -55,9 +57,9 @@ export function validRoomChat(v: unknown): v is RoomChat {
     text(v.name, 64) &&
     text(v.text, 560) &&
     [...(v.text as string)].length <= 280 &&
-    finite(v.x, -1e9, 1e9) &&
-    finite(v.y, -1e9, 1e9) &&
-    integer(v.at)
+    finite(v.x, -Number.MAX_SAFE_INTEGER + 4096, Number.MAX_SAFE_INTEGER - 4096) &&
+    finite(v.y, -Number.MAX_SAFE_INTEGER + 4096, Number.MAX_SAFE_INTEGER - 4096) &&
+    integer(v.at, 0, 8640000000000000)
   );
 }
 export function validProductionMachine(v: unknown): v is ProductionMachine {
@@ -74,6 +76,20 @@ export function validRoomWorldCheckpoint(v: unknown): v is RoomWorldCheckpoint {
   try {
     return (
       object(v) &&
+      onlyKeys(v, [
+        'version',
+        'room',
+        'seed',
+        'generation',
+        'removed',
+        'opened',
+        'combat',
+        'combatEvent',
+        'machines',
+        'chat',
+        'chatSerial',
+        'productionReceipts',
+      ]) &&
       v.version === 1 &&
       typeof v.room === 'string' &&
       /^[A-Z0-9]{4,16}$/.test(v.room) &&
@@ -87,7 +103,9 @@ export function validRoomWorldCheckpoint(v: unknown): v is RoomWorldCheckpoint {
       Array.isArray(v.chat) &&
       v.chat.length <= 200 &&
       v.chat.every(validRoomChat) &&
-      v.chat.every((c) => c.room === v.room && c.id <= (v.chatSerial as number)) &&
+      v.chat.every(
+        (c) => c.channel === 'world' && c.room === v.room && c.id <= (v.chatSerial as number),
+      ) &&
       Array.isArray(v.machines) &&
       v.machines.length <= 256 &&
       v.machines.every(validProductionMachine) &&
@@ -180,15 +198,26 @@ export async function verifyRoomCheckpoint(
   try {
     if (
       !object(value) ||
+      !onlyKeys(value, [
+        'version',
+        'authority',
+        'revision',
+        'previous',
+        'createdAt',
+        'state',
+        'signature',
+        'hash',
+      ]) ||
       value.version !== 1 ||
       !object(value.authority) ||
+      !onlyKeys(value.authority, ['key_ops', 'ext', 'kty', 'x', 'y', 'crv']) ||
       value.authority.d !== undefined ||
       value.authority.kty !== 'EC' ||
       value.authority.crv !== 'P-256' ||
       !text(value.authority.x, 64) ||
       !text(value.authority.y, 64) ||
       !integer(value.revision, 1) ||
-      !integer(value.createdAt) ||
+      !integer(value.createdAt, 0, 8640000000000000) ||
       typeof value.previous !== 'string' ||
       !/^(?:[a-f0-9]{64})?$/.test(value.previous) ||
       typeof value.hash !== 'string' ||

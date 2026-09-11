@@ -7,7 +7,11 @@ import {
   validSharedCombatProgression,
   validSharedCombatFrame,
 } from './shared-combat.ts';
-import { validRoomWorldCheckpoint, validProductionMachine } from './room-checkpoint.ts';
+import {
+  validRoomWorldCheckpoint,
+  validProductionMachine,
+  validRoomChat,
+} from './room-checkpoint.ts';
 
 const MAX_COORDINATE = Number.MAX_SAFE_INTEGER - 4096;
 export const MAX_MESSAGE_BYTES = 8192;
@@ -634,7 +638,12 @@ export class CoopRooms {
       });
     }
     // Spatial speech remains in the private host backup, never the public replica.
-    if (privateState.chat.length && validRoomWorldCheckpoint({ ...state, chat: privateState.chat }))
+    if (
+      privateState.chat.length &&
+      privateState.chat.every(
+        (c) => validRoomChat(c) && c.room === state.room && c.id <= state.chatSerial,
+      )
+    )
       room.chat = structuredClone(privateState.chat);
     this.rooms.set(room.id, room);
     return room.id;
@@ -743,6 +752,31 @@ export class CoopRooms {
         );
       if (distance(member, machine) > 2 || room.world.blocked(machine.x, machine.y, room.removed))
         return answer(false, 'Stand within two tiles of a clear platform.');
+      if (!integer(machine.x, -10000000, 10000000) || !integer(machine.y, -10000000, 10000000))
+        return answer(false, 'A production platform must occupy an actual world tile.');
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const tile = room.world.tile(machine.x + dx, machine.y + dy);
+          if (
+            tile.building ||
+            tile.site ||
+            !['snow', 'grass'].includes(tile.terrain) ||
+            room.world.blocked(tile.x, tile.y, room.removed)
+          )
+            return answer(
+              false,
+              'A production platform needs a clear three-by-three patch of snow or grass, away from roads and buildings.',
+            );
+        }
+      if (
+        room.world
+          .propsAround(machine.x, machine.y, 2.1)
+          .some((p) => !room.removed.has(p.id) && distance(p, machine) < 2.1)
+      )
+        return answer(
+          false,
+          'Leave the production platform clear of actual resources and fixtures.',
+        );
       if (
         [...room.machines.values()].filter((m) => m.ownerId === member.id).length >= 8 ||
         room.machines.size >= 256

@@ -78,6 +78,31 @@ function fixture(t: any) {
   return { hub, advance: (ms: number) => (time += ms) };
 }
 
+function platformSite(world: InfiniteWorld) {
+  for (let y = 2; y < 60; y++)
+    for (let x = -45; x <= 45; x++) {
+      let clear = true;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const tile = world.tile(x + dx, y + dy);
+          if (
+            tile.building ||
+            tile.site ||
+            !['snow', 'grass'].includes(tile.terrain) ||
+            world.blocked(tile.x, tile.y)
+          )
+            clear = false;
+        }
+      if (!clear || world.propsAround(x, y, 2.1).some((p) => Math.hypot(p.x - x, p.y - y) < 2.1))
+        continue;
+      const pine = world
+        .propsAround(x, y, 16)
+        .find((p) => p.kind === 'pine' && Math.hypot(p.x - x, p.y - y) <= 16);
+      if (pine) return { point: { x, y }, pine };
+    }
+  throw Error('No actual clear production fixture.');
+}
+
 test('authoritative spatial speech, planet chat, bounded history and replay do not disclose distant speech', (t) => {
   const { hub, advance } = fixture(t);
   const a = traveler(hub),
@@ -138,20 +163,33 @@ test('signed public checkpoints reject mutation, wrong authority and rollback an
   assert.equal('d' in one.authority, false);
   a.send({ type: 'restore', state: { ...exported.state, removed: ['injected'] } });
   assert.equal(hub.exportRoom(a.welcome.room)!.state.removed.length, 0);
+  const restored = new CoopRooms({ durable: true });
+  restored.restoreRoom(exported.state, exported.privateState);
+  const resumed = traveler(restored, { room: a.welcome.room, resumeToken: a.welcome.resumeToken });
+  t.after(() => resumed.socket.close());
+  assert.equal(resumed.welcome.chat[0].text, 'local only');
+  assert.equal(restored.exportRoom(a.welcome.room)!.state.chat.length, 0);
+  await assert.rejects(() =>
+    signRoomCheckpoint({ ...exported.state, owner: { token: 'private' } } as any, key),
+  );
+  await assert.rejects(() =>
+    signRoomCheckpoint({ ...exported.state, chat: resumed.welcome.chat }, key),
+  );
 });
 
 test('owned production source claims persist and acknowledge exact job retries without allowing another job or owner to win', (t) => {
   const { hub } = fixture(t),
-    a = traveler(hub),
+    world = new InfiniteWorld(3886, 3),
+    site = platformSite(world),
+    a = traveler(hub, { position: site.point }),
     room = a.welcome.room;
   a.send({
     type: 'machine',
     requestId: 'r1',
-    machine: { id: 'platform:test', kind: 'sawmill', x: 0, y: 5 },
+    machine: { id: 'platform:test', kind: 'sawmill', ...site.point },
   });
   assert.equal(a.socket.get('claimResult').ok, true);
-  const world = new InfiniteWorld(3886, 3),
-    pine = world.propsAround(0, 5, 16).find((p) => p.kind === 'pine')!;
+  const pine = site.pine;
   assert.ok(pine);
   const claim = {
     type: 'production',
@@ -322,4 +360,97 @@ test('browser credentials survive a new client instance and signed visitor repli
   assert.equal((await loadSavedRoom(room))!.checkpoint.hash, one.hash);
   assert.equal(savedWorlds()[0].owned, true);
   b.disconnect();
+});
+
+test('platform registration rejects roads, resources, fractional tiles and concurrent overlap without mutating the losing owner', (t) => {
+  const { hub } = fixture(t),
+    a = traveler(hub),
+    room = a.welcome.room;
+  a.send({
+    type: 'machine',
+    requestId: 'road',
+    machine: { id: 'road', kind: 'garden', x: 0, y: 5 },
+  });
+  assert.equal(a.socket.get('claimResult').ok, false);
+  assert.equal(hub.exportRoom(room)!.state.machines.length, 0);
+  const world = new InfiniteWorld(3886, 3),
+    site = platformSite(world);
+  a.send({ type: 'pose', ...site.point, heading: 0, phase: 0, appearance: look });
+  const b = traveler(hub, { room, position: site.point });
+  a.send({
+    type: 'machine',
+    requestId: 'fraction',
+    machine: { id: 'fraction', kind: 'garden', x: site.point.x + 0.2, y: site.point.y },
+  });
+  assert.equal(a.socket.get('claimResult').ok, false);
+  a.send({
+    type: 'machine',
+    requestId: 'first',
+    machine: { id: 'first', kind: 'garden', ...site.point },
+  });
+  b.send({
+    type: 'machine',
+    requestId: 'second',
+    machine: { id: 'second', kind: 'garden', ...site.point },
+  });
+  assert.equal(a.socket.get('claimResult').ok, true);
+  assert.equal(b.socket.get('claimResult').ok, false);
+  const state = hub.exportRoom(room)!.state;
+  assert.equal(state.machines.length, 1);
+  assert.equal(state.machines[0].ownerId, a.welcome.peerId);
+});
+
+test('actual hostile damage receipts survive authority restore and a synchronous acknowledgement clears only persisted delivered receipts', (t) => {
+  const { hub, advance } = fixture(t),
+    world = new InfiniteWorld(3886, 3);
+  const npc = world.npcsAround(-352, -448, 16).find((n) => n.role === 'raider' && n.hostile)!;
+  assert.ok(npc);
+  const position = [
+    { x: npc.x + 1, y: npc.y },
+    { x: npc.x - 1, y: npc.y },
+    { x: npc.x, y: npc.y + 1 },
+    { x: npc.x, y: npc.y - 1 },
+  ].find((p) => !world.blocked(p.x, p.y))!;
+  assert.ok(position);
+  const a = traveler(hub, { position, combatActive: true, bodyId: 'body:hit' }),
+    room = a.welcome.room;
+  let hit: any;
+  for (let i = 0; i < 50 && !hit; i++) {
+    advance(100);
+    a.send({
+      type: 'pose',
+      ...position,
+      heading: 0,
+      phase: 0,
+      appearance: look,
+      combatActive: true,
+      bodyId: 'body:hit',
+    });
+    hub.tick(0.1);
+    hit = a.socket.messages
+      .flatMap((m) => (m.type === 'combat_frame' ? m.frame.hits : []))
+      .find((h) => h.target === 'peer');
+  }
+  assert.ok(hit, 'actual generated hostile must hit the standing active body');
+  const backup = hub.exportRoom(room)!;
+  assert.ok((backup.privateState as any).members[0].combatHits.some((h: any) => h.id === hit.id));
+  a.socket.close();
+  const restored = new CoopRooms({ durable: true });
+  restored.restoreRoom(backup.state, backup.privateState);
+  const b = traveler(restored, {
+    room,
+    resumeToken: a.welcome.resumeToken,
+    position,
+    bodyId: 'body:hit',
+  });
+  t.after(() => b.socket.close());
+  assert.ok(
+    b.welcome.combat.hits.some((h: any) => h.id === hit.id && h.targetBodyId === 'body:hit'),
+  );
+  b.send({ type: 'combat_ack', eventId: hit.id });
+  const after = restored.exportRoom(room)!;
+  assert.equal((after.privateState as any).members[0].combatHits.length, 0);
+  b.send({ type: 'combat_ack', eventId: hit.id + 10000 });
+  assert.equal(b.socket.get('error').code, 'invalid_combat_ack');
+  assert.equal((restored.exportRoom(room)!.privateState as any).members[0].combatAck, hit.id);
 });
