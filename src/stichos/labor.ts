@@ -1,5 +1,5 @@
 import { deriveSeed, random } from '../procedural/random.ts';
-import type { ItemId, Npc, Prop, PropKind } from './types.ts';
+import type { ItemId, Npc, Prop, PropKind, Point } from './types.ts';
 import type { ArtifactGenome } from './artifacts.ts';
 
 export type ToolKind = 'axe' | 'pickaxe' | 'sickle';
@@ -49,6 +49,16 @@ export interface LaborAllocation {
   item: ItemId;
   amount: number;
 }
+export interface LaborJourney {
+  version: 1;
+  phase: 'outbound' | 'working' | 'returning' | 'ready' | 'blocked';
+  allocation: number;
+  strokes: number;
+  nextStrokeAt: number;
+  strokeInterval: number;
+  returnPoint: Point;
+  reason?: string;
+}
 export interface LaborOrder {
   id: string;
   serial: number;
@@ -60,6 +70,7 @@ export interface LaborOrder {
   endsAt: number;
   wages: number;
   allocations: LaborAllocation[];
+  journey?: LaborJourney;
 }
 export const THEO_ESTATE = Object.freeze({
   residenceId: 'origin:house:-1:1',
@@ -344,6 +355,12 @@ export function finishLabor(
   | { ok: false; reason: string } {
   if (order.status !== 'working')
     return { ok: false, reason: 'This assignment has already ended.' };
+  if (order.journey && order.journey.phase !== 'ready')
+    return {
+      ok: false,
+      reason:
+        order.journey.reason ?? 'The worker must finish the actual resource work and return first.',
+    };
   if (!finite(input.now) || input.now < order.endsAt)
     return { ok: false, reason: 'The work is still in progress.' };
   if (input.worker.id !== order.workerId || !workerProfile(input.worker, []).eligible)
@@ -405,6 +422,31 @@ export function validateLaborOrders(value: unknown): LaborOrder[] {
       o.allocations.length > 3
     )
       return bad();
+    if (o.journey !== undefined) {
+      const j = o.journey;
+      if (
+        !j ||
+        j.version !== 1 ||
+        !['outbound', 'working', 'returning', 'ready', 'blocked'].includes(j.phase) ||
+        !integer(j.allocation, 0, o.allocations.length) ||
+        !integer(j.strokes, 0, 9) ||
+        !finite(j.nextStrokeAt) ||
+        j.nextStrokeAt < 0 ||
+        !finite(j.strokeInterval) ||
+        j.strokeInterval < 0.4 ||
+        j.strokeInterval > 30 ||
+        !j.returnPoint ||
+        !finite(j.returnPoint.x) ||
+        !finite(j.returnPoint.y) ||
+        Math.abs(j.returnPoint.x) > Number.MAX_SAFE_INTEGER ||
+        Math.abs(j.returnPoint.y) > Number.MAX_SAFE_INTEGER ||
+        (j.reason !== undefined && (typeof j.reason !== 'string' || j.reason.length > 240)) ||
+        (['returning', 'ready'].includes(j.phase) &&
+          (j.allocation !== o.allocations.length || j.strokes !== 0)) ||
+        (['outbound', 'working'].includes(j.phase) && j.allocation >= o.allocations.length)
+      )
+        return bad();
+    }
     ids.add(o.id);
     if (o.status === 'working') {
       if (workers.has(o.workerId)) return bad();

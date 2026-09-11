@@ -321,6 +321,7 @@ export class Stichos {
     | null = null;
   private orders: LaborOrder[] = [];
   private laborSerial = 0;
+  private laborPaths = new Map<string, { target: string; points: Point[]; removedSize: number }>();
   private sharedWorld = false;
   private estateTrust: Record<string, boolean> = Object.fromEntries(
     THEO_ESTATE.staffIds.map((id) => [id, true]),
@@ -733,6 +734,17 @@ export class Stichos {
   }
   laborPreview(workerId: string, kind: LaborKind) {
     const worker = this.laborWorker(workerId);
+    if (
+      this.orders.some(
+        (o) =>
+          o.workerId === workerId && o.status === 'cancelled' && o.journey?.phase === 'returning',
+      )
+    )
+      return {
+        ok: false as const,
+        message: 'This worker is returning from a withdrawn assignment.',
+        reason: 'Let the worker return before offering new work.',
+      };
     if (this.sharedWorld)
       return {
         ok: false as const,
@@ -789,9 +801,13 @@ export class Stichos {
     if (!preview.ok) return { ok: false, message: preview.reason };
     this.player.coins -= preview.wages;
     this.laborSerial++;
-    this.orders = this.orders.filter((o) => o.status === 'working').slice(-63);
+    this.orders = this.orders
+      .filter((o) => o.status === 'working' || o.journey?.phase === 'returning')
+      .slice(-63);
     this.orders.push(preview.order);
-    this.rememberNpc(this.laborWorker(workerId)!);
+    const worker = this.laborWorker(workerId)!;
+    this.beginLaborJourney(preview.order, worker);
+    this.npcMemory.set(worker.id, clone(worker));
     return {
       ok: true,
       message: `${preview.order.workerName} accepted ${preview.wages} coins. Collect after ${Math.ceil(preview.order.endsAt - this.time)} seconds of lived time.`,
@@ -815,6 +831,7 @@ export class Stichos {
       !(this.estate.residence && distance(this.estate.residence, this.player) <= 10)
     )
       return { ok: false, message: 'Collect beside the worker or at the established residence.' };
+    this.beginLaborJourney(order, worker);
     const result = finishLabor(order, {
       worker,
       props: order.allocations.flatMap((a) => this.world.propsAround(a.x, a.y, 1)),
@@ -837,10 +854,262 @@ export class Stichos {
     if (!order || order.status !== 'working')
       return { ok: false, message: 'This assignment has already ended.' };
     order.status = 'cancelled';
+    if (order.journey) {
+      order.journey.phase = 'returning';
+      order.journey.allocation = order.allocations.length;
+      order.journey.strokes = 0;
+      delete order.journey.reason;
+    }
+    this.laborPaths.delete(order.id);
     return {
       ok: true,
       message: 'Assignment withdrawn. Agreed wages already paid are not refunded.',
     };
+  }
+  private beginLaborJourney(order: LaborOrder, worker: Npc) {
+    if (order.journey || order.status !== 'working') return;
+    const strokes = order.allocations.reduce((sum, a) => {
+      const prop = this.world.propsAround(a.x, a.y, 1).find((p) => p.id === a.propId);
+      return sum + (prop ? (resourceWork(prop)?.requiredStrokes ?? 1) : 1);
+    }, 0);
+    order.journey = {
+      version: 1,
+      phase: 'outbound',
+      allocation: 0,
+      strokes: 0,
+      nextStrokeAt: this.time,
+      strokeInterval: clamp(
+        ((order.endsAt - order.startedAt) * 0.8) / Math.max(1, strokes),
+        0.65,
+        20,
+      ),
+      returnPoint: { x: worker.x, y: worker.y },
+    };
+  }
+  private laborPassable(point: Point) {
+    return [
+      [-0.21, -0.21],
+      [0.21, -0.21],
+      [-0.21, 0.21],
+      [0.21, 0.21],
+    ].every(([dx, dy]) => !this.world.blocked(point.x + dx, point.y + dy, this.removed, true));
+  }
+  private routeLabor(from: Point, goals: Point[]): Point[] | null {
+    const key = (p: Point) => `${Math.round(p.x)},${Math.round(p.y)}`;
+    const end = new Map(goals.filter((p) => this.laborPassable(p)).map((p) => [key(p), p]));
+    if (!end.size) return null;
+    const start = { x: Math.round(from.x), y: Math.round(from.y) },
+      queue = [start],
+      parents = new Map<string, Point | null>([[key(start), null]]);
+    for (let i = 0; i < queue.length && i < 6500; i++) {
+      const point = queue[i],
+        target = end.get(key(point));
+      if (target) {
+        const route: Point[] = [];
+        for (
+          let at: Point | null = point;
+          at && key(at) !== key(start);
+          at = parents.get(key(at)) ?? null
+        )
+          route.push(at);
+        route.reverse();
+        if (route.length) route[route.length - 1] = { ...target };
+        else if (distance(from, target) > 0.12) route.push({ ...target });
+        return route;
+      }
+      for (const [dx, dy] of [
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+        [0, -1],
+      ]) {
+        const next = { x: point.x + dx, y: point.y + dy },
+          id = key(next);
+        if (
+          parents.has(id) ||
+          Math.abs(next.x - start.x) > 48 ||
+          Math.abs(next.y - start.y) > 48 ||
+          !this.laborPassable(next)
+        )
+          continue;
+        parents.set(id, point);
+        queue.push(next);
+      }
+    }
+    return null;
+  }
+  private advanceLaborWalker(
+    order: LaborOrder,
+    worker: Npc,
+    goals: Point[],
+    target: string,
+    dt: number,
+  ): 'moving' | 'arrived' | 'blocked' {
+    let route = this.laborPaths.get(order.id);
+    if (!route || route.target !== target || route.removedSize !== this.removed.size) {
+      const points = this.routeLabor(worker, goals);
+      if (!points) return 'blocked';
+      route = { target, points, removedSize: this.removed.size };
+      this.laborPaths.set(order.id, route);
+    }
+    while (route.points.length && distance(worker, route.points[0]) < 0.08) route.points.shift();
+    if (!route.points.length) return 'arrived';
+    const next = route.points[0],
+      before = { x: worker.x, y: worker.y };
+    if (!this.clear(next)) {
+      const door = this.world
+        .propsAround(next.x, next.y, 0.75)
+        .find((p) => p.kind === 'door' && distance(p, next) < 0.6 && !this.removed.has(p.id));
+      if (door && distance(worker, door) <= 1.4) {
+        this.removed.add(door.id);
+        route.removedSize = this.removed.size;
+      } else {
+        this.laborPaths.delete(order.id);
+        return 'blocked';
+      }
+    }
+    const span = distance(worker, next),
+      stride = Math.min(span, Math.min(2.4, worker.speed || 1.5) * dt);
+    worker.heading = Math.atan2(next.y - worker.y, next.x - worker.x);
+    this.move(worker, Math.cos(worker.heading) * stride, Math.sin(worker.heading) * stride);
+    worker.phase += distance(before, worker) * 2.5;
+    if (distance(before, worker) < stride * 0.1 && stride > 0.001) {
+      this.laborPaths.delete(order.id);
+      return 'blocked';
+    }
+    return 'moving';
+  }
+  private updateLabor(dt: number) {
+    if (this.sharedWorld) return;
+    for (const order of this.orders) {
+      if (
+        order.status !== 'working' &&
+        !(order.status === 'cancelled' && order.journey?.phase === 'returning')
+      )
+        continue;
+      const worker = this.laborWorker(order.workerId);
+      if (!worker) continue;
+      this.beginLaborJourney(order, worker);
+      const j = order.journey!;
+      if (j.phase === 'ready' || j.phase === 'blocked') continue;
+      const block = (reason: string) => {
+        j.phase = 'blocked';
+        j.reason = reason;
+        this.laborPaths.delete(order.id);
+      };
+      if (
+        worker.hp <= 0 ||
+        worker.hostile ||
+        this.removed.has(worker.id) ||
+        this.occupiedNpcId === worker.id
+      ) {
+        block('The assigned worker is no longer available.');
+        continue;
+      }
+      if (j.phase === 'returning') {
+        const result = this.advanceLaborWalker(order, worker, [j.returnPoint], 'return', dt);
+        if (result === 'arrived') {
+          j.phase = 'ready';
+          this.laborPaths.delete(order.id);
+          this.event(
+            'quest',
+            order.status === 'cancelled'
+              ? `${worker.name} returned from the withdrawn assignment.`
+              : `${worker.name} returned with the completed work. Collect the agreed resources.`,
+          );
+        } else if (result === 'blocked')
+          block('The return route is obstructed. Clear it and retry the assignment.');
+      } else {
+        const allocation = order.allocations[j.allocation];
+        const prop =
+          allocation &&
+          this.world
+            .propsAround(allocation.x, allocation.y, 1)
+            .find((p) => p.id === allocation.propId);
+        if (!prop || this.removed.has(prop.id)) {
+          block(
+            'An allocated resource was taken. Withdraw this assignment or restore access before retrying.',
+          );
+          continue;
+        }
+        const kind = requiredToolFor(prop.kind)!,
+          profile = seededTool(worker.appearance.seed, kind),
+          effort = resourceWork(prop)!;
+        if (j.phase === 'outbound') {
+          const goals = [
+            [-1, 0],
+            [1, 0],
+            [0, -1],
+            [0, 1],
+            [-1, -1],
+            [1, -1],
+            [-1, 1],
+            [1, 1],
+          ].map(([dx, dy]) => ({ x: prop.x + dx, y: prop.y + dy }));
+          const result = this.advanceLaborWalker(order, worker, goals, prop.id, dt);
+          if (result === 'arrived') {
+            j.phase = 'working';
+            j.nextStrokeAt = this.time + Math.max(profile.cooldown, j.strokeInterval);
+            this.laborPaths.delete(order.id);
+          } else if (result === 'blocked')
+            block('The resource has no clear working approach. Clear the route and retry.');
+        } else if (j.phase === 'working') {
+          if (distance(worker, prop) > 1.8) {
+            j.phase = 'outbound';
+            this.laborPaths.delete(order.id);
+          } else if (this.time >= j.nextStrokeAt) {
+            worker.heading = Math.atan2(prop.y - worker.y, prop.x - worker.x);
+            j.strokes++;
+            j.nextStrokeAt = this.time + Math.max(profile.cooldown, j.strokeInterval);
+            if (distance(worker, this.player) < 22) {
+              const effect = this.effect(
+                'harvest',
+                worker,
+                profile.metalColor,
+                0.65,
+                worker.heading,
+              );
+              effect.actorId = worker.id;
+              effect.tool = { kind, seed: worker.appearance.seed };
+            }
+            if (j.strokes >= effort.requiredStrokes) {
+              j.allocation++;
+              j.strokes = 0;
+              j.phase = j.allocation >= order.allocations.length ? 'returning' : 'outbound';
+              this.laborPaths.delete(order.id);
+            }
+          }
+        }
+      }
+      this.npcMemory.set(worker.id, clone(worker));
+    }
+  }
+  retryLabor(orderId: string) {
+    const order = this.orders.find((o) => o.id === orderId),
+      worker = order && this.laborWorker(order.workerId);
+    if (
+      this.sharedWorld ||
+      this.phase !== 'playing' ||
+      !order ||
+      order.status !== 'working' ||
+      order.journey?.phase !== 'blocked' ||
+      !worker ||
+      worker.hp <= 0 ||
+      worker.hostile ||
+      this.occupiedNpcId === worker.id
+    )
+      return { ok: false, message: 'This worker cannot resume that assignment.' };
+    if (order.allocations.some((a) => this.removed.has(a.propId)))
+      return {
+        ok: false,
+        message:
+          'An allocated resource has been taken. Withdraw the order; it cannot duplicate that harvest.',
+      };
+    order.journey.phase =
+      order.journey.allocation >= order.allocations.length ? 'returning' : 'outbound';
+    delete order.journey.reason;
+    this.laborPaths.delete(order.id);
+    return { ok: true, message: 'The worker is trying the cleared route again.' };
   }
   artifactDesign(index = 0) {
     const offset = Number.isSafeInteger(index) && index >= 0 ? index : 0;
@@ -1311,6 +1580,7 @@ export class Stichos {
       this.visit();
     }
     this.updateNpcs(dt);
+    this.updateLabor(dt);
     this.updateArrows(dt);
     for (const effect of this.effects) effect.age += dt;
     this.effects = this.effects.filter((e) => e.age < e.duration);
@@ -1395,6 +1665,17 @@ export class Stichos {
       }
     for (const npc of this.npcs) {
       if (npc.hp <= 0 || this.phase !== 'playing') continue;
+      if (
+        !npc.hostile &&
+        !this.sharedWorld &&
+        this.orders.some(
+          (o) =>
+            o.workerId === npc.id &&
+            (o.status === 'working' ||
+              (o.status === 'cancelled' && o.journey?.phase === 'returning')),
+        )
+      )
+        continue;
       npc.cooldown = Math.max(0, npc.cooldown - dt);
       if (npc.role === 'guard' && this.reputation[npc.clan] < -24) npc.hostile = true;
       const range = distance(npc, this.player);
@@ -2390,6 +2671,22 @@ export class Stichos {
   }
 
   private talk(npc: Npc) {
+    const job = this.orders.find(
+      (o) => o.workerId === npc.id && o.status === 'working' && o.journey?.phase !== 'ready',
+    );
+    if (job) {
+      this.dialogue = {
+        speaker: npc.name,
+        role: npc.role,
+        npcId: npc.id,
+        text:
+          job.journey?.reason ??
+          `I am carrying out the ${job.kind} assignment. I will return to my post when the actual work is done; we can discuss other matters then.`,
+        choices: [{ id: 'close', label: 'Let them continue working' }],
+      };
+      this.event('dialogue');
+      return;
+    }
     const choices = [{ id: 'close', label: 'Leave the conversation' }];
     let text =
       'The roads do not end here. Every settlement carries its own bargains, and the cold treats all six families alike.';
@@ -4017,6 +4314,10 @@ export class Stichos {
     if (!game.clear(game.player) || !game.clear(game.restAnchor))
       throw new Error('Saved position is inside blocked terrain.');
     game.refreshNpcs();
+    for (const order of game.orders) {
+      const worker = game.laborWorker(order.workerId);
+      if (worker) game.beginLaborJourney(order, worker);
+    }
     game.syncCampaign();
     game.syncFreeLife();
     game.revealExploration();
@@ -4428,6 +4729,15 @@ function validateSave(value: unknown): SaveData {
       value.seed as number,
       (value.worldGeneration ?? 1) as WorldGeneration,
     );
+    for (const order of orders) {
+      const journey = order.journey;
+      if (
+        journey &&
+        (journey.nextStrokeAt > (value.time as number) + 30 ||
+          order.allocations.some((a) => distance(a, journey.returnPoint) > 24.001))
+      )
+        return fail();
+    }
     for (const order of orders)
       for (const a of order.allocations) {
         if (!point(a)) return fail();
@@ -4441,6 +4751,12 @@ function validateSave(value: unknown): SaveData {
               : 2
             : plantProfile(prop.seed, prop.kind as PlantKind).yield;
         if (expected !== a.amount) return fail();
+        if (
+          order.journey &&
+          order.allocations[order.journey.allocation] === a &&
+          order.journey.strokes >= resourceWork(prop)!.requiredStrokes
+        )
+          return fail();
       }
     const owners = new Set<string>();
     for (const pack of labor.tools) {
