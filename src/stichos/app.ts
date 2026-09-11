@@ -2,6 +2,9 @@ import './style.css';
 import './notebook.css';
 import './life.css';
 import './universe-ui.css';
+import './screen-ui.css';
+import aiCompanionGuide from '../../docs/stichos/AI-COMPANION.md?url';
+import { drawProduction } from './production-art';
 import { creationHtml, mountCreation } from './creation';
 import { mountGalaxy } from './galaxy';
 import {
@@ -24,7 +27,7 @@ import { claimLifeTab, releaseLifeTab } from './life-lease';
 import { mountLife } from './life';
 import { MultiplayerConnection, getBrowserPlayerId, savedWorlds } from './multiplayer';
 import { PRODUCTION_KINDS, type ProductionKind } from './production';
-import { notebookHtml } from './notebook';
+import { notebookHtml, notebookLeafCount } from './notebook';
 import type { NotebookSection, NotebookView } from './notebook';
 import { INTRO_BEATS, JOURNAL_ENTRIES, PLANT_NOTES } from './lore';
 import { Stichos, ITEMS, RECIPES } from './session';
@@ -46,14 +49,14 @@ import type { ItemId, Npc, Point, Prop } from './types';
 void registerOffline();
 const root = document.getElementById('app')!;
 root.innerHTML = `<main class="s-shell">
- <header class="s-header"><a class="s-brand" href="?">VERSO<span>Destino: Stíchos</span></a><div class="s-location"><strong id="s-place">Vespera</strong><span id="s-coordinates">Stíchos · 3886</span></div><nav><button id="s-sound" title="Sound">♫</button><button id="s-together" title="Play together">Together</button><button id="s-life" title="Professions, homes and clothing (L)">Life</button><button id="s-journal" title="Journal (J)">Journal <kbd>J</kbd></button><button id="s-pause" aria-label="Pause">Ⅱ</button></nav></header>
- <section class="s-world-wrap"><canvas id="s-world" tabindex="0" aria-label="The continuous world of Stíchos. WASD or click to walk. E to interact."></canvas><div class="s-weather"><i></i><span id="s-weather">A cold morning</span></div><div class="s-mobile-status"><span>♥ <b id="s-mobile-hp"></b><i><em id="s-mobile-hp-bar"></em></i></span><span>Breath <b id="s-mobile-breath"></b><i><em id="s-mobile-breath-bar"></em></i></span></div><div class="s-compass">N<span>◇</span></div><div id="s-hover" class="s-hover" hidden></div><button id="s-context" class="s-context" hidden></button><div id="s-toast" class="s-toast" role="status" aria-live="polite"></div><div class="s-world-caption">The road disappears into snow.</div></section>
+ <header class="s-header"><a class="s-brand" href="?">VERSO<span>One universe, many lives</span></a><div class="s-location"><strong id="s-place">Vespera</strong><span id="s-coordinates">Stíchos · 3886</span></div><nav><button id="s-sound" title="Sound">♫</button><button id="s-together" title="Play together">Together</button><button id="s-life" title="Professions, homes and clothing (L)">Life</button><button id="s-journal" title="Journal (J)">Journal <kbd>J</kbd></button><button id="s-pause" aria-label="Pause">Ⅱ</button></nav></header>
+ <section class="s-world-wrap"><canvas id="s-world" tabindex="0" aria-label="An open world in the Verso universe. WASD or click to walk. E to interact."></canvas><div class="s-weather"><i></i><span id="s-weather">A cold morning</span></div><div class="s-mobile-status"><span>♥ <b id="s-mobile-hp"></b><i><em id="s-mobile-hp-bar"></em></i></span><span>Breath <b id="s-mobile-breath"></b><i><em id="s-mobile-breath-bar"></em></i></span></div><div class="s-compass">N<span>◇</span></div><div id="s-hover" class="s-hover" hidden></div><button id="s-context" class="s-context" hidden></button><div id="s-toast" class="s-toast" role="status" aria-live="polite"></div><div class="s-world-caption">Every road leads to another life.</div></section>
  <aside class="s-sidebar"><section class="s-person"><div class="s-person-heading"><canvas id="s-portrait" width="96" height="112" aria-label="Your current human host"></canvas><div><small id="s-body-label">A borrowed life</small><h1 id="s-person-name">Theo Bishop</h1></div><strong id="s-level">1</strong></div><div class="s-meter health"><label>Vitality <b id="s-hp-label"></b></label><div><i id="s-hp"></i></div></div><div class="s-meter breath"><label>Breath <b id="s-breath-label"></b></label><div><i id="s-breath"></i></div></div><div class="s-person-minor"><span id="s-warmth"></span><span id="s-stamina"></span></div><div class="s-xp"><i id="s-xp"></i></div></section>
- <section class="s-map-block"><canvas id="s-map" width="240" height="150" aria-label="Map around your current position"></canvas><div><span id="s-map-label">Vespera</span><button id="s-expand-map" title="Map (M)">⤢</button></div></section>
+ <section class="s-map-block"><canvas id="s-map" width="240" height="150" aria-label="Map around your current position"></canvas><div><span id="s-map-label">Vespera</span><button id="s-expand-map" aria-label="Open world atlas" title="Map (M)">⤢</button></div></section>
  <section class="s-task"><small>Following a thread</small><h2 id="s-quest-title"></h2><p id="s-quest-objective"></p><span id="s-quest-distance"></span><button id="s-track">Read journal</button></section>
- <section class="s-pack"><div class="s-pack-heading"><h2>Your satchel</h2><span id="s-coins"></span></div><div class="s-tabs" role="tablist" aria-label="Satchel view"><button id="s-tab-pack" role="tab" aria-selected="true">Belongings</button><button id="s-tab-craft" role="tab" aria-selected="false">Prepare</button></div><div id="s-pack-content"></div><button id="s-pocketbook" class="s-pocketbook"><span aria-hidden="true">▤</span><strong id="s-pocketbook-label">The priest’s notebook</strong><small id="s-pocketbook-note">In this body’s keeping</small></button><div id="s-item-detail" class="s-item-detail">Select an item to examine it.</div></section>
+ <section class="s-pack"><div class="s-pack-heading"><h2>Your satchel</h2><span id="s-coins"></span><button id="v-pack-close" aria-label="Close satchel">×</button></div><div class="s-tabs" role="tablist" aria-label="Satchel view"><button id="s-tab-pack" role="tab" aria-selected="true">Belongings</button><button id="s-tab-craft" role="tab" aria-selected="false">Prepare</button></div><div id="s-pack-content"></div><button id="s-pocketbook" class="s-pocketbook"><span aria-hidden="true">▤</span><strong id="s-pocketbook-label">The priest’s notebook</strong><small id="s-pocketbook-note">In this body’s keeping</small></button><div id="s-item-detail" class="s-item-detail">Select an item to examine it.</div></section>
  <footer class="s-side-footer"><span id="s-distance">0 paces traveled</span><button id="s-help">Controls</button></footer></aside>
- <footer class="s-actionbar"><div class="s-equipment"><button data-equip="staff" title="Equip staff">${itemIcon('staff')}</button><button data-equip="sword" title="Equip sword">${itemIcon('sword')}</button><button data-equip="bow" title="Equip bow">${itemIcon('bow')}</button><button id="s-inspect-gear" title="Inspect equipment (K)">Gear</button></div><div class="s-hotkeys"><button data-action="attack" title="Attack (F / 1)"><kbd>1</kbd>${itemIcon('sword')}<span>Strike</span></button><button data-action="ward" title="Botanical ward (Q / 2)"><kbd>2</kbd>${itemIcon('ward')}<span>Ward</span><i id="s-ward-cooldown"></i></button><button data-use="cequin" title="Breathe cequin (3)"><kbd>3</kbd>${itemIcon('cequin')}<b data-count="cequin"></b><span>Breathe</span></button><button data-use="salve" title="Apply salve (4)"><kbd>4</kbd>${itemIcon('salve')}<b data-count="salve"></b><span>Heal</span></button><button data-use="tonic" title="Use warming tonic (5)"><kbd>5</kbd>${itemIcon('tonic')}<b data-count="tonic"></b><span>Warm</span></button><button data-use="rations" title="Eat (6)"><kbd>6</kbd>${itemIcon('rations')}<b data-count="rations"></b><span>Eat</span></button><button data-action="interact" title="Interact (E)"><kbd>E</kbd>${itemIcon('hand')}<span>Interact</span></button></div><button id="s-mobile-pack">Satchel</button><span class="s-walk-help">WASD / click to walk<br>Shift to run</span></footer>
+ <footer class="s-actionbar"><div class="s-equipment"><button data-equip="staff" title="Equip staff">${itemIcon('staff')}</button><button data-equip="sword" title="Equip sword">${itemIcon('sword')}</button><button data-equip="bow" title="Equip bow">${itemIcon('bow')}</button><button id="s-inspect-gear" title="Inspect equipment (K)">Gear</button></div><div class="s-hotkeys"><button data-action="attack" title="Attack (F / 1)"><kbd>1</kbd>${itemIcon('sword')}<span>Strike</span></button><button data-action="ward" title="Botanical ward (Q / 2)"><kbd>2</kbd>${itemIcon('ward')}<span>Ward</span><i id="s-ward-cooldown"></i></button><button data-use="cequin" title="Breathe cequin (3)"><kbd>3</kbd>${itemIcon('cequin')}<b data-count="cequin"></b><span>Breathe</span></button><button data-use="salve" title="Apply salve (4)"><kbd>4</kbd>${itemIcon('salve')}<b data-count="salve"></b><span>Heal</span></button><button data-use="tonic" title="Use warming tonic (5)"><kbd>5</kbd>${itemIcon('tonic')}<b data-count="tonic"></b><span>Warm</span></button><button data-use="rations" title="Eat (6)"><kbd>6</kbd>${itemIcon('rations')}<b data-count="rations"></b><span>Eat</span></button><button data-action="interact" title="Interact (E)"><kbd>E</kbd>${itemIcon('hand')}<span>Interact</span></button></div><button id="s-mobile-pack">Satchel</button><button id="v-mobile-more">More</button><span class="s-walk-help">WASD / click to walk<br>Shift to run</span></footer>
  <div class="s-mobile-move"><button data-move="w">↑</button><button data-move="a">←</button><button data-move="s">↓</button><button data-move="d">→</button></div>
  <div id="s-dialogue" class="s-dialogue" hidden></div><div id="s-modal" class="s-modal" hidden></div><div id="s-transfer" class="s-transfer" role="dialog" aria-modal="true" aria-labelledby="s-transfer-line" hidden><div class="s-transfer-ring"></div><span id="s-transfer-time"></span><h2 id="s-transfer-line"></h2><p id="s-transfer-sub"></p><div id="s-intro-controls" class="s-intro-controls" hidden><button id="s-intro-prev">← Back</button><span id="s-intro-page" aria-live="polite"></span><button id="s-intro-next">Continue →</button></div><button id="s-skip">Continue</button></div></main>`;
 
@@ -86,7 +89,7 @@ document
   .querySelector('.s-map-block')!
   .insertAdjacentHTML(
     'afterbegin',
-    '<div class="v-map-heading"><span>Local chart</span><div><button id="v-map-less" aria-label="Zoom world out">−</button><button id="v-map-more" aria-label="Zoom world in">+</button></div></div>',
+    '<div class="v-map-heading"><span>Local chart</span><div><small>World zoom</small><button id="v-map-less" aria-label="Zoom world out">−</button><button id="v-map-more" aria-label="Zoom world in">+</button></div></div>',
   );
 document
   .querySelector('.s-side-footer')!
@@ -116,10 +119,10 @@ const multiplayer = new MultiplayerConnection();
 const peerEmotes = new Map<string, { text: string; until: number }>();
 let sharedActionPending = false;
 let multiplayerRoster = '';
-let roomName = 'Theo';
+let roomName = 'Traveler';
 let roomServer = 'peer:';
 try {
-  roomName = localStorage.getItem('verso.room.name') || 'Theo';
+  roomName = localStorage.getItem('verso.room.name') || 'Traveler';
   roomServer = localStorage.getItem('verso.room.server') || roomServer;
 } catch {}
 let started = false,
@@ -152,7 +155,7 @@ function trackedQuest() {
     return {
       id: 'map-waypoint',
       title: 'Your marked destination',
-      description: 'A point marked in Theo’s atlas.',
+      description: 'A point marked in your atlas.',
       objective: `Travel toward ${Math.round(mapWaypoint.x)}, ${Math.round(mapWaypoint.y)}.`,
       target: mapWaypoint,
       complete: false,
@@ -161,7 +164,7 @@ function trackedQuest() {
   const active = game.quests.filter((q) => !q.complete);
   return (
     active.find((q) => q.id === trackedQuestId) ??
-    active.filter((q) => q.target).at(-1) ??
+    (game.universeLife ? active.find((q) => q.target) : active.filter((q) => q.target).at(-1)) ??
     active[0]
   );
 }
@@ -214,7 +217,7 @@ function resize() {
   if (chartControl) {
     const map = chartControl.canvas;
     map.width = Math.max(260, Math.round(map.getBoundingClientRect().width));
-    map.height = Math.min(560, Math.max(290, Math.round(innerHeight * 0.51)));
+    map.height = Math.max(170, Math.round(map.getBoundingClientRect().height));
     chartControl.requestDraw();
   }
 }
@@ -295,7 +298,9 @@ function setInert(value: boolean) {
     .querySelectorAll<HTMLElement>('.s-shell > :not(#s-modal):not(#s-transfer)')
     .forEach((n) => (n.inert = value));
 }
+let modalInvoker: HTMLElement | null = null;
 function openModal(kind: string, html: string) {
+  if (!modal) modalInvoker = document.activeElement as HTMLElement;
   disposeSpecial?.();
   disposeSpecial = null;
   modalRevision++;
@@ -311,7 +316,61 @@ function openModal(kind: string, html: string) {
   const container = el('s-modal');
   container.hidden = false;
   container.className = `s-modal ${kind === 'title' ? 'is-title' : kind === 'map' ? 'is-atlas' : kind === 'journal' ? 'is-notebook' : ''}`;
-  container.innerHTML = `<section class="s-window" role="dialog" aria-modal="true">${html}</section>`;
+  container.innerHTML = `<section class="s-window" role="dialog" aria-modal="true" data-screen="${kind}">${html}</section>`;
+  if (!['title', 'journal', 'map'].includes(kind)) {
+    const frame = container.querySelector<HTMLElement>('.s-window')!;
+    frame.classList.add('s-bounded-window');
+    const header = document.createElement('header');
+    header.className = 's-dialog-heading';
+    const existingHeading = frame.querySelector<HTMLElement>(':scope > .v-window-heading');
+    if (existingHeading) header.append(existingHeading);
+    else {
+      const heading = frame.querySelector('h2');
+      if (heading) header.append(heading);
+    }
+    if (!['lost', 'life-in-use'].includes(kind) && !header.querySelector('button')) {
+      const close = document.createElement('button');
+      close.className = 's-window-close';
+      close.textContent = '×';
+      close.setAttribute('aria-label', 'Close window');
+      close.onclick = () => (started ? closeModal() : title());
+      header.append(close);
+    }
+    const body = document.createElement('div');
+    body.className = 's-window-content';
+    const footer = document.createElement('footer');
+    footer.className = 's-dialog-footer';
+    for (const node of [...frame.children]) {
+      if (node === existingHeading) continue;
+      if (
+        (node.tagName === 'BUTTON' && /return|close|resume/.test(node.id)) ||
+        node.classList.contains('v-window-footer')
+      )
+        footer.append(node);
+      else body.append(node);
+    }
+    frame.append(header, body);
+    if (footer.childElementCount) frame.append(footer);
+    if (kind === 'creation') {
+      const tabs = document.createElement('nav');
+      tabs.className = 'v-creation-tabs';
+      tabs.setAttribute('aria-label', 'Character creation pages');
+      tabs.innerHTML =
+        '<button type="button" data-creation-page="life" aria-pressed="true">This life</button><button type="button" data-creation-page="look" aria-pressed="false">Appearance</button>';
+      body.prepend(tabs);
+      frame.dataset.creationPage = 'life';
+      tabs.querySelectorAll<HTMLButtonElement>('button').forEach(
+        (b) =>
+          (b.onclick = () => {
+            frame.dataset.creationPage = b.dataset.creationPage;
+            tabs
+              .querySelectorAll('button')
+              .forEach((other) => other.setAttribute('aria-pressed', String(other === b)));
+            body.scrollTop = 0;
+          }),
+      );
+    }
+  }
   const heading = container.querySelector('h2');
   if (heading) {
     heading.id = 's-modal-heading';
@@ -332,7 +391,9 @@ function closeModal() {
   setInert(false);
   paused = false;
   audio.pause(false);
-  canvas.focus({ preventScroll: true });
+  if (modalInvoker?.isConnected && !modalInvoker.closest('#s-modal'))
+    modalInvoker.focus({ preventScroll: true });
+  else canvas.focus({ preventScroll: true });
 }
 function title() {
   const invite = pendingInvitation;
@@ -346,11 +407,10 @@ function title() {
     e.preventDefault();
     const text = el<HTMLInputElement>('s-seed-input').value.trim();
     const seed = text ? parseSeed(text) : crypto.getRandomValues(new Uint32Array(1))[0];
-    choosePlanet(seed, 3);
+    choosePlanet(seed, 4);
   };
   el('v-theo-story').onclick = () => {
-    const seed = el<HTMLInputElement>('s-seed-input').value.trim();
-    choosePlanet(seed ? parseSeed(seed) : STICHOS_SEED, 3, undefined, true);
+    choosePlanet(STICHOS_SEED, 3, undefined, true);
   };
   el<HTMLFormElement>('v-title-room').onsubmit = (e) => {
     e.preventDefault();
@@ -379,7 +439,7 @@ function title() {
 }
 function choosePlanet(
   seed: number,
-  generation: Geography = 3,
+  generation: Geography = 4,
   invite?: RoomInvitation,
   theo = false,
 ) {
@@ -699,12 +759,12 @@ function updateTransfer(now: number) {
           : transferKind === 'clinic'
             ? recovering
             : returning,
-    seconds = (now - transferStarted) / 1000;
+    seconds = Math.max(0, (now - transferStarted) / 1000);
   const duration = reducedMotion.matches ? 2.5 : 3.1;
   const step =
     transferKind === 'opening'
       ? introPage
-      : Math.min(lines.length - 1, Math.floor(seconds / duration));
+      : Math.max(0, Math.min(lines.length - 1, Math.floor(seconds / duration)));
   if (step !== transferStep) {
     transferStep = step;
     el('s-transfer-time').textContent = lines[step][0];
@@ -781,7 +841,7 @@ function pauseMenu() {
 async function aiMenu() {
   openModal(
     'ai',
-    `<div class="v-window-heading"><h2>AI companion</h2><button id="v-ai-close" aria-label="Close">×</button></div><p>Player chat works directly in your room. Optional AI conversations require a trusted companion outside the browser.</p><p>Codex supports ChatGPT subscription login in its native runtime. A supported browser/WASM runtime is not currently available in this build.</p><form id="v-ai-pair"><label>Local companion pairing code<input id="v-ai-code" autocomplete="off" maxlength="100"></label><button>Check companion</button></form><p id="v-ai-status" role="status">Start the optional companion with <code>node server/ai-companion.mjs</code>, then enter its pairing code. No AI requests run automatically.</p>`,
+    `<div class="v-window-heading"><h2>AI companion</h2><button id="v-ai-close" aria-label="Close">×</button></div><p>Player chat works directly in your room. Optional AI conversations require a trusted companion outside the browser.</p><p>AI conversations are not available in this release. You can still talk to real players through Local and Room chat.</p><details><summary>Advanced companion setup</summary><p>The optional local companion can check a native Codex login. It does not enable AI dialogue in this build.</p><form id="v-ai-pair"><label>Local companion pairing code<input id="v-ai-code" autocomplete="off" maxlength="100"></label><button>Check companion</button></form><p id="v-ai-status" role="status">Start the optional companion with <code>node server/ai-companion.mjs</code>, then enter its pairing code. No AI requests run automatically.</p><a href="${esc(aiCompanionGuide)}" target="_blank" rel="noopener">Read companion setup notes</a></details>`,
   );
   el('v-ai-close').onclick = closeModal;
   el<HTMLFormElement>('v-ai-pair').onsubmit = async (e) => {
@@ -802,29 +862,53 @@ async function aiMenu() {
 function equipmentMenu() {
   openModal(
     'gear',
-    `<span class="s-chapter">Belongings of ${esc(game.player.bodyName)}</span><h2>Wood, metal, and a living core.</h2><p>Longer weapons reach farther. Denser materials strike harder and recover more slowly. These belongings stay with this body when your mind travels.</p><div class="s-gear-cards">${(
-      ['staff', 'sword', 'bow'] as WeaponKind[]
-    )
-      .map((kind) => {
-        const p = game.weaponProfile(kind);
-        const owned = game.weapons.has(kind);
-        return `<article>${weaponIcon(game.weaponSeed(kind), kind, 112)}<small>${owned ? (!game.activeArtifact && game.player.appearance.weapon === kind ? 'Equipped' : 'In this body’s keeping') : 'Available from merchants'}</small><h3>${esc(p.name)}</h3><dl><div><dt>Strength</dt><dd>${p.damage}</dd></div><div><dt>Reach</dt><dd>${p.range.toFixed(2)}</dd></div><div><dt>Recovery</dt><dd>${p.cooldown.toFixed(2)}s</dd></div></dl><p>${esc(p.effectDescription)}</p><button data-equip="${kind}" ${!owned ? 'disabled' : ''}>${owned ? 'Equip' : 'Not owned'}</button></article>`;
-      })
-      .join(
-        '',
-      )}</div>${game.activeArtifact ? `<article class="s-active-invention"><img src="${artifactIcon(game.activeArtifact.design, 112)}" alt=""><h3>${esc(game.activeArtifact.name)}</h3><p>Equipped invention · ${esc(game.activeArtifact.delivery)}<br>${game.activeArtifact.properties.damage} strength · ${game.activeArtifact.properties.range.toFixed(2)} reach · ${game.activeArtifact.properties.cooldown.toFixed(2)}s recovery</p></article>` : ''}<button id="s-open-estate">Working tools and household</button><button id="s-open-invent">Invent and inspect new constructions</button><button id="s-open-forge">Build from parts</button><button id="s-gear-return" class="s-primary">Return to this life</button>`,
+    `<span class="s-chapter">Belongings of ${esc(game.player.bodyName)}</span><h2>Your equipment</h2><p>Every weapon has its own materials, proportions and handling. These objects stay with this body when your mind travels.</p><div class="s-gear-cards">${game.weaponInventory.map((w) => `<article>${weaponIcon(w.seed, w.kind, 112)}<small>${w.equipped ? 'Equipped' : esc(w.profile.construction)}</small><h3>${esc(w.profile.name)}</h3><dl><div><dt>Strength</dt><dd>${w.profile.damage}</dd></div><div><dt>Reach</dt><dd>${w.profile.range.toFixed(2)}</dd></div><div><dt>Recovery</dt><dd>${w.profile.cooldown.toFixed(2)}s</dd></div></dl><p>${esc(w.profile.effectDescription)}</p><button data-equip-record="${esc(w.id)}" ${w.equipped ? 'disabled' : ''}>${w.equipped ? 'Equipped' : 'Equip this weapon'}</button></article>`).join('') || '<p>Your hands are empty. Visit a merchant to examine their stock, or build a weapon at a workbench.</p>'}</div>${game.activeArtifact ? `<article class="s-active-invention"><img src="${artifactIcon(game.activeArtifact.design, 112)}" alt="${esc(game.activeArtifact.name)}"><h3>${esc(game.activeArtifact.name)}</h3><p>Equipped invention · ${game.activeArtifact.properties.damage} strength · ${game.activeArtifact.properties.range.toFixed(2)} reach</p></article>` : ''}<div class="s-menu-buttons"><button id="s-open-estate">Working tools and household</button><button id="s-open-invent">Invent a construction</button><button id="s-open-forge">Build a weapon from parts</button></div><button id="s-gear-return" class="s-primary">Return to this life</button>`,
   );
   el('s-gear-return').onclick = closeModal;
   el('s-open-forge').onclick = () => lifeMenu('forge');
   el('s-open-estate').onclick = () => lifeMenu('estate');
   el('s-open-invent').onclick = () => lifeMenu('discover', game.activeArtifact?.design);
+  document.querySelectorAll<HTMLButtonElement>('[data-equip-record]').forEach(
+    (b) =>
+      (b.onclick = () => {
+        const result = game.equipWeapon(b.dataset.equipRecord!);
+        save();
+        updateUI();
+        equipmentMenu();
+        toast(result.message);
+      }),
+  );
 }
 function controls() {
+  const touch = matchMedia('(pointer: coarse)').matches || innerWidth < 900;
   openModal(
     'help',
-    `<span class="s-chapter">Living on Stíchos</span><h2>Take your time. Keep breathing.</h2><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click the ground</b><span>Follow a path; click a person or object to approach</span></p><p><b>E</b><span>Talk, gather, open, read, or use a nearby object</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor</span></p><p><b>Q / 2</b><span>Release a botanical ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Cequin · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare supplies / inspect equipment</span></p><p><b>J / M / Escape</b><span>Journal / map / pause</span></p><p><b>Mouse wheel</b><span>Zoom the world</span></p></div><p>Cequin sustains breath. Tonics help with cold. Rest near a shrine or bench. Roads connect inhabited districts; wilderness contains supplies and danger. Dialogue choices and violence affect clan trust.</p><p>Watch an attacker’s windup. Step sideways to avoid a drawn bow, use walls as cover, or interrupt a nearby strike with your weapon or ward.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
+    `<span class="s-chapter">Living on ${esc(currentPlanet.name)}</span><h2>Explore at your own pace.</h2>${touch ? '<article><h3>Touch controls</h3><p>Tap the ground to walk. Hold an arrow to move. Tap a person, plant or object to approach, then tap the action shown above the hotbar.</p><p>Satchel opens your belongings and preparation recipes. More opens equipment, supplies, journal and saved phrases. Pinch is not required: use the chart buttons to zoom.</p></article>' : ''}<details ${touch ? '' : 'open'}><summary>Keyboard and mouse</summary><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click ground / person</b><span>Approach the selected place or person</span></p><p><b>E</b><span>Talk, work with a tool, gather, read or open</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor with held equipment</span></p><p><b>Q / 2</b><span>Release a ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Breath supply · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare / equipment</span></p><p><b>J / M / L / G</b><span>Notebook / world atlas / Life / galaxy</span></p><p><b>Enter / F7–F9</b><span>Chat / send saved phrases</span></p><p><b>Escape</b><span>Close a window, cancel construction or pause</span></p><p><b>Mouse wheel</b><span>Zoom the world or chart under the cursor</span></p></div></details><p>Use actual tools to harvest resources. Learn local needs, earn wages, hire people you trust and build a home. Roads connect settlements; wilderness contains supplies and danger.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
   );
   el('s-help-return').onclick = closeModal;
+}
+function moreActions() {
+  openModal(
+    'actions',
+    `<h2>Actions</h2><div class="s-menu-buttons"><button id="v-more-gear">Equipment</button><button id="v-more-journal">Notebook</button><button id="v-more-life">Life, home and work</button><button id="v-more-warm">Use warming tonic · ${game.inventory.tonic ?? 0}</button><button id="v-more-eat">Eat food · ${game.inventory.rations ?? 0}</button><button id="v-more-phrases">Words and shortcuts</button><button id="v-more-atlas">World atlas</button></div>`,
+  );
+  el('v-more-gear').onclick = equipmentMenu;
+  el('v-more-journal').onclick = () => journal();
+  el('v-more-life').onclick = () => lifeMenu();
+  el('v-more-phrases').onclick = shortcutsMenu;
+  el('v-more-atlas').onclick = mapModal;
+  el('v-more-warm').onclick = () => {
+    closeModal();
+    game.use('tonic');
+    updateUI();
+    save();
+  };
+  el('v-more-eat').onclick = () => {
+    closeModal();
+    game.use('rations');
+    updateUI();
+    save();
+  };
 }
 function journal(section?: NotebookSection) {
   if (section) {
@@ -837,7 +921,7 @@ function journal(section?: NotebookSection) {
     el('s-modal').querySelector<HTMLElement>(focus)?.focus({ preventScroll: true });
   };
   el('s-journal-return').onclick = () => {
-    if (game.hasNotebook && notebookView.open) foldNotebook(false);
+    if ((game.hasNotebook || game.universeLife) && notebookView.open) foldNotebook(false);
     else closeModal();
   };
   const open = el('s-notebook-open');
@@ -867,7 +951,7 @@ function journal(section?: NotebookSection) {
     });
   const leaf = (n: number) => {
     if (notebookView.section === 'years')
-      notebookView.entry = Math.max(0, Math.min(JOURNAL_ENTRIES.length - 1, n));
+      notebookView.entry = Math.max(0, Math.min(notebookLeafCount(game, 'years') - 1, n));
     else notebookView.plant = Math.max(0, Math.min(PLANT_NOTES.length - 1, n));
     refresh();
   };
@@ -891,10 +975,12 @@ function journal(section?: NotebookSection) {
     } catch {}
     refresh('#s-notebook-type');
   };
-  el('s-notebook-intro').onclick = () => {
-    replayingIntro = true;
-    transfer('opening');
-  };
+  const introButton = el('s-notebook-intro');
+  if (introButton)
+    introButton.onclick = () => {
+      replayingIntro = true;
+      transfer('opening');
+    };
   const search = el<HTMLInputElement>('s-glossary-search');
   if (search)
     search.oninput = () => {
@@ -917,7 +1003,7 @@ function journal(section?: NotebookSection) {
     };
 }
 function foldNotebook(putAway: boolean) {
-  if (!game.hasNotebook || !notebookView.open) {
+  if ((!game.hasNotebook && !game.universeLife) || !notebookView.open) {
     closeModal();
     return;
   }
@@ -961,11 +1047,16 @@ function mapModal() {
   const places = game.discoveredSites;
   openModal(
     'map',
-    `<span class="s-chapter">Theo Bishop’s atlas · Stíchos, 3886</span><div class="s-atlas-heading"><h2>The country you remember.</h2><button id="s-map-return" class="s-primary">Keep walking</button></div><div class="s-atlas-toolbar"><div class="s-atlas-zoom"><button id="s-atlas-minus" aria-label="Zoom atlas out">−</button><button id="s-atlas-plus" aria-label="Zoom atlas in">+</button></div><button id="s-atlas-body">My body</button><button id="s-atlas-fit">All explored</button>${trackedQuest()?.target ? '<button id="s-atlas-task">Current thread</button>' : ''}<span id="s-atlas-scale"></span></div><div class="s-atlas-layout"><div class="s-atlas-chart"><canvas id="s-large-map" tabindex="0" width="800" height="500" aria-label="Explored world atlas. Drag or use arrow keys to pan. Scroll or use plus and minus to zoom. Click to mark a destination."></canvas><div class="s-atlas-coordinate-line"><span id="s-atlas-coordinate"></span><span>Dark country is uncharted</span></div></div><aside class="s-atlas-places"><h3>Known places</h3>${places.length ? places.map((site) => `<button data-atlas-site="${esc(site.id)}"><strong>${esc(site.name)}</strong><small>${esc(site.detail)} · ${Math.round(site.x)}, ${Math.round(site.y)}</small></button>`).join('') : '<p>Walk the roads to learn the names of distant places.</p>'}<div class="s-atlas-mark"><h3>Chart mark</h3><p id="s-atlas-mark-label">Click the chart to mark a destination.</p><button id="s-atlas-follow" disabled>Follow this mark</button><button id="s-atlas-clear" ${mapWaypoint ? '' : 'disabled'}>Clear mark</button></div></aside></div><form id="s-atlas-find" class="s-atlas-find"><span>Find coordinates</span><label>East / west <input id="s-atlas-x" type="number" step="1" min="-1000000000" max="1000000000" value="${Math.round(game.player.x)}" required></label><label>North / south <input id="s-atlas-y" type="number" step="1" min="-1000000000" max="1000000000" value="${Math.round(game.player.y)}" required></label><button type="submit">Locate</button></form><p class="s-atlas-hint">Drag to move the chart. Scroll to change scale. Your gold arrow marks the current body; diamonds mark destinations. Only explored terrain is drawn. Looking at the atlas does not move your body or reveal distant country.</p>`,
+    `<span class="s-chapter">${esc(game.player.bodyName)}’s atlas · ${esc(currentPlanet.name)}</span><div class="s-atlas-heading"><h2>The country you remember.</h2><button id="s-map-return" class="s-primary">Keep walking</button></div><div class="s-atlas-toolbar"><div class="s-atlas-zoom"><button id="s-atlas-minus" aria-label="Zoom atlas out">−</button><button id="s-atlas-plus" aria-label="Zoom atlas in">+</button></div><button id="s-atlas-body">My body</button><button id="s-atlas-fit">All explored</button><button id="v-atlas-places" aria-expanded="false">Places & mark</button>${trackedQuest()?.target ? '<button id="s-atlas-task">Current thread</button>' : ''}<span id="s-atlas-scale"></span></div><div class="s-atlas-layout"><div class="s-atlas-chart"><canvas id="s-large-map" tabindex="0" width="800" height="500" aria-label="Explored world atlas. Drag or use arrow keys to pan. Scroll or use plus and minus to zoom. Click to mark a destination."></canvas><div class="s-atlas-coordinate-line"><span id="s-atlas-coordinate"></span><span>Dark country is uncharted</span></div></div><aside class="s-atlas-places"><h3>Known places</h3>${places.length ? places.map((site) => `<button data-atlas-site="${esc(site.id)}"><strong>${esc(site.name)}</strong><small>${esc(site.detail)} · ${Math.round(site.x)}, ${Math.round(site.y)}</small></button>`).join('') : '<p>Walk the roads to learn the names of distant places.</p>'}<div class="s-atlas-mark"><h3>Chart mark</h3><p id="s-atlas-mark-label">Click the chart to mark a destination.</p><button id="s-atlas-follow" disabled>Follow this mark</button><button id="s-atlas-clear" ${mapWaypoint ? '' : 'disabled'}>Clear mark</button></div></aside></div><form id="s-atlas-find" class="s-atlas-find"><span>Find coordinates</span><label>East / west <input id="s-atlas-x" type="number" step="1" min="-1000000000" max="1000000000" value="${Math.round(game.player.x)}" required></label><label>North / south <input id="s-atlas-y" type="number" step="1" min="-1000000000" max="1000000000" value="${Math.round(game.player.y)}" required></label><button type="submit">Locate</button></form><p class="s-atlas-hint">Drag to move the chart. Scroll to change scale. Your gold arrow marks the current body; diamonds mark destinations. Only explored terrain is drawn. Looking at the atlas does not move your body or reveal distant country.</p>`,
   );
+  el('v-atlas-places').onclick = () => {
+    const pane = document.querySelector('.s-atlas-places')!;
+    const open = pane.classList.toggle('is-open');
+    el('v-atlas-places').setAttribute('aria-expanded', String(open));
+  };
   const map = el<HTMLCanvasElement>('s-large-map');
   map.width = Math.max(260, Math.round(map.getBoundingClientRect().width));
-  map.height = Math.min(560, Math.max(290, Math.round(innerHeight * 0.51)));
+  map.height = Math.max(170, Math.round(map.getBoundingClientRect().height));
   let selection: Point | null = mapWaypoint ? { ...mapWaypoint } : null;
   const updateMark = () => {
     const button = el<HTMLButtonElement>('s-atlas-follow');
@@ -1054,7 +1145,7 @@ function lost() {
   const anotherMind = game.transferReady && !!game.transferCandidate;
   openModal(
     'lost',
-    `<span class="s-chapter">The breath stops</span><h2>${anotherMind ? 'Your mind is still here.' : 'A voice pulls you back.'}</h2><p>${anotherMind ? 'The restored signal can hold your consciousness while another body wakes. Your choices remain in Stíchos.' : 'The clinic knows this face. Somewhere beyond the cold, someone is still trying to reach you.'}</p><button id="s-return-life" class="s-primary">${anotherMind ? 'Follow the other heartbeat' : 'Wake at the clinic'}</button>`,
+    `<span class="s-chapter">The breath stops</span><h2>${anotherMind ? 'Your mind is still here.' : 'A voice pulls you back.'}</h2><p>${anotherMind ? 'The restored signal can hold your consciousness while another body wakes. Your choices remain in this world.' : 'The clinic knows this face. Somewhere beyond the cold, someone is still trying to reach you.'}</p><button id="s-return-life" class="s-primary">${anotherMind ? 'Follow the other heartbeat' : 'Wake at the clinic'}</button>`,
   );
   el('s-return-life').onclick = () =>
     transfer(anotherMind ? 'return' : 'clinic', () => {
@@ -1062,6 +1153,7 @@ function lost() {
       lastPhase = game.phase;
     });
 }
+el('v-pack-close').onclick = () => root.classList.remove('satchel-open');
 function inventory(view: 'pack' | 'craft' = packView) {
   packView = view;
   packSignature = '';
@@ -1086,7 +1178,7 @@ function updatePack() {
   if (packView === 'pack') {
     const entries = (Object.keys(ITEMS) as ItemId[]).filter((id) => (game.inventory[id] ?? 0) > 0);
     el('s-pack-content').innerHTML =
-      `<div class="s-item-grid">${entries.map((id) => `<button class="s-item ${selectedItem === id ? 'selected' : ''}" data-item="${id}" title="${esc(ITEMS[id].name)}">${itemIcon(id, 34)}<b>${game.inventory[id]}</b></button>`).join('')}${Array.from({ length: Math.max(0, Math.ceil(Math.max(10, entries.length) / 5) * 5 - entries.length) }, () => '<span class="s-empty-slot"></span>').join('')}</div>` +
+      `<div class="s-item-grid">${entries.map((id) => `<button class="s-item ${selectedItem === id ? 'selected' : ''}" data-item="${id}" aria-label="${esc(game.itemName(id))}, ${game.inventory[id]}, inspect" aria-pressed="${selectedItem === id}" title="${esc(game.itemName(id))}">${itemIcon(id, 34)}<b>${game.inventory[id]}</b></button>`).join('')}${Array.from({ length: Math.max(0, Math.ceil(Math.max(10, entries.length) / 5) * 5 - entries.length) }, () => '<span class="s-empty-slot"></span>').join('')}</div>` +
       `<div class="s-pack-tools">${game.tools.map((t) => `<button data-pack-tool="${t.kind}" title="${esc(t.profile.name)} · ${t.durability}/${t.profile.maxDurability} condition" aria-pressed="${t.equipped && !game.activeArtifact}"><img src="${toolIcon(t.seed, t.kind, 36)}" alt=""><span>${t.kind}<small>${t.durability}/${t.profile.maxDurability}</small></span></button>`).join('')}</div><div class="s-pack-inventions">${game.artifacts.map((a) => `<button data-pack-invention="${esc(a.design)}" title="${esc(a.genome.name)}"><img src="${artifactIcon(a.design, 52)}" alt=""><span>${esc(a.genome.name)}<small>${a.equipped ? 'Equipped' : esc(a.genome.delivery)}</small></span></button>`).join('')}<div class="v-pack-management"><button id="s-pack-tools">Tools & household</button><button id="s-pack-invent">Invent</button></div></div>`;
     el('s-pack-content')
       .querySelectorAll<HTMLButtonElement>('[data-pack-tool]')
@@ -1118,9 +1210,11 @@ function updatePack() {
   if (selectedItem) {
     const item = ITEMS[selectedItem];
     el('s-item-detail').innerHTML =
-      `<strong>${esc(item.name)}</strong><p>${esc(item.description)}</p>${['cequin', 'salve', 'tonic', 'rations', 'bandage'].includes(selectedItem) ? `<button data-use="${selectedItem}">Use ${esc(item.name.toLowerCase())}</button>` : ''}`;
+      `<strong>${esc(game.itemName(selectedItem))}</strong><p>${esc(item.description)}</p>${['cequin', 'salve', 'tonic', 'rations', 'bandage'].includes(selectedItem) ? `<button data-use="${selectedItem}">Use ${esc(item.name.toLowerCase())}</button>` : ''}`;
   }
 }
+let tradeTab: 'buy' | 'sell' = 'buy';
+let tradeSelection = '';
 function updateDialogue() {
   if (modal || transferStarted) {
     el('s-dialogue').hidden = true;
@@ -1136,6 +1230,78 @@ function updateDialogue() {
   walk = [];
   el('s-dialogue').innerHTML =
     `<section role="dialog" aria-label="Conversation with ${esc(d.speaker)}"><div class="s-dialogue-heading"><div><small>${esc(d.role)}</small><h2>${esc(d.speaker)}</h2></div><button id="s-dialogue-close" aria-label="Close conversation">×</button></div><p>${esc(d.text)}</p><div class="s-dialogue-choices">${d.choices.map((c) => `<button data-choice="${esc(c.id)}" ${c.disabled ? 'disabled' : ''}>${esc(c.label)}${c.detail ? `<small>${esc(c.detail)}</small>` : ''}</button>`).join('')}</div></section>`;
+  if (d.role === 'merchant' && d.npcId) {
+    const choices = d.choices
+      .filter((c) =>
+        tradeTab === 'sell'
+          ? c.id.startsWith('sell:')
+          : c.id.startsWith('buy:') || c.id.startsWith('weapon:'),
+      )
+      .sort((a, b) => Number(b.id.startsWith('weapon:')) - Number(a.id.startsWith('weapon:')));
+    let selected =
+      choices.find((c) => c.id === tradeSelection) ??
+      choices.find((c) => c.id === 'weapon:sword') ??
+      choices.find((c) => c.id.startsWith('weapon:')) ??
+      choices[0];
+    tradeSelection = selected?.id ?? '';
+    const stock = selected?.id.startsWith('weapon:')
+      ? game.merchantWeaponStock(d.npcId).find((w) => w.kind === selected.id.slice(7))
+      : undefined;
+    const item = selected && !stock ? (selected.id.split(':')[1] as ItemId) : null;
+    el('s-dialogue').innerHTML =
+      `<section role="dialog" aria-label="Trade with ${esc(d.speaker)}"><div class="s-dialogue-heading"><div><small>Merchant · ${game.player.coins} coins</small><h2>${esc(d.speaker)}</h2></div><button id="s-dialogue-close" aria-label="Finish trading">×</button></div><div class="s-trade-tabs"><button data-trade-tab="buy" aria-pressed="${tradeTab === 'buy'}">Buy</button><button data-trade-tab="sell" aria-pressed="${tradeTab === 'sell'}">Sell</button></div><div class="s-trade-workspace"><div class="s-trade-list">${choices.map((c) => `<button data-trade-select="${esc(c.id)}" aria-pressed="${c.id === selected?.id}">${esc(c.label)}</button>`).join('') || '<p>No items to sell.</p>'}</div><article class="s-trade-detail">${selected ? `${stock ? weaponIcon(stock.seed, stock.kind, 112) : item && ITEMS[item] ? itemIcon(item, 112) : ''}<h3>${esc(stock?.profile.name ?? (item ? game.itemName(item) : selected.label))}</h3><p>${stock ? `${stock.profile.damage} strength · ${stock.profile.range.toFixed(2)} reach · ${stock.profile.cooldown.toFixed(2)}s recovery` : item ? esc(ITEMS[item].description) : ''}</p>${stock ? `<p>${esc(stock.profile.construction)}</p><p>${esc(stock.profile.effectDescription)}</p>` : `<label>Quantity<select id="v-trade-quantity"><option value="1">1</option><option value="5">5</option><option value="10">10</option></select></label>`}<button id="v-trade-confirm" ${selected.disabled ? 'disabled' : ''}>${esc(selected.label)}</button>${selected.disabled ? '<small>More coins or space are needed.</small>' : ''}` : '<p>Choose something to inspect.</p>'}</article></div></section>`;
+    const refresh = () => {
+      dialogueSignature = '';
+      updateDialogue();
+    };
+    document.querySelectorAll<HTMLButtonElement>('[data-trade-tab]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          tradeTab = b.dataset.tradeTab as 'buy' | 'sell';
+          tradeSelection = '';
+          refresh();
+        }),
+    );
+    document.querySelectorAll<HTMLButtonElement>('[data-trade-select]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          tradeSelection = b.dataset.tradeSelect!;
+          refresh();
+        }),
+    );
+    const quantitySelect = el<HTMLSelectElement>('v-trade-quantity');
+    if (quantitySelect && selected && item) {
+      const unitPrice = Number(selected.label.match(/(\d+) coins/)?.[1] ?? 0);
+      const max =
+        tradeTab === 'sell'
+          ? (game.inventory[item] ?? 0)
+          : Math.min(
+              game.capacity - game.carried,
+              unitPrice ? Math.floor(game.player.coins / unitPrice) : 0,
+            );
+      for (const option of [...quantitySelect.options])
+        option.disabled = Number(option.value) > max;
+      quantitySelect.onchange = () => {
+        const count = Number(quantitySelect.value);
+        el('v-trade-confirm').textContent =
+          `${tradeTab === 'sell' ? 'Sell' : 'Buy'} ${count} · ${unitPrice * count} coins`;
+      };
+      quantitySelect.onchange(new Event('change'));
+    }
+    const confirm = el('v-trade-confirm');
+    if (confirm && selected)
+      confirm.onclick = (event) => {
+        event.stopPropagation();
+        const quantity = stock ? 1 : Number(el<HTMLSelectElement>('v-trade-quantity').value);
+        for (let i = 0; i < quantity; i++) {
+          const option = game.dialogue?.choices.find((c) => c.id === selected!.id);
+          if (!option || option.disabled) break;
+          game.choose(selected!.id);
+        }
+        save();
+        updateUI();
+      };
+  }
   el('s-dialogue-close').onclick = () => {
     game.dialogue = null;
     updateDialogue();
@@ -1143,14 +1309,21 @@ function updateDialogue() {
   };
 }
 function updateUI() {
-  el('s-pocketbook-label').textContent = game.hasNotebook
-    ? 'The priest’s notebook'
-    : 'Remembered pages';
-  el('s-pocketbook-note').textContent = game.hasNotebook
+  el('s-pocketbook-label').textContent = game.universeLife
+    ? 'My field notebook'
+    : game.hasNotebook
+      ? 'The priest’s notebook'
+      : 'Remembered pages';
+  el('s-pocketbook-note').textContent = game.universeLife
     ? 'In this body’s keeping'
-    : 'The book remains with the priest';
+    : game.hasNotebook
+      ? 'In this body’s keeping'
+      : 'The book remains with the priest';
   const p = game.player,
     tile = game.world.tile(p.x, p.y);
+  document.querySelector('.s-brand span')!.textContent = game.universeLife
+    ? 'One universe, many lives'
+    : 'Destino: Stíchos';
   el('s-person-name').textContent = p.bodyName;
   const bodySignature = JSON.stringify(game.displayAppearance);
   if (portraitSignature !== bodySignature) {
@@ -1181,6 +1354,13 @@ function updateUI() {
   el('s-place').textContent =
     (tile.site ? 'Botanical seed vault' : closest?.name) ??
     {
+      woodland: 'The woodland',
+      meadow: 'The meadow',
+      wetland: 'The wetland',
+      dunes: 'The dunes',
+      badlands: 'The badlands',
+      volcanic: 'The volcanic ridge',
+      alpine: 'The alpine heights',
       frostwood: 'The frostwood',
       tundra: 'Open tundra',
       marsh: 'The blue marshes',
@@ -1191,12 +1371,15 @@ function updateUI() {
     ? `${game.world.clans[closest.clan].name} territory`
     : 'Unclaimed wilderness';
   el('s-coordinates').textContent =
-    `${Math.round(p.x)}, ${Math.round(p.y)} · ${currentPlanet.name}, 3886`;
+    `${Math.round(p.x)}, ${Math.round(p.y)} · ${currentPlanet.name}${game.universeLife ? '' : ', 3886'}`;
   const romer = (tile.temperature * 21) / 40 + 7.5;
   el('s-weather').textContent =
-    `${romer.toFixed(1)}° Rø · ${tile.temperature.toFixed(0)}° C · ${p.cequinTime > 0 ? 'Cequin in your breath' : 'The air bites'}`;
+    `${game.universeLife ? '' : romer.toFixed(1) + '° Rø · '}${tile.temperature.toFixed(0)}° C · ${game.universeLife ? game.exposure.label : p.cequinTime > 0 ? 'Breath sustained' : 'Freezing air'}`;
+  el('s-weather').title = game.universeLife
+    ? game.exposure.detail
+    : 'Cequin protects breathing in the cold.';
   const q = trackedQuest();
-  el('s-quest-title').textContent = q?.title ?? 'A life beyond the cathedral';
+  el('s-quest-title').textContent = q?.title ?? 'An unfinished life';
   el('s-quest-objective').textContent =
     q?.objective ?? 'Follow the roads. Find the people whose lives touch yours.';
   const target = q?.target;
@@ -1225,7 +1408,7 @@ function updateUI() {
   const equipmentChanged = equipmentSignature !== equipmentKey;
   equipmentSignature = equipmentKey;
   if (equipmentChanged) {
-    const kind = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon;
+    const kind = p.appearance.weapon;
     const artifact = game.activeArtifact;
     const attackButton = document.querySelector<HTMLButtonElement>('[data-action="attack"]');
     attackButton
@@ -1236,13 +1419,21 @@ function updateUI() {
           .createContextualFragment(
             artifact
               ? `<img src="${artifactIcon(artifact.design, 30)}" width="30" height="30" alt="">`
-              : weaponIcon(game.weaponSeed(kind), kind, 30),
+              : kind === 'none'
+                ? itemIcon('hand')
+                : weaponIcon(game.weaponSeed(kind), kind, 30),
           ),
       );
     if (attackButton)
       attackButton.title = artifact
         ? `${artifact.name} · ${artifact.properties.damage} strength · ${artifact.delivery}`
-        : game.weaponProfile(kind).name;
+        : kind === 'none'
+          ? 'Empty hands · equip a weapon to attack'
+          : game.weaponProfile(kind).name;
+    if (attackButton) {
+      attackButton.disabled = !artifact && kind === 'none';
+      attackButton.setAttribute('aria-label', attackButton.title);
+    }
   }
   document.querySelectorAll<HTMLButtonElement>('[data-equip]').forEach((n) => {
     if (equipmentChanged)
@@ -1253,7 +1444,14 @@ function updateUI() {
       );
     n.classList.toggle('equipped', !game.activeArtifact && n.dataset.equip === p.appearance.weapon);
     n.disabled = !game.weapons.has(n.dataset.equip as 'staff' | 'sword' | 'bow');
-    n.title = n.disabled ? `Buy a ${n.dataset.equip} from a merchant` : `Equip ${n.dataset.equip}`;
+    n.title = n.disabled
+      ? `Find ${n.dataset.equip} equipment at a merchant`
+      : `Equip ${game.weaponProfile(n.dataset.equip as WeaponKind).name}`;
+    n.setAttribute('aria-label', n.title);
+    n.setAttribute(
+      'aria-pressed',
+      String(!game.activeArtifact && n.dataset.equip === p.appearance.weapon),
+    );
     const profile = game.weaponProfile(n.dataset.equip as 'staff' | 'sword' | 'bow');
     if (!n.disabled)
       n.title = `${profile.name} · ${profile.damage} strength · ${profile.range.toFixed(1)} reach · ${profile.effectDescription}`;
@@ -1360,7 +1558,7 @@ function togetherMenu() {
     'together',
     `<div class="v-window-heading"><div><small>${esc(currentPlanet.name)} · ${active ? 'Connected' : 'Find your people'}</small><h2>${active ? 'Share this room' : 'Play together'}</h2></div><button id="s-room-return" aria-label="Return to the world">×</button></div>${
       active
-        ? `<div class="v-room-layout"><div><small>Room code</small><div class="v-room-code" id="v-room-code">${esc(multiplayer.room)}</div><p>${multiplayer.peers.length + 1} of 8 travelers<br>Share the code, link, or QR.</p><div class="s-menu-buttons"><button id="v-copy-code">Copy code</button><button id="v-share-room">Share link</button></div></div><div id="v-room-qr" class="v-room-qr" aria-label="QR code to join this room"></div></div><div class="v-room-link"><input id="s-room-invitation" readonly aria-label="Room join URL" value="${esc(link)}"><button id="s-room-copy">Copy link</button></div><div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}${p.id === multiplayer.peerId ? ' · you' : ''}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}</span>${p.id !== multiplayer.peerId ? `<button data-meet-peer="${esc(p.id)}">Track</button>` : ''}</p>`).join('')}</div><p class="v-muted">${browserRoom ? 'The host keeps this room open. Signed checkpoints preserve shared changes for the same host to resume later.' : 'This world runs on a dedicated node; its operator controls availability.'} Press Enter to talk; Local reaches nearby people, Room reaches this whole room.</p><div class="s-menu-buttons"><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thanks</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>`
+        ? `<div class="v-room-layout"><div><small>Room code</small><div class="v-room-code" id="v-room-code">${esc(multiplayer.room)}</div><p>${multiplayer.peers.length + 1} of 8 travelers<br>Share the code, link, or QR.</p><div class="s-menu-buttons"><button id="v-copy-code">Copy code</button><button id="v-share-room">Share link</button></div></div><div id="v-room-qr" class="v-room-qr" aria-label="QR code to join this room"></div></div><details class="v-room-link"><summary>Full invitation link</summary><input id="s-room-invitation" readonly aria-label="Room join URL" value="${esc(link)}"><button id="s-room-copy">Copy link</button></details><div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}${p.id === multiplayer.peerId ? ' · you' : ''}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}</span>${p.id !== multiplayer.peerId ? `<button data-meet-peer="${esc(p.id)}">Track</button>` : ''}</p>`).join('')}</div><p class="v-muted">${browserRoom ? 'The host keeps this room open. Signed checkpoints preserve shared changes for the same host to resume later.' : 'This world runs on a dedicated node; its operator controls availability.'} Press Enter to talk; Local reaches nearby people, Room reaches this whole room.</p><div class="v-room-emotes"><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thanks</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>`
         : `<form id="s-room-form"><label>Your traveler name<input id="s-room-name" value="${esc(roomName)}" maxlength="32" required></label><label>Room code<input id="s-room-code" value="${esc(multiplayer.room)}" placeholder="Leave empty to host a new room" maxlength="16" autocapitalize="characters"></label><div class="s-menu-buttons"><button class="s-primary" type="submit">${multiplayer.status === 'connecting' ? 'Connecting…' : 'Join or host'}</button>${multiplayer.reconnectable ? '<button id="s-room-reconnect" type="button">Reconnect</button>' : ''}</div><details class="v-room-mode"><summary>Connection options</summary><label>Connection<select id="s-room-mode"><option value="peer" ${browserRoom ? 'selected' : ''}>Browser room</option><option value="server" ${!browserRoom ? 'selected' : ''}>Dedicated world node</option></select></label><label id="s-room-server-label" ${browserRoom ? 'hidden' : ''}>World node<input id="s-room-server" value="${esc(browserRoom ? `wss://${location.host}/ws` : roomServer)}" maxlength="240"></label></details></form>${
             owned.length
               ? `<h3>Resume a world you host</h3><div class="s-menu-buttons">${owned
@@ -1545,10 +1743,10 @@ async function say(text: string) {
     return;
   }
   if (/^\/(room|world)\s/i.test(text)) {
-    chatChannel = 'world';
+    setChatChannel('world');
     text = text.replace(/^\/\w+\s+/, '');
   } else if (/^\/say\s/i.test(text)) {
-    chatChannel = 'say';
+    setChatChannel('say');
     text = text.replace(/^\/say\s+/, '');
   } else if (text.startsWith('/')) {
     appendChat('', 'Unknown command. Use /say, /room or /help.', true);
@@ -1594,9 +1792,21 @@ async function say(text: string) {
 function shortcutsMenu() {
   openModal(
     'shortcuts',
-    `<div class="v-window-heading"><h2>Words at your fingertips</h2><button id="v-shortcuts-close" aria-label="Close shortcuts">×</button></div><p>Assign a phrase or chat command to F7, F8 and F9. Shortcuts stay with this browser and send only when you press their key.</p><form id="v-shortcuts-form">${phraseShortcuts.map((p, i) => `<label class="v-shortcut-row"><kbd>F${i + 7}</kbd><input data-phrase="${i}" maxlength="280" value="${esc(p)}"></label>`).join('')}<button class="s-primary">Keep these shortcuts</button></form><p class="v-muted">Examples: /room Meet at the market. · /say Follow me. · hi</p>`,
+    `<div class="v-window-heading"><h2>Words at your fingertips</h2><button id="v-shortcuts-close" aria-label="Close shortcuts">×</button></div><p>Assign a phrase or chat command to F7, F8 and F9. Shortcuts stay with this browser. Press a key or a Send button to speak.</p><form id="v-shortcuts-form">${phraseShortcuts.map((p, i) => `<label class="v-shortcut-row"><kbd>F${i + 7}</kbd><input data-phrase="${i}" maxlength="280" value="${esc(p)}"><button type="button" data-shortcut-send="${i}">Send</button></label>`).join('')}<button class="s-primary">Keep these shortcuts</button></form><p class="v-muted">Examples: /room Meet at the market. · /say Follow me. · hi</p>`,
   );
   el('v-shortcuts-close').onclick = closeModal;
+  document.querySelectorAll<HTMLButtonElement>('[data-shortcut-send]').forEach(
+    (b) =>
+      (b.onclick = () => {
+        const text = document
+          .querySelector<HTMLInputElement>(`[data-phrase="${b.dataset.shortcutSend}"]`)!
+          .value.trim();
+        if (text) {
+          closeModal();
+          void say(text);
+        }
+      }),
+  );
   el<HTMLFormElement>('v-shortcuts-form').onsubmit = (e) => {
     e.preventDefault();
     phraseShortcuts = [...document.querySelectorAll<HTMLInputElement>('[data-phrase]')].map((n) =>
@@ -1628,6 +1838,12 @@ el('v-chat-input').onkeydown = (e) => {
   }
 };
 el('v-chat-settings').onclick = shortcutsMenu;
+function setChatChannel(channel: 'say' | 'world') {
+  chatChannel = channel;
+  document
+    .querySelectorAll<HTMLElement>('[data-chat-channel]')
+    .forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.chatChannel === channel)));
+}
 function setChatCollapsed(collapsed: boolean) {
   document.querySelector('.s-shell')!.classList.toggle('chat-collapsed', collapsed);
   el('v-chat-toggle').textContent = collapsed ? '+' : '−';
@@ -1639,10 +1855,7 @@ el('v-chat-toggle').onclick = () =>
 document.querySelectorAll<HTMLElement>('[data-chat-channel]').forEach(
   (n) =>
     (n.onclick = () => {
-      chatChannel = n.dataset.chatChannel as 'say' | 'world';
-      document
-        .querySelectorAll<HTMLElement>('[data-chat-channel]')
-        .forEach((b) => b.setAttribute('aria-pressed', String(b === n)));
+      setChatChannel(n.dataset.chatChannel as 'say' | 'world');
     }),
 );
 let placingProduction: ProductionKind | null = null;
@@ -1745,16 +1958,16 @@ function workMenu() {
   if (!started) return;
   const amounts = (values: Partial<Record<ItemId, number>>) =>
     Object.entries(values)
-      .map(([k, n]) => `${n} ${k}`)
+      .map(([k, n]) => `${n} ${game.itemName(k as ItemId)}`)
       .join(', ') || 'none';
   const machines = game.productionStructures;
   openModal(
     'production',
-    `<div class="v-window-heading"><div><small>Gather · construct · supply · earn</small><h2>Make a working place</h2></div><button id="v-work-close" aria-label="Close work">×</button></div><p>Build on clear ground near your resources. Load real inputs, let the work run while you play, then collect the output at the platform. Merchants buy gathered materials and prepared goods.</p><div class="v-production-grid">${PRODUCTION_KINDS.map((k) => `<article><h3>${esc(k.name)}</h3><p>${k.coins} coins · ${amounts(k.items)}</p><p>${esc(k.description)}</p><button data-build-kind="${k.id}">Place in world</button></article>`).join('')}</div><div class="v-production-list">${
+    `<div class="v-window-heading"><div><small>Gather · construct · supply · earn</small><h2>Make a working place</h2></div><button id="v-work-close" aria-label="Close work">×</button></div><p>Build on clear ground near your resources. Load real inputs, let the work run while you play, then collect the output at the platform. Merchants buy gathered materials and prepared goods.</p><div class="v-production-grid">${PRODUCTION_KINDS.map((k) => `<article><canvas data-production-preview="${k.id}" width="160" height="110" aria-label="${esc(k.name)} structure"></canvas><h3>${esc(k.name)}</h3><p>${k.coins} coins · ${amounts(k.items)}</p><p>${esc(k.description)}</p><button data-build-kind="${k.id}">Place in world</button></article>`).join('')}</div><div class="v-production-list">${
       machines
         .map((m) => {
           const near = Math.hypot(m.x - game.player.x, m.y - game.player.y) < 3;
-          return `<article><header><b>${esc(PRODUCTION_KINDS.find((k) => k.id === m.kind)!.name)}</b><span>${esc(m.phase)} · ${m.x}, ${m.y}</span></header>${m.job ? `<progress value="${m.progress}" max="1"></progress><p>${esc(m.job.blocked || `${m.job.completed}/${m.job.batches} batches completed`)} · ${Math.floor(m.progress * 100)}%</p>` : ''}<p>Stored: ${amounts(m.output)} ${!near ? '· Approach to supply or collect' : ''}</p>${
+          return `<article><canvas data-production-preview="${m.kind}" data-production-progress="${m.progress}" width="160" height="110" aria-label="${esc(m.kind)} work platform"></canvas><header><b>${esc(PRODUCTION_KINDS.find((k) => k.id === m.kind)!.name)}</b><span>${esc({ idle: 'Ready for inputs', working: 'Making the next batch', ready: 'Output ready', blocked: 'Work interrupted' }[m.phase] ?? m.phase)} · ${Math.round(Math.hypot(m.x - game.player.x, m.y - game.player.y))} paces away</span></header>${m.job ? `<progress value="${m.progress}" max="1"></progress><p>${esc(m.job.blocked || `${m.job.completed}/${m.job.batches} batches completed`)} · ${Math.floor(m.progress * 100)}%</p>` : ''}<p>Stored: ${amounts(m.output)} ${!near ? '· Approach to supply or collect' : ''}</p>${
             !m.job
               ? `<select aria-label="Production recipe" data-machine-recipe="${m.id}">${game.productionRecipes
                   .filter((r) => r.kind === m.kind)
@@ -1772,6 +1985,37 @@ function workMenu() {
       '<p>No production platforms yet. Gather timber and ore with your tools, then choose a clear work site.</p>'
     }</div>`,
   );
+  const workFrame = document.querySelector<HTMLElement>('[data-screen=production]')!;
+  const workTabs = document.createElement('nav');
+  workTabs.className = 'v-production-tabs';
+  workTabs.setAttribute('aria-label', 'Work views');
+  workFrame.dataset.workView = machines.length ? 'machines' : 'build';
+  workTabs.innerHTML = `<button data-work-view="build" aria-pressed="${!machines.length}">Build a platform</button><button data-work-view="machines" aria-pressed="${!!machines.length}">My work · ${machines.length}</button>`;
+  workFrame.querySelector('.s-dialog-heading')!.after(workTabs);
+  workTabs.querySelectorAll<HTMLButtonElement>('button').forEach(
+    (b) =>
+      (b.onclick = () => {
+        workFrame.dataset.workView = b.dataset.workView;
+        workTabs
+          .querySelectorAll('button')
+          .forEach((other) => other.setAttribute('aria-pressed', String(other === b)));
+        workFrame.querySelector('.s-window-content')!.scrollTop = 0;
+      }),
+  );
+  document.querySelectorAll<HTMLCanvasElement>('[data-production-preview]').forEach((c) => {
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    drawProduction(
+      ctx,
+      c.dataset.productionPreview as ProductionKind,
+      80,
+      85,
+      2,
+      Number(c.dataset.productionProgress ?? 0),
+      false,
+      0,
+    );
+  });
   el('v-work-close').onclick = closeModal;
   document.querySelectorAll<HTMLElement>('[data-build-kind]').forEach(
     (n) =>
@@ -2366,6 +2610,7 @@ el('s-help').onclick = controls;
 el('s-inspect-gear').onclick = equipmentMenu;
 el('s-tab-pack').onclick = () => inventory('pack');
 el('s-tab-craft').onclick = () => inventory('craft');
+el('v-mobile-more').onclick = moreActions;
 el('s-mobile-pack').onclick = () => root.classList.toggle('satchel-open');
 el('s-sound').onclick = () => {
   if (audio.needsGesture) {
@@ -2396,10 +2641,12 @@ addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  if (e.key === 'Tab' && (modal || transferStarted)) {
+  if (e.key === 'Tab' && (modal || transferStarted || game.dialogue)) {
     const focus = [
-      ...el(transferStarted ? 's-transfer' : 's-modal').querySelectorAll<HTMLElement>(
-        'button:not(:disabled),input:not([hidden]),select,textarea,a[href],[tabindex="0"]',
+      ...el(
+        transferStarted ? 's-transfer' : modal ? 's-modal' : 's-dialogue',
+      ).querySelectorAll<HTMLElement>(
+        'button:not(:disabled),input:not(:disabled):not([hidden]),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]',
       ),
     ].filter((node) => node.getClientRects().length && !node.closest('[hidden],[inert]'));
     const first = focus[0],

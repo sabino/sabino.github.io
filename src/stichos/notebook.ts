@@ -1,5 +1,5 @@
 import { JOURNAL_ENTRIES, PLANT_NOTES, GLOSSARY } from './lore';
-import { plantGenome } from './botany';
+import { plantGenome, plantProfile } from './botany';
 import type { PlantKind } from './botany';
 import type { Stichos } from './session';
 
@@ -44,7 +44,7 @@ function paperTexture(seed: number) {
 }
 
 /** An ink study from the same botanical construction parameters as world plants. */
-function botanicalStudy(seed: number, kind: PlantKind) {
+function botanicalStudy(seed: number, kind: PlantKind, author = 'T. Bishop') {
   const g = plantGenome(seed, kind);
   const paths: string[] = [];
   const top = 152 - g.stemHeight * 2.7;
@@ -74,18 +74,79 @@ function botanicalStudy(seed: number, kind: PlantKind) {
     paths.push(
       `<path d="M98 156q${(n - g.rootMass / 2) * 7} 15 ${(n - g.rootMass / 2) * 11} 23"/>`,
     );
-  return `<svg class="s-botanical-study" viewBox="0 0 210 210" role="img" aria-label="Ink study of ${kind === 'mushroom' ? 'winter fungi' : kind}"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round">${paths.join('')}<path stroke-dasharray="2 3" opacity=".5" d="M25 174H177M161 33v112"/><path d="M157 33h8m-8 112h8"/></g><text x="112" y="198">T. Bishop</text></svg>`;
+  return `<svg class="s-botanical-study" viewBox="0 0 210 210" role="img" aria-label="Ink study of ${kind === 'mushroom' ? 'winter fungi' : kind}"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round">${paths.join('')}<path stroke-dasharray="2 3" opacity=".5" d="M25 174H177M161 33v112"/><path d="M157 33h8m-8 112h8"/></g><text x="112" y="198">${esc(author)}</text></svg>`;
 }
 
 function threads(game: Stichos) {
-  return `<div class="s-notebook-threads"><section><h3>Threads to follow</h3>${game.quests.map((q) => `<article class="s-quest-record ${q.complete ? 'complete' : ''}"><small>${q.complete ? 'Resolved' : 'Unfinished'}</small><h4>${esc(q.title)}</h4><p>${esc(q.description)}</p><b>${esc(q.objective)}</b>${q.target ? `<span>Near ${Math.round(q.target.x)}, ${Math.round(q.target.y)}</span>` : ''}${!q.complete ? `<button class="s-track-quest" data-track-quest="${esc(q.id)}">Follow this thread</button>` : ''}</article>`).join('')}<h3>The six families</h3>${game.world.clans.map((c, i) => `<div class="s-clan-row"><i style="background:${c.color}"></i><strong>${esc(c.name)}</strong><span>Trust ${game.reputation[i] ?? 0}</span></div>`).join('')}</section><section><h3>Since this morning</h3><p class="s-notebook-caption">These pages change with the life you lead.</p>${game.journal
+  return `<div class="s-notebook-threads"><section><h3>Threads to follow</h3>${game.quests.map((q) => `<article class="s-quest-record ${q.complete ? 'complete' : ''}"><small>${q.complete ? 'Resolved' : 'Unfinished'}</small><h4>${esc(q.title)}</h4><p>${esc(q.description)}</p><b>${esc(q.objective)}</b>${q.target ? `<span>Near ${Math.round(q.target.x)}, ${Math.round(q.target.y)}</span>` : ''}${!q.complete ? `<button class="s-track-quest" data-track-quest="${esc(q.id)}">Follow this thread</button>` : ''}</article>`).join('')}<h3>${game.universeLife ? 'Local allegiances' : 'The six families'}</h3>${game.world.clans.map((c, i) => `<div class="s-clan-row"><i style="background:${c.color}"></i><strong>${esc(c.name)}</strong><span>Trust ${game.reputation[i] ?? 0}</span></div>`).join('')}</section><section><h3>Since this morning</h3><p class="s-notebook-caption">These pages change with the life you lead.</p>${game.journal
     .slice()
     .reverse()
     .map((e) => `<article class="s-memory"><h4>${esc(e.title)}</h4><p>${esc(e.text)}</p></article>`)
     .join('')}</section></div>`;
 }
 
+export function notebookLeafCount(game: Stichos, section: NotebookSection) {
+  if (section === 'botany') return 4;
+  return game.universeLife ? (game.personalStory?.history.length ?? 1) : JOURNAL_ENTRIES.length;
+}
+function personalNotebook(game: Stichos, view: NotebookView) {
+  const story = game.personalStory,
+    culture = game.world.civilization!;
+  const owner = game.player.bodyName,
+    title = story?.title ?? 'A life in progress';
+  if (!view.open)
+    return `<div class="s-notebook is-shut"><div class="s-notebook-cover"><span class="s-cover-owner">${esc(owner)}</span><div class="s-cover-frame"><span class="s-cover-rule">PRIVATE FIELD RECORD</span><h2>${esc(title)}</h2><div class="s-cover-plant">${botanicalStudy(game.world.seed, 'cequin', owner)}</div><p>${esc(culture.name)}<br>${esc(culture.eraName)}</p></div><p class="s-cover-note">This life has a history.<br>The next page is mine to write.</p><button id="s-notebook-open">Open notebook</button><button id="s-journal-return">Put away <kbd>J / Esc</kbd></button><span class="s-cover-binding" aria-hidden="true"></span></div></div>`;
+  const tabs: [NotebookSection, string][] = [
+    ['years', 'My history'],
+    ['botany', 'Field studies'],
+    ['glossary', 'Local knowledge'],
+    ['threads', 'Current threads'],
+  ];
+  let page = '',
+    footer = '';
+  if (view.section === 'years') {
+    const history = story?.history ?? [
+      {
+        age: game.lifeOrigin?.age ?? 20,
+        title: 'An unfamiliar heartbeat',
+        text: culture.story.arrival,
+      },
+    ];
+    const index = Math.min(view.entry, history.length - 1),
+      entry = history[index];
+    page = `<article class="s-notebook-leaf"><span class="s-notebook-overline">Age ${entry.age} · ${esc(owner)}’s memory</span><h3 id="s-leaf-title" tabindex="-1">${esc(entry.title)}</h3><div class="s-handwriting"><p>${esc(entry.text)}</p><p>${esc(story?.worldContext ?? culture.story.tension)}</p></div><aside class="s-margin-note"><span>What remains unresolved</span><p>${esc(story?.mystery ?? culture.story.mystery)}</p></aside><div class="s-leaf-signature">${esc(owner)}</div></article>`;
+    footer = `<button id="s-leaf-prev" ${index === 0 ? 'disabled' : ''}>← Previous leaf</button><span>${index + 1} / ${history.length}</span><button id="s-leaf-next" ${index === history.length - 1 ? 'disabled' : ''}>Next leaf →</button>`;
+  } else if (view.section === 'botany') {
+    const kind = (['cequin', 'heartleaf', 'emberroot', 'mushroom'] as const)[view.plant],
+      plant = plantProfile(game.world.seed, kind),
+      genome = plantGenome(game.world.seed, kind);
+    const use = {
+      cequin: 'Its leaves sustain breathing. Keep a portion available on long journeys.',
+      heartleaf: 'The fibres are useful for dressings and restorative preparations.',
+      emberroot: 'The root is useful in preparations that restore warmth.',
+      mushroom: 'Fungi must be identified where they grow; inspect the specimen before gathering.',
+    }[kind];
+    page = `<article class="s-notebook-leaf s-plant-leaf"><span class="s-notebook-overline">Field study ${view.plant + 1} · ${esc(culture.name)}</span><h3 id="s-leaf-title" tabindex="-1">${esc(plant.name)}</h3><figure>${botanicalStudy(game.world.seed, kind, owner)}<figcaption>Observe the living specimen.</figcaption></figure><div class="s-handwriting"><p>${esc(plant.description)}</p><p>${esc(use)}</p><p>The leaf arrangement is ${esc(genome.leafArrangement)}. I record its form here to compare with plants encountered along the road.</p></div><aside class="s-margin-note"><span>Gathering</span><p>Use a sickle. Harvest carefully, then return to a workbench to prepare supplies.</p></aside></article>`;
+    footer = `<button id="s-leaf-prev" ${view.plant === 0 ? 'disabled' : ''}>← Previous study</button><span>${view.plant + 1} / 4</span><button id="s-leaf-next" ${view.plant === 3 ? 'disabled' : ''}>Next study →</button>`;
+  } else if (view.section === 'glossary') {
+    const entries = [
+      { term: culture.name, definition: story?.worldContext ?? culture.story.tension },
+      { term: culture.eraName, definition: culture.story.tension },
+      { term: culture.politics.governance, definition: culture.politics.law },
+      ...culture.factions.map((f) => ({ term: f.name, definition: f.doctrine })),
+      {
+        term: 'Mind transfer',
+        definition:
+          'Your memories continue. A body keeps its own home, work, tools and belongings.',
+      },
+    ];
+    page = `<article class="s-notebook-leaf s-glossary-leaf"><h3 id="s-leaf-title" tabindex="-1">Words for this world.</h3><label class="s-glossary-search">Find a word<input id="s-glossary-search" type="search" placeholder="People, institutions, customs…"></label><dl class="s-glossary">${entries.map((e) => `<div data-glossary="${esc((e.term + ' ' + e.definition).toLowerCase())}"><dt>${esc(e.term)}</dt><dd>${esc(e.definition)}</dd></div>`).join('')}</dl><p id="s-glossary-empty" hidden>No entry contains those words.</p></article>`;
+  } else
+    page = `<article class="s-notebook-leaf s-threads-leaf"><h3 id="s-leaf-title" tabindex="-1">The next page.</h3>${threads(game)}</article>`;
+  return `<div class="s-notebook physical-book ${view.plain ? 'plain-type' : ''}" style="--s-paper-grain:${esc(paperTexture(game.world.seed))}"><header class="s-notebook-header"><div><span class="s-chapter">${esc(owner)} · private notebook</span><h2>${esc(title)}</h2><p>${esc(culture.name)} · ${esc(culture.eraName)}</p></div><button id="s-journal-return">Close book <kbd>J / Esc</kbd></button></header><nav class="s-notebook-tabs" aria-label="Notebook sections">${tabs.map(([id, label]) => `<button data-notebook-section="${id}" aria-pressed="${id === view.section}">${label}</button>`).join('')}</nav><div class="s-notebook-spread single-leaf">${page}</div><footer class="s-notebook-footer"><div class="s-notebook-pages">${footer}</div><div class="s-notebook-tools"><button id="s-notebook-type" aria-pressed="${view.plain}">${view.plain ? 'Handwriting' : 'Plain type'}</button></div></footer></div>`;
+}
 export function notebookHtml(game: Stichos, view: NotebookView) {
+  if (game.universeLife) return personalNotebook(game, view);
   if (game.hasNotebook && !view.open)
     return `<div class="s-notebook is-shut"><div class="s-notebook-cover"><span class="s-cover-owner">T H E O &nbsp; B I S H O P</span><div class="s-cover-frame"><span class="s-cover-rule">PRIVATE RECORD · VOL. I</span><h2>The years<br>between<br>two breaths.</h2><div class="s-cover-plant">${botanicalStudy(game.world.seed, 'cequin')}</div><p>3866 — 3886<br>Vespera · planet Stíchos</p></div><p class="s-cover-note">If these hands are no longer mine,<br>leave this book in their keeping.</p><button id="s-notebook-open">Open notebook</button><button id="s-journal-return">Put away <kbd>J / Esc</kbd></button><span class="s-cover-binding" aria-hidden="true"></span></div></div>`;
   const tabs: [NotebookSection, string][] = [

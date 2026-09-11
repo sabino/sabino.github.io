@@ -12,6 +12,8 @@ export function mountGalaxy(
     scale = 0.42,
     cx = 0,
     cy = 0;
+  let selectedSeed = current;
+  let hoveredSeed: number | null = null;
   let planets: Planet[] = [],
     drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null;
   function catalogue() {
@@ -54,7 +56,12 @@ export function mountGalaxy(
       ctx.lineTo(w, y);
       ctx.stroke();
     }
-    for (const p of planets) {
+    const labels: { x: number; y: number; w: number }[] = [];
+    for (const p of [...planets].sort(
+      (a, b) =>
+        Number(b.seed === selectedSeed) - Number(a.seed === selectedSeed) ||
+        Number(known.has(b.seed)) - Number(known.has(a.seed)),
+    )) {
       const x = w / 2 + (p.x - cx) * scale,
         y = h / 2 + (p.y - cy) * scale;
       if (x < 0 || x > w || y < 0 || y > h) continue;
@@ -72,15 +79,32 @@ export function mountGalaxy(
       ctx.fillStyle = '#d9ead333';
       ctx.fillRect(x - r, y - r / 3, r * 1.7, 2);
       ctx.restore();
-      if (p.seed === current) {
+      if (p.seed === selectedSeed) {
         ctx.strokeStyle = '#e0c488';
         ctx.strokeRect(x - r - 4, y - r - 4, r * 2 + 8, r * 2 + 8);
       }
       ctx.fillStyle = known.has(p.seed) ? '#d5dedb' : '#81929f';
       ctx.font = '12px "Courier New", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(known.has(p.seed) ? p.name : 'Unknown signal', x, y + r + 17);
+      if (known.has(p.seed) || p.seed === selectedSeed || p.seed === hoveredSeed || scale > 1.2) {
+        const label =
+          known.has(p.seed) || p.seed === selectedSeed
+            ? p.name
+            : `Signal ${p.seed.toString(36).slice(0, 4).toUpperCase()}`;
+        const width = ctx.measureText(label).width,
+          ly = y + r + 17;
+        if (
+          !labels.some((l) => Math.abs(l.y - ly) < 17 && Math.abs(l.x - x) < (l.w + width) / 2 + 8)
+        ) {
+          ctx.fillText(label, x, ly);
+          labels.push({ x, y: ly, w: width });
+        }
+      }
     }
+    ctx.fillStyle = '#b8c9c9';
+    ctx.textAlign = 'left';
+    ctx.font = '12px Courier New';
+    ctx.fillText(`Sector ${sector} · ${Math.round(scale * 100)}%`, 12, 22);
   }
   catalogue();
   const start = planetAt(current);
@@ -92,7 +116,17 @@ export function mountGalaxy(
     drag = { x: e.clientX, y: e.clientY, cx, cy, moved: false };
   };
   canvas.onpointermove = (e) => {
-    if (!drag) return;
+    if (!drag) {
+      const b = canvas.getBoundingClientRect(),
+        x = (e.clientX - b.left - canvas.width / 2) / scale + cx,
+        y = (e.clientY - b.top - canvas.height / 2) / scale + cy;
+      const nearby = planets.find((p) => Math.hypot(p.x - x, p.y - y) < 20 / scale);
+      if (hoveredSeed !== (nearby?.seed ?? null)) {
+        hoveredSeed = nearby?.seed ?? null;
+        draw();
+      }
+      return;
+    }
     const dx = e.clientX - drag.x,
       dy = e.clientY - drag.y;
     if (Math.hypot(dx, dy) > 5) drag.moved = true;
@@ -111,7 +145,11 @@ export function mountGalaxy(
     const p = planets
       .map((p) => ({ p, d: Math.hypot(p.x - x, p.y - y) }))
       .sort((a, b) => a.d - b.d)[0];
-    if (p && p.d < 30 / scale) onSelect(p.p);
+    if (p && p.d < 30 / scale) {
+      selectedSeed = p.p.seed;
+      onSelect(p.p);
+      draw();
+    }
   };
   canvas.onwheel = (e) => {
     e.preventDefault();
@@ -129,10 +167,16 @@ export function mountGalaxy(
       sector += delta;
       catalogue();
       cx = cy = 0;
+      const local = sectorPlanets(sector).sort(
+        (a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y),
+      )[0];
+      selectedSeed = local.seed;
+      onSelect(local);
       draw();
     },
     focus(seed: number) {
       const p = planetAt(seed);
+      selectedSeed = p.seed;
       cx = p.x;
       cy = p.y;
       draw();

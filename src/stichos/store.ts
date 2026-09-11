@@ -311,14 +311,14 @@ export async function mountStore(
         button('Download private code', 'download-code', () => {
           const blob = new Blob(
             [
-              `Stichos wallet recovery\n\n${generatedCode}\n\nKeep this code private. Anyone with it can restore your wardrobe. Restoring signs out the previous wallet session. This is not your game save.\n`,
+              `Verso wallet recovery\n\n${generatedCode}\n\nKeep this code private. Anyone with it can restore your wardrobe. Restoring signs out the previous wallet session. This is not your game save.\n`,
             ],
             { type: 'text/plain;charset=utf-8' },
           );
           const url = URL.createObjectURL(blob),
             link = document.createElement('a');
           link.href = url;
-          link.download = 'stichos-wallet-recovery.txt';
+          link.download = 'verso-wallet-recovery.txt';
           link.click();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
         }),
@@ -369,7 +369,7 @@ export async function mountStore(
       ),
     );
     wallet.append(restore);
-    root.append(wallet);
+    if (catalog?.enabled && csrf) root.append(wallet);
     container.replaceChildren(root);
     if (focused)
       [...container.querySelectorAll<HTMLButtonElement>('[data-store-action]')]

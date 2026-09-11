@@ -11,10 +11,10 @@ import {
   previewCosmetic,
 } from './progression';
 import type { ProgressionAction, Profession } from './progression';
-import { drawPortrait } from './portrait';
+import { drawHumanoid } from './art';
 import { weaponIcon } from './equipment';
 import { furnitureIcon } from './progression-art';
-import { FORGE_MATERIALS, FORGE_CORES, FORGE_SPANS } from './forge';
+import { forgeMaterials, FORGE_CORES, FORGE_SPANS } from './forge';
 import type { ForgeRecipe } from './forge';
 import { artifactIcon } from './artifact-art';
 import type { ArtifactGenome } from './artifacts';
@@ -50,6 +50,7 @@ export function mountLife(
   let inventionOffset = 0;
   let design = initialDesign ?? game.nextArtifactDesign;
   const forgeRecipe: ForgeRecipe = {
+    technology: game.equipmentTechnology,
     kind: game.player.appearance.weapon === 'none' ? 'staff' : game.player.appearance.weapon,
     material: 0,
     core: 'breath',
@@ -58,8 +59,15 @@ export function mountLife(
   let selectedHome = game.progression.homes[0]?.id ?? '';
   let message = '';
   let revision = 0;
+  let selectedPattern = COSMETICS.find((s) => s.currency === 'coins')!.id;
+  let sectionIndex = 0;
+  let changedTab = false;
   const actions: ProgressionAction[] = [];
   function purpose() {
+    if (game.personalStory) {
+      const personal = game.personalStory;
+      return `<article class="s-life-story"><small>${esc(personal.subtitle)}</small><h3>${esc(personal.title)}</h3><p>${esc(personal.worldContext)}</p><p>${esc(personal.purpose)}</p></article><h3>Your commitments</h3><div class="s-life-grid">${personal.obligations.map((o) => `<article><small>${o.complete ? 'Kept' : 'Unfinished'}</small><h4>${esc(o.title)}</h4><p>${esc(o.description)}</p><progress value="${o.progress}" max="${o.goal}" aria-label="${esc(o.title)}"></progress><p>${o.progress}/${o.goal} · ${Math.round(o.target.x)}, ${Math.round(o.target.y)}</p></article>`).join('')}</div><h3>The people in this life</h3><div class="s-life-grid">${personal.relationships.map((r) => `<article><small>${esc(r.role)} · ${esc(r.stance)}</small><h4>${esc(r.name)}</h4><p>${esc(r.reason)}</p><p>${r.trusted ? 'Trusted' : r.met ? 'Met in this life' : 'An unfinished conversation'} · ${Math.round(r.target.x)}, ${Math.round(r.target.y)}</p></article>`).join('')}</div><h3>What you remember</h3><div class="s-life-grid">${personal.history.map((h) => `<article><small>Age ${h.age}</small><h4>${esc(h.title)}</h4><p>${esc(h.text)}</p></article>`).join('')}</div><h3>Local commissions</h3><p>${game.freeLife.contract ? esc(game.freeLife.contract.description) : 'Visit a noticeboard for paid work. Your profession, relationships and the needs of this place give that work a purpose.'}</p>`;
+    }
     const story = game.campaign,
       life = game.freeLife,
       ending = game.endingSummary;
@@ -75,6 +83,11 @@ export function mountLife(
             .join('')}</div>`
         : ''
     }`;
+  }
+  function publicWork() {
+    const life = game.freeLife,
+      job = life.contract;
+    return `<article class="s-life-story"><small>${esc(game.world.civilization?.name)} · ${life.contractsCompleted} commissions completed</small><h3>Build a livelihood here.</h3><p>Settlements pay for fresh supplies, prepared goods, cultivated plants and safer roads. Accept a noticeboard commission before doing the work, then return to its issuer for payment.</p></article><h3>Your current commission</h3>${job ? `<article><h4>${esc(job.title)}</h4><p>${esc(job.description)}</p><progress value="${job.progress}" max="${job.required}" aria-label="Commission progress"></progress><p>${job.progress}/${job.required} · ${job.reward} coins on delivery<br>${esc(job.town)} · ${Math.round(job.board.x)}, ${Math.round(job.board.y)}</p></article>` : '<p>No commission accepted. Look for a noticeboard in a settlement. The issuer and work site appear in your notebook and atlas.</p>'}<h3>A working life</h3><div class="s-life-grid">${life.milestones.map((goal) => `<article><small>${goal.complete ? 'Accomplished' : `${goal.progress}/${goal.goal}`}</small><h4>${esc(goal.title)}</h4><p>${esc(goal.description)}</p><progress value="${goal.progress}" max="${goal.goal}" aria-label="${esc(goal.title)}"></progress></article>`).join('')}</div>`;
   }
   function actionButton(action: ProgressionAction, label: string) {
     const preview = game.progressionPreview(action),
@@ -97,7 +110,7 @@ export function mountLife(
         'Prepare supplies, improve weapons and furnish your home. Skilled hands prepare more from the same ingredients.',
       combat: 'Learn through encounters. Experience improves strength and recovery in every body.',
     };
-    return `<p>What Theo learns travels with his mind. A weapon’s improvements belong to the body that carries it.</p><div class="s-life-grid">${(
+    return `<p>What you learn travels with your mind. A weapon’s improvements belong to the body that carries it.</p><div class="s-life-grid">${(
       ['botany', 'crafting', 'combat'] as Profession[]
     )
       .map((profession) => {
@@ -126,7 +139,17 @@ export function mountLife(
           ...Object.entries(resolved.cost.items).map(([item, amount]) => `${amount} ${item}`),
         ].join(' · ')
       : '';
-    return `<p>Build a weapon from its parts. Material sets mass, proportions shape reach and recovery, and a living core changes what a successful hit does. Your choices resolve into an actual generated weapon.</p><div class="s-forge-layout"><div class="s-forge-controls"><label>Weapon<select id="s-forge-kind">${(['staff', 'sword', 'bow'] as const).map((kind) => `<option value="${kind}" ${forgeRecipe.kind === kind ? 'selected' : ''}>${kind}</option>`).join('')}</select></label><label>Structural material<select id="s-forge-material">${FORGE_MATERIALS[forgeRecipe.kind].map((material, index) => `<option value="${index}" ${forgeRecipe.material === index ? 'selected' : ''}>${esc(material)}</option>`).join('')}</select></label><label>Living core<select id="s-forge-core">${FORGE_CORES.map((core) => `<option value="${core.id}" ${forgeRecipe.core === core.id ? 'selected' : ''}>${esc(core.name)}</option>`).join('')}</select></label><label>Proportions<select id="s-forge-span">${FORGE_SPANS.map((span) => `<option value="${span.id}" ${forgeRecipe.span === span.id ? 'selected' : ''}>${esc(span.name)}</option>`).join('')}</select></label><p>${esc(FORGE_SPANS.find((span) => span.id === forgeRecipe.span)!.description)}</p></div><article class="s-forge-preview">${resolved ? `${weaponIcon(resolved.seed, forgeRecipe.kind, 160)}<small>${esc(resolved.profile.construction)}</small><h3>${esc(resolved.profile.name)}</h3><dl><div><dt>Strength</dt><dd>${resolved.profile.damage} <small>current ${current.damage}</small></dd></div><div><dt>Reach</dt><dd>${resolved.profile.range.toFixed(2)} <small>current ${current.range.toFixed(2)}</small></dd></div><div><dt>Recovery</dt><dd>${resolved.profile.cooldown.toFixed(2)}s <small>current ${current.cooldown.toFixed(2)}s</small></dd></div></dl><p>${esc(resolved.profile.effectDescription)}</p>` : '<p>This construction could not be resolved. Choose another combination.</p>'}</article></div><p class="s-forge-price">${esc(price)}</p><button id="s-forge-build" class="s-primary" ${preview.ok ? '' : 'disabled'}>Forge and equip this construction</button><p id="s-forge-requirement">${esc(preview.message)}</p><p>The work requires crafting level 2 and a nearby field or home workbench. Its materials and coins leave this body’s pack. The completed weapon stays with this body when Theo travels.</p>`;
+    return `<p>Build a weapon from its parts. Material sets mass, proportions shape reach and recovery, and a living core changes what a successful hit does. Your choices resolve into an actual generated weapon.</p><div class="s-forge-layout"><div class="s-forge-controls"><label>Weapon<select id="s-forge-kind">${(['staff', 'sword', 'bow'] as const).map((kind) => `<option value="${kind}" ${forgeRecipe.kind === kind ? 'selected' : ''}>${kind}</option>`).join('')}</select></label><label>Structural material<select id="s-forge-material">${forgeMaterials(
+      forgeRecipe.kind,
+      forgeRecipe.technology,
+    )
+      .map(
+        (material, index) =>
+          `<option value="${index}" ${forgeRecipe.material === index ? 'selected' : ''}>${esc(material)}</option>`,
+      )
+      .join(
+        '',
+      )}</select></label><label>Living core<select id="s-forge-core">${FORGE_CORES.map((core) => `<option value="${core.id}" ${forgeRecipe.core === core.id ? 'selected' : ''}>${esc(core.name)}</option>`).join('')}</select></label><label>Proportions<select id="s-forge-span">${FORGE_SPANS.map((span) => `<option value="${span.id}" ${forgeRecipe.span === span.id ? 'selected' : ''}>${esc(span.name)}</option>`).join('')}</select></label><p>${esc(FORGE_SPANS.find((span) => span.id === forgeRecipe.span)!.description)}</p></div><article class="s-forge-preview">${resolved ? `${weaponIcon(resolved.seed, forgeRecipe.kind, 160)}<small>${esc(resolved.profile.construction)}</small><h3>${esc(resolved.profile.name)}</h3><dl><div><dt>Strength</dt><dd>${resolved.profile.damage} <small>current ${current.damage}</small></dd></div><div><dt>Reach</dt><dd>${resolved.profile.range.toFixed(2)} <small>current ${current.range.toFixed(2)}</small></dd></div><div><dt>Recovery</dt><dd>${resolved.profile.cooldown.toFixed(2)}s <small>current ${current.cooldown.toFixed(2)}s</small></dd></div></dl><p>${esc(resolved.profile.effectDescription)}</p>` : '<p>This construction could not be resolved. Choose another combination.</p>'}</article></div><p class="s-forge-price">${esc(price)}</p><button id="s-forge-build" class="s-primary" ${preview.ok ? '' : 'disabled'}>Forge and equip this construction</button><p id="s-forge-requirement">${esc(preview.message)}</p><p>The work requires crafting level 2 and a nearby field or home workbench. Its materials and coins leave this body’s pack. The completed weapon stays with this body when your mind travels.</p>`;
   }
   function inventionStats(genome: ArtifactGenome) {
     const p = genome.properties;
@@ -146,7 +169,7 @@ export function mountLife(
     const owned = game.artifacts.find((a) => a.design === g?.design);
     return `<p>Sketch a construction from branches, blades, chambers, roots and living tissues. Its shape and materials determine what it does.</p><form id="s-invention-form"><label>A phrase for this design<input id="s-invention-design" value="${esc(design)}" maxlength="64" autocomplete="off" spellcheck="false"></label><div class="s-invention-buttons"><button type="submit">Sketch this phrase</button><button type="button" id="s-invention-next">Next invention →</button></div></form>${
       g
-        ? `<article class="s-invention-sheet"><div class="s-invention-drawing"><img src="${artifactIcon(g.design, 200)}" alt="${esc(g.name)}"><small>${g.parts.length} connected parts · ${esc(g.delivery)}</small></div><div><span class="s-chapter">${esc(g.category)} · a new construction</span><h3>${esc(g.name)}</h3><p>${esc(g.description)}</p>${inventionStats(g)}${artifactToolKind(g) ? `<p>Working purpose: ${artifactToolKind(g)} · requires repeated tool strokes.</p>` : ''}<small>${g.delivery === 'consume' ? 'Using this consumes the physical object.' : 'Restorative effects apply only after a successful hit. This implement remains with its bearer.'}</small></div></article><details class="s-invention-parts"><summary>Read the construction</summary><div class="s-invention-part-list">${g.parts.map((part, i) => `<span><b>${i + 1}. ${esc(part.kind)}</b>${esc(part.material.name)}<small>${part.length.toFixed(1)} span · ${part.width.toFixed(1)} breadth<br>hardness ${part.material.hardness.toFixed(2)} · density ${part.material.density.toFixed(2)}</small></span>`).join('')}</div></details><p class="s-forge-price">${g.cost.coins} coins · ${Object.entries(
+        ? `<article class="s-invention-sheet"><div class="s-invention-drawing"><img src="${artifactIcon(g.design, 200)}" alt="${esc(g.name)}"><small>${g.parts.length} connected parts · ${esc({ consume: 'Single-use preparation', projectile: 'Ranged implement', beam: 'Focused emitter', contact: 'Handheld implement', pulse: 'Area emitter' }[g.delivery] ?? 'Working implement')}</small></div><div><span class="s-chapter">${esc(g.category)} · a new construction</span><h3>${esc(g.name)}</h3><p>${esc(g.description)}</p>${inventionStats(g)}${artifactToolKind(g) ? `<p>Working purpose: ${artifactToolKind(g)} · requires repeated tool strokes.</p>` : ''}<small>${g.delivery === 'consume' ? 'Using this consumes the physical object.' : 'Restorative effects apply only after a successful hit. This implement remains with its bearer.'}</small></div></article><details class="s-invention-parts"><summary>Read the construction</summary><div class="s-invention-part-list">${g.parts.map((part, i) => `<span><b>${i + 1}. ${esc(part.kind)}</b>${esc(part.material.name)}<small>${part.length.toFixed(1)} span · ${part.width.toFixed(1)} breadth<br>hardness ${part.material.hardness.toFixed(2)} · density ${part.material.density.toFixed(2)}</small></span>`).join('')}</div></details><p class="s-forge-price">${g.cost.coins} coins · ${Object.entries(
             g.cost.items,
           )
             .map(([id, amount]) => `${amount} ${esc(id)}`)
@@ -154,11 +177,11 @@ export function mountLife(
               ' · ',
             )}</p>${owned ? `<button id="s-invention-act" class="s-primary" ${owned.equipped ? 'disabled' : ''}>${owned.equipped ? 'Held by this body' : g.delivery === 'consume' ? 'Use this invention' : 'Equip this invention'}</button>` : `<button id="s-invention-build" class="s-primary" ${preview.ok ? '' : 'disabled'}>Make this invention</button>`}`
         : ''
-    }<p id="s-invention-requirement">${esc(preview.message)}</p><p>New sketches use this world's seed and Theo's next invention number. You can also enter your own phrase. The same phrase reproduces the same construction; keep exploring new phrases and sketches.</p><h3>This body’s inventions · ${game.artifacts.length}</h3><div class="s-invention-owned">${game.artifacts.map((a) => `<article><button data-invention-inspect="${esc(a.design)}"><img src="${artifactIcon(a.design, 88)}" alt=""><strong>${esc(a.genome.name)}</strong><small>${esc(a.genome.delivery)}${a.equipped ? ' · equipped' : ''}</small></button><button data-invention-action="${esc(a.design)}" ${a.equipped ? 'disabled' : ''}>${a.equipped ? 'Equipped' : a.genome.delivery === 'consume' ? 'Use' : 'Equip'}</button>${a.toolKind ? `<p>${a.toolKind} · ${a.durability}/${a.maxDurability} condition</p><button data-invention-repair="${esc(a.design)}" ${a.durability === a.maxDurability ? 'disabled' : ''}>Repair · 4 coins + wood + ore</button>` : ''}<button data-invention-salvage="${esc(a.design)}">Salvage materials</button></article>`).join('') || '<p>No inventions in this body’s pack yet. Make one at a workbench when the materials are ready.</p>'}</div>`;
+    }<p id="s-invention-requirement">${esc(preview.message)}</p><p>New sketches use your world and your next invention number. You can also enter your own phrase. The same phrase reproduces the same construction; keep exploring new phrases and sketches.</p><h3>This body’s inventions · ${game.artifacts.length}</h3><div class="s-invention-owned">${game.artifacts.map((a) => `<article><button data-invention-inspect="${esc(a.design)}"><img src="${artifactIcon(a.design, 88)}" alt=""><strong>${esc(a.genome.name)}</strong><small>${esc(a.genome.delivery)}${a.equipped ? ' · equipped' : ''}</small></button><button data-invention-action="${esc(a.design)}" ${a.equipped ? 'disabled' : ''}>${a.equipped ? 'Equipped' : a.genome.delivery === 'consume' ? 'Use' : 'Equip'}</button>${a.toolKind ? `<p>${a.toolKind} · ${a.durability}/${a.maxDurability} condition</p><button data-invention-repair="${esc(a.design)}" ${a.durability === a.maxDurability ? 'disabled' : ''}>Repair · 4 coins + wood + ore</button>` : ''}<button data-invention-salvage="${esc(a.design)}">Salvage materials</button></article>`).join('') || '<p>No inventions in this body’s pack yet. Make one at a workbench when the materials are ready.</p>'}</div>`;
   }
   function estate() {
     const residence = game.estate.residence;
-    return `<article class="s-life-story"><small>The priest’s household · established over twenty stíchoi</small><h3>A life already lived here.</h3><p>${esc(game.estate.description)}</p>${residence ? `<p><b>${esc(residence.name)}</b> · ${Math.round(residence.x)}, ${Math.round(residence.y)}</p>` : ''}<p>Timber and ore maintain tools, furnish homes and make expedition equipment. Living plants keep clinics supplied. Wages buy another person’s time; your choice of whom to trust shapes this household.</p></article><h3>Working tools · this body’s belongings</h3><p>Equip an axe to chop wood, a pickaxe to mine, or a sickle to gather plants. Press E for each stroke. Working consumes energy and wears the tool; return to a workbench for repairs.</p><div class="s-life-grid s-tool-grid">${(
+    return `<article class="s-life-story"><small>${game.universeLife ? esc(game.player.bodyName) + '’s household' : 'The priest’s household · established over twenty stíchoi'}</small><h3>A life already lived here.</h3><p>${esc(game.estate.description)}</p>${residence ? `<p><b>${esc(residence.name)}</b> · ${Math.round(residence.x)}, ${Math.round(residence.y)}</p>` : ''}<p>Timber and ore maintain tools, furnish homes and make expedition equipment. Living plants keep clinics supplied. Wages buy another person’s time; your choice of whom to trust shapes this household.</p></article><h3>Working tools · this body’s belongings</h3><p>Equip an axe to chop wood, a pickaxe to mine, or a sickle to gather plants. Press E for each stroke. Working consumes energy and wears the tool; return to a workbench for repairs.</p><div class="s-life-grid s-tool-grid">${(
       ['axe', 'pickaxe', 'sickle'] as ToolKind[]
     )
       .map((kind) => {
@@ -216,28 +239,26 @@ export function mountLife(
   }
   function wardrobe() {
     const selected = game.progression.equippedStyles[game.bodyId];
-    return `<p>Clothing changes how you look. It grants no extra power. Patterns learned with coins follow Theo; each host keeps its own choice of outfit.</p>${actionButton({ kind: 'equip-style', styleId: null }, selected ? 'Wear this body’s original clothing' : 'Original clothing selected')}<div class="s-life-grid s-style-grid">${COSMETICS.filter(
-      (s) => s.currency === 'coins',
-    )
-      .map(
-        (style) =>
-          `<article><canvas data-style-preview="${style.id}" width="96" height="112" aria-label="${esc(style.name)} preview"></canvas><h3>${esc(style.name)}</h3><p>${esc(style.description)}</p>${game.progression.ownedStyles.includes(style.id) ? actionButton({ kind: 'equip-style', styleId: style.id }, selected === style.id ? 'Wearing this' : 'Wear in this body') : actionButton({ kind: 'buy-style', styleId: style.id }, 'Learn pattern')}</article>`,
-      )
-      .join('')}</div>`;
+    const styles = COSMETICS.filter((s) => s.currency === 'coins');
+    const style = styles.find((s) => s.id === selectedPattern) ?? styles[0];
+    return `<p>Patterns change appearance without granting power. Each body keeps its own outfit.</p><div class="s-wardrobe-workspace"><div class="s-outfit-pair"><canvas data-style-preview="${style.id}" data-facing="down" width="192" height="208" aria-label="${esc(style.name)} full outfit, front"></canvas><canvas data-style-preview="${style.id}" data-facing="up" width="192" height="208" aria-label="${esc(style.name)} full outfit, back"></canvas></div><div><label>Clothing pattern<select id="s-pattern-select">${styles.map((s) => `<option value="${s.id}" ${s.id === style.id ? 'selected' : ''}>${esc(s.name)}${game.progression.ownedStyles.includes(s.id) ? ' · owned' : ''}</option>`).join('')}</select></label><h3>${esc(style.name)}</h3><p>${esc(style.description)}</p>${game.progression.ownedStyles.includes(style.id) ? actionButton({ kind: 'equip-style', styleId: style.id }, selected === style.id ? 'Wearing this' : 'Wear in this body') : actionButton({ kind: 'buy-style', styleId: style.id }, 'Learn pattern')}${actionButton({ kind: 'equip-style', styleId: null }, selected ? 'Wear original clothing' : 'Original clothing selected')}</div></div>`;
   }
   function render() {
     const current = ++revision;
     const active = container.contains(document.activeElement)
       ? (document.activeElement as HTMLElement)
       : null;
+    const oldScroll = container.querySelector('#s-life-panel')?.scrollTop ?? 0;
     const focusId = active?.id,
       focusTab = active?.dataset.lifeTab;
     actions.length = 0;
-    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['purpose', 'compact', 'skills', 'forge', 'discover', 'estate', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', compact: 'Winter Compact', skills: 'Professions', forge: 'Forge', discover: 'Invent', estate: 'Household & tools', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'purpose' ? purpose() : tab === 'compact' ? renderCompact(game.winterCompact.state, game.winterCompact.plan, game.inventory, game.player.coins) : tab === 'skills' ? skills() : tab === 'forge' ? forge() : tab === 'discover' ? discover() : tab === 'estate' ? estate() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
+    container.innerHTML = `<nav class="s-life-tabs" role="tablist" aria-label="Life disciplines">${(['purpose', 'compact', 'skills', 'forge', 'discover', 'estate', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" role="tab" aria-selected="${t === tab}" aria-controls="s-life-panel" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', compact: game.universeLife ? 'Public work' : 'Winter Compact', skills: 'Professions', forge: 'Forge', discover: 'Invent', estate: 'Household & tools', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-sections"></div><div id="s-life-panel" role="tabpanel" tabindex="0">${tab === 'purpose' ? purpose() : tab === 'compact' ? (game.universeLife ? publicWork() : renderCompact(game.winterCompact.state, game.winterCompact.plan, game.inventory, game.player.coins)) : tab === 'skills' ? skills() : tab === 'forge' ? forge() : tab === 'discover' ? discover() : tab === 'estate' ? estate() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
     container.querySelectorAll<HTMLButtonElement>('[data-life-tab]').forEach(
       (button) =>
         (button.onclick = () => {
           tab = button.dataset.lifeTab as LifeTab;
+          sectionIndex = 0;
+          changedTab = true;
           message = '';
           render();
         }),
@@ -277,14 +298,26 @@ export function mountLife(
           render();
         }),
     );
-    container
-      .querySelectorAll<HTMLCanvasElement>('[data-style-preview]')
-      .forEach((canvas) =>
-        drawPortrait(
-          canvas.getContext('2d')!,
-          previewCosmetic(game.player.appearance, canvas.dataset.stylePreview!),
-        ),
+    container.querySelectorAll<HTMLCanvasElement>('[data-style-preview]').forEach((canvas) => {
+      const ctx = canvas.getContext('2d')!;
+      ctx.imageSmoothingEnabled = false;
+      drawHumanoid(
+        ctx,
+        previewCosmetic(game.player.appearance, canvas.dataset.stylePreview!),
+        96,
+        171,
+        4,
+        canvas.dataset.facing === 'up' ? 0 : 2,
+        0,
+        false,
       );
+    });
+    const patternSelect = container.querySelector<HTMLSelectElement>('#s-pattern-select');
+    if (patternSelect)
+      patternSelect.onchange = () => {
+        selectedPattern = patternSelect.value;
+        render();
+      };
     const select = container.querySelector<HTMLSelectElement>('#s-home-select');
     if (select)
       select.onchange = () => {
@@ -442,6 +475,75 @@ export function mountLife(
         if (current === revision && container.isConnected)
           void mountStore(container.querySelector<HTMLElement>('#s-life-panel')!, game, onChange);
       });
+    const panel = container.querySelector<HTMLElement>('#s-life-panel')!;
+    // Keep each discipline at its own beginning, and split long task families into compact pages.
+    const headings = [...panel.children].filter((n) => n.tagName === 'H3');
+    if (headings.length > 0) {
+      const groups: HTMLElement[][] = [[]];
+      const labels = ['Overview'];
+      for (const node of [...panel.children] as HTMLElement[]) {
+        if (node.tagName === 'H3') {
+          groups.push([]);
+          labels.push(node.textContent ?? 'Details');
+        }
+        groups[groups.length - 1].push(node);
+      }
+      if (!groups[0].length) {
+        groups.shift();
+        labels.shift();
+      }
+      sectionIndex = Math.min(sectionIndex, groups.length - 1);
+      const nav = container.querySelector<HTMLElement>('#s-life-sections')!;
+      const select = document.createElement('select');
+      select.setAttribute('aria-label', 'Section in this discipline');
+      labels.forEach((label, i) =>
+        select.add(new Option(label, String(i), i === sectionIndex, i === sectionIndex)),
+      );
+      const show = () => {
+        groups.forEach((group, i) => group.forEach((node) => (node.hidden = i !== sectionIndex)));
+        panel.scrollTop = 0;
+      };
+      select.onchange = () => {
+        sectionIndex = Number(select.value);
+        show();
+      };
+      nav.append(select);
+      show();
+    }
+    panel.querySelectorAll<HTMLElement>('.s-life-grid').forEach((grid) => {
+      const cards = [...grid.children] as HTMLElement[];
+      const count = innerWidth < 600 ? 1 : 3;
+      if (cards.length <= count) return;
+      let page = 0;
+      const nav = document.createElement('div');
+      nav.className = 's-card-pages';
+      const prev = document.createElement('button'),
+        next = document.createElement('button'),
+        label = document.createElement('span');
+      prev.textContent = '←';
+      next.textContent = '→';
+      prev.setAttribute('aria-label', 'Previous items');
+      next.setAttribute('aria-label', 'Next items');
+      const show = () => {
+        cards.forEach((card, i) => (card.hidden = i < page * count || i >= (page + 1) * count));
+        prev.disabled = !page;
+        next.disabled = (page + 1) * count >= cards.length;
+        label.textContent = `${page * count + 1}–${Math.min(cards.length, (page + 1) * count)} of ${cards.length}`;
+      };
+      prev.onclick = () => {
+        page--;
+        show();
+      };
+      next.onclick = () => {
+        page++;
+        show();
+      };
+      nav.append(prev, label, next);
+      grid.after(nav);
+      show();
+    });
+    panel.scrollTop = changedTab ? 0 : oldScroll;
+    changedTab = false;
     const restoredFocus = focusId
       ? container.querySelector<HTMLElement>(`#${focusId}`)
       : focusTab
