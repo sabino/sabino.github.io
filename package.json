@@ -11,11 +11,15 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "check": "npm test && npm run build",
     "format": "prettier --write src tests scripts docs *.ts *.html *.json README.md",
-    "format:check": "prettier --check src tests scripts docs *.ts *.html *.json README.md"
+    "format:check": "prettier --check src tests scripts docs *.ts *.html *.json README.md",
+    "server": "node --experimental-strip-types server/index.mjs"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "vite": "^7.1.5"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
   }
 }
