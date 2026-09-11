@@ -1652,7 +1652,7 @@ function drawHumanoidParts(
       ctx.translate(wx + sign * attack * 4, hand);
       ctx.rotate(angle);
       if (side && east < 0) ctx.scale(-1, 1);
-      if (workTool) drawLaborTool(ctx, workTool, 0, 0, 0.85);
+      if (workTool && !look.artifactDesign) drawLaborTool(ctx, workTool, 0, 0, 0.85);
       else if (look.artifactDesign) drawArtifact(ctx, look.artifactDesign, 0, 0, weaponScale);
       else if (look.weapon !== 'none')
         drawWeapon(
