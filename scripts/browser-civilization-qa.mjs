@@ -223,7 +223,7 @@ async function traveler(name, targetUrl = url, mobile = false) {
 try {
   const version = await (await fetch(`${endpoint}/json/version`)).json();
   browser = await connect(version.webSocketDebuggerUrl);
-  for (const seed of ['1', '8', '71']) {
+  for (const seed of ['1', '2', '8', '71']) {
     const c = await traveler('world-' + seed);
     await c.fill('#s-seed-input', seed);
     await c.click('#s-start button[type=submit]');
@@ -233,7 +233,8 @@ try {
     await c.wait('window.stichos.state.transfer', 'arrival');
     await c.click('#s-skip');
     await c.wait("window.stichos.state.modal===''&&!window.stichos.state.transfer", 'world');
-    await delay(1500);
+    await delay(2500);
+    console.log('FPS ' + seed + ' ' + (await c.read('window.stichos.fps')));
     await c.shot(seed + '-world');
     fs.writeFileSync(
       path.join(out, seed + '-state.json'),
@@ -244,11 +245,18 @@ try {
   console.log('ERRORS ' + JSON.stringify(errors));
 } catch (e) {
   console.error(e);
+  console.error(JSON.stringify(errors));
+  for (const c of clients) {
+    await c.shot(c.name + '-failure');
+    console.log(await c.read('document.body.innerText.slice(-2000)'));
+  }
   process.exitCode = 1;
 } finally {
   for (const c of clients) {
     c.page.close();
-    await browser?.send('Target.disposeBrowserContext',{browserContextId:c.browserContextId}).catch(()=>{});
+    await browser
+      ?.send('Target.disposeBrowserContext', { browserContextId: c.browserContextId })
+      .catch(() => {});
   }
   browser?.close();
 }

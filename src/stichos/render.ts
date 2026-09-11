@@ -553,6 +553,61 @@ export class StichosRenderer {
         if (neighbor.building || neighbor.terrain === 'wall' || neighbor.terrain === tile.terrain)
           continue;
         const tint = blendColor(regionalGroundColor(tile), regionalGroundColor(neighbor), 0.58);
+        const edgeScale = u / 32;
+        // A continuous irregular shoulder connects materials; vegetation can overhang its margin.
+        if (
+          ['road', 'floor', 'water', 'ice'].includes(type) &&
+          !['road', 'floor', 'wall'].includes(neighbor.terrain)
+        ) {
+          for (let segment = 0; segment < 4; segment++) {
+            const depth = (4 + rng() * 5) * edgeScale,
+              along = -u / 2 + (segment * u) / 4;
+            const xx = p.x + (dx ? (dx > 0 ? u / 2 - depth : -u / 2) : along),
+              yy = p.y + (dy ? (dy > 0 ? u / 2 - depth : -u / 2) : along);
+            rect(ctx, xx, yy, dx ? depth : u / 4 + edgeScale, dy ? depth : u / 4 + edgeScale, tint);
+            if (type === 'road') {
+              const rim = color(regionalGroundColor(tile), -16);
+              rect(
+                ctx,
+                xx + (dx < 0 ? depth - edgeScale : 0),
+                yy + (dy < 0 ? depth - edgeScale : 0),
+                dx ? edgeScale : u / 4,
+                dy ? edgeScale : u / 4,
+                rim,
+              );
+              rect(
+                ctx,
+                xx + edgeScale,
+                yy + edgeScale,
+                dx ? Math.max(1, depth - 2 * edgeScale) : u / 5,
+                dy ? Math.max(1, depth - 2 * edgeScale) : u / 5,
+                color(tint, 13),
+              );
+            }
+            if (neighbor.terrain === 'grass' && tile.temperature > 1) {
+              for (let n = 0; n < 3; n++) {
+                const tx = xx + rng() * (dx ? depth : u / 4),
+                  ty = yy + rng() * (dy ? depth : u / 4);
+                line(
+                  ctx,
+                  tx,
+                  ty,
+                  tx - edgeScale,
+                  ty - 3 * edgeScale,
+                  color(regionalGroundColor(neighbor), -10),
+                );
+                rect(
+                  ctx,
+                  tx,
+                  ty - 2 * edgeScale,
+                  edgeScale,
+                  2 * edgeScale,
+                  color(regionalGroundColor(neighbor), 25),
+                );
+              }
+            }
+          }
+        }
         for (let n = 0; n < 9; n++) {
           const along = -u / 2 + rng() * u,
             depth = ((1 + rng() * 3) * u) / 32;

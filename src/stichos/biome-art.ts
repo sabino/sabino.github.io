@@ -359,15 +359,18 @@ export function makeRegionalTree(form: TreeForm, seed: number): Sprite {
           dy = (r() - 0.5) * ry * 2;
         if ((dx / rx) ** 2 + (dy / ry) ** 2 > 0.84) continue;
         const lit = -dx / rx - dy / ry;
-        rect(
-          c,
-          xx + dx,
-          yy + dy,
-          3 + r() * 5,
-          2 + r() * 3,
-          shade(g.leaf, lit * 19 + r() * 25 - 12),
-        );
-        if (r() > 0.84 && lit > 0.3) rect(c, xx + dx, yy + dy, 2, 1, shade(g.leaf, lit * 15 + 26));
+        const density = Math.max(0, Math.min(1, (lit + 0.65) / 2));
+        let tone = blendColor('#203f37', g.leaf, 0.48 + density * 0.52);
+        if (lit > 0.35) tone = blendColor(tone, '#c2ba76', (lit - 0.35) * 0.16);
+        tone = shade(tone, r() * 14 - 7);
+        const ww = 3 + r() * 5,
+          hh = 2 + r() * 3;
+        rect(c, xx + dx, yy + dy + 1, ww, hh, shade(tone, -13));
+        rect(c, xx + dx, yy + dy, ww - 1, Math.max(1, hh - 1), tone);
+        if (r() > 0.7 && lit > 0.4) {
+          rect(c, xx + dx, yy + dy, 2, 1, shade(tone, 22));
+          rect(c, xx + dx + 1, yy + dy - 1, 1, 1, shade(tone, 28));
+        }
       }
     };
     if (form === 'conifer') {
