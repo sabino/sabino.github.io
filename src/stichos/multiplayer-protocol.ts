@@ -56,6 +56,7 @@ export type MultiplayerClientMessage =
       type: 'join';
       protocol: typeof MULTIPLAYER_PROTOCOL;
       room?: string;
+      publicWorld?: boolean;
       seed: number;
       generation: WorldGeneration;
       name: string;

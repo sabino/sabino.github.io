@@ -1,4 +1,5 @@
 import { civilizationFor } from './civilization.ts';
+import { worldNodeEndpoint } from './world-node.ts';
 /** Everyone uses this address space. A seed is an address, never a private universe. */
 export const UNIVERSE_ID = 'verso-1';
 export const STICHOS_SEED = 0x53544943;
@@ -13,8 +14,8 @@ export interface RoomInvitation extends PlanetAddress {
   public?: boolean;
 }
 /** A shared meeting frequency lets strangers on the same planet find one another. */
-export function publicRoomCode(seed: number, generation: Geography = 4) {
-  return `U${generation}${(seed >>> 0).toString(36).toUpperCase().padStart(7, '0')}`;
+export function publicRoomCode(seed: number, generation: Geography = 4, endpoint = 'peer:') {
+  return `${endpoint === 'peer:' ? 'U' : 'P'}${generation}${(seed >>> 0).toString(36).toUpperCase().padStart(7, '0')}`;
 }
 export interface Planet extends PlanetAddress {
   id: string;
@@ -91,7 +92,7 @@ function addressChecksum(value: string) {
   for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193);
   return (hash >>> 0).toString(36).toUpperCase().padStart(7, '0').slice(-4);
 }
-export function roomAddress(invite: PlanetAddress & { room: string }) {
+export function roomAddress(invite: PlanetAddress & { room: string; endpoint?: string }) {
   const room = validRoomCode(invite.room);
   if (
     !room ||
@@ -101,16 +102,27 @@ export function roomAddress(invite: PlanetAddress & { room: string }) {
     ![1, 2, 3, 4].includes(invite.generation)
   )
     throw Error('Invalid room address.');
-  const body = `V${invite.generation}-${invite.seed.toString(36).toUpperCase()}-${room}`;
+  const prefix = invite.endpoint === worldNodeEndpoint() ? 'N' : 'V';
+  const body = `${prefix}${invite.generation}-${invite.seed.toString(36).toUpperCase()}-${room}`;
   return `${body}-${addressChecksum(body)}`;
 }
 export function readRoomAddress(raw: string): RoomInvitation | null {
   const code = raw.trim().toUpperCase();
-  const match = /^V([1-4])-([A-Z0-9]{1,7})-([A-Z0-9]{4,16})-([A-Z0-9]{4})$/.exec(code);
-  if (!match || addressChecksum(code.slice(0, -5)) !== match[4]) return null;
-  const seed = parseInt(match[2], 36);
-  if (seed > 0xffffffff || seed.toString(36).toUpperCase() !== match[2]) return null;
-  return { seed, generation: Number(match[1]) as Geography, room: match[3], endpoint: 'peer:' };
+  const match = /^([VN])([1-4])-([A-Z0-9]{1,7})-([A-Z0-9]{4,16})-([A-Z0-9]{4})$/.exec(code);
+  if (!match || addressChecksum(code.slice(0, -5)) !== match[5]) return null;
+  const seed = parseInt(match[3], 36);
+  if (seed > 0xffffffff || seed.toString(36).toUpperCase() !== match[3]) return null;
+  const generation = Number(match[2]) as Geography;
+  const endpoint = match[1] === 'N' ? worldNodeEndpoint() : 'peer:';
+  return {
+    seed,
+    generation,
+    room: match[4],
+    endpoint,
+    ...(endpoint !== 'peer:' && match[4] === publicRoomCode(seed, generation, endpoint)
+      ? { public: true }
+      : {}),
+  };
 }
 /** A readable display name; the complete code remains the unambiguous address. */
 export function roomTitle(room: string) {
@@ -136,7 +148,8 @@ export function roomLink(base: string, invite: RoomInvitation) {
   url.search = '';
   url.hash = '';
   url.searchParams.set('join', roomAddress(invite));
-  if (invite.endpoint !== 'peer:') url.searchParams.set('server', invite.endpoint);
+  if (invite.endpoint !== 'peer:' && invite.endpoint !== worldNodeEndpoint())
+    url.searchParams.set('server', invite.endpoint);
   return url.href;
 }
 export function readRoomLink(raw: string): RoomInvitation | null {
@@ -149,7 +162,7 @@ export function readRoomLink(raw: string): RoomInvitation | null {
     const seedText = decoded ? String(decoded.seed) : url.searchParams.get('planet'),
       seed = Number(seedText),
       generation = decoded?.generation ?? Number(url.searchParams.get('g') || 3);
-    const endpoint = url.searchParams.get('server') || 'peer:';
+    const endpoint = url.searchParams.get('server') || decoded?.endpoint || 'peer:';
     if (
       !room ||
       !seedText ||
@@ -172,7 +185,15 @@ export function readRoomLink(raw: string): RoomInvitation | null {
       // An HTTPS invitation must never downgrade its game channel.
       if (url.protocol === 'https:' && server.protocol !== 'wss:') return null;
     }
-    return { room, seed, generation: generation as Geography, endpoint };
+    return {
+      room,
+      seed,
+      generation: generation as Geography,
+      endpoint,
+      ...(endpoint !== 'peer:' && room === publicRoomCode(seed, generation as Geography, endpoint)
+        ? { public: true }
+        : {}),
+    };
   } catch {
     return null;
   }

@@ -13,6 +13,7 @@ import {
   validRoomCode,
   STICHOS_SEED,
 } from '../src/stichos/universe.ts';
+import { worldNodeEndpoint } from '../src/stichos/world-node.ts';
 
 test('planet addresses and neighboring sectors are shared deterministic coordinates', () => {
   assert.deepEqual(sectorPlanets(12), sectorPlanets(12));
@@ -91,4 +92,40 @@ test('old invitation URLs remain valid and a corrupt new address never falls bac
   const old = 'https://sabino.pro/games/verso/?room=ABCD&planet=8&g=4';
   assert.deepEqual(readRoomLink(old), { room: 'ABCD', seed: 8, generation: 4, endpoint: 'peer:' });
   assert.equal(readRoomLink(old + '&join=broken'), null);
+});
+
+test('hosted room codes include the planet and default node without a separate server URL', () => {
+  for (const seed of [0, 8, 0xffffffff]) {
+    const invite = {
+      seed,
+      generation: 4 as const,
+      room: '0123456789ABCDEF',
+      endpoint: worldNodeEndpoint(),
+    };
+    const code = roomAddress(invite);
+    assert.match(code, /^N4-/);
+    assert.deepEqual(readRoomInput(code), invite);
+    const link = roomLink('https://sabino.pro/games/verso/', invite);
+    assert.equal(new URL(link).searchParams.size, 1);
+    assert.deepEqual(readRoomInput(link), invite);
+    const peer = { ...invite, endpoint: 'peer:' };
+    assert.match(roomAddress(peer), /^V4-/);
+    assert.deepEqual(readRoomInput(roomAddress(peer)), peer);
+  }
+});
+
+test('persistent public frequencies have a separate signing namespace from browser frequencies', () => {
+  const endpoint = worldNodeEndpoint();
+  for (const seed of [0, 8, 0xffffffff]) {
+    const room = publicRoomCode(seed, 4, endpoint);
+    assert.match(room, /^P4[A-Z0-9]{7}$/);
+    assert.notEqual(room, publicRoomCode(seed, 4, 'peer:'));
+    const invite = { seed, generation: 4 as const, room, endpoint, public: true };
+    assert.deepEqual(readRoomInput(roomAddress(invite)), invite);
+    assert.deepEqual(readRoomLink(roomLink('https://sabino.pro/games/verso/', invite)), invite);
+    const custom = { ...invite, endpoint: 'wss://other.example/ws' };
+    const link = roomLink('https://sabino.pro/games/verso/', custom);
+    assert.equal(new URL(link).searchParams.get('server'), custom.endpoint);
+    assert.deepEqual(readRoomLink(link), custom);
+  }
 });

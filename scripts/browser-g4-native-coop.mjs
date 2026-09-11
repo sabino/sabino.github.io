@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 const endpoint = process.argv[2],
   url = process.argv[3] || 'http://localhost:4174/';
+const hosted = process.env.VERSO_ROOM_TRANSPORT === 'node';
 if (
   !endpoint ||
   !['127.0.0.1', 'localhost'].includes(new URL(endpoint).hostname) ||
@@ -17,7 +18,9 @@ if (
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(
   root,
-  '.dream-loop/g4-native-coop' + (new URL(url).hostname === 'sabino.pro' ? '-public' : ''),
+  '.dream-loop/g4-native-coop' +
+    (hosted ? '-node' : '') +
+    (new URL(url).hostname === 'sabino.pro' ? '-public' : ''),
 );
 fs.mkdirSync(out, { recursive: true });
 const started = new Date(),
@@ -249,17 +252,22 @@ try {
   await host.click('#s-start button[type=submit]');
   await accept(host, 'Aster Gearwright');
   await host.click('#s-together');
-  await host.click('.v-room-mode summary');
-  await host.click('#s-room-mode');
-  await host.key('Home', 'Home', 36);
-  await host.key('Enter', 'Enter', 13);
+  if (!hosted) {
+    await host.click('.v-room-mode summary');
+    await host.click('#s-room-mode');
+    await host.key('Home', 'Home', 36);
+    await host.key('Enter', 'Enter', 13);
+  } else {
+    assert.equal(await host.read("document.querySelector('#s-room-mode').value"), 'server');
+    assert.match(await host.read("document.querySelector('#s-room-server').value"), /^wss:\/\//);
+  }
   await host.click('#s-room-form button[type=submit]');
   await host.wait("window.stichos.state.multiplayer.status==='online'", 'host online', 30000);
   await host.wait("!!document.querySelector('#s-room-invitation')", 'invitation');
   const link = await host.read("document.querySelector('#s-room-invitation').value"),
     room = (await host.state()).multiplayer.room;
   const address = new URL(link).searchParams.get('join');
-  assert.match(address, new RegExp(`^V4-8-${room}-[A-Z0-9]{4}$`));
+  assert.match(address, new RegExp(`^${hosted ? 'N' : 'V'}4-8-${room}-[A-Z0-9]{4}$`));
   assert.equal(new URL(link).searchParams.size, 1);
   const offline = await traveler('offline-address');
   await offline.page.send('Network.emulateNetworkConditions', {
@@ -324,13 +332,56 @@ try {
     await absent.click('#v-join-invite');
   }
   await accept(absent, 'Delta Returner', true);
-  await absent.wait(
-    "!!document.querySelector('#v-room-failure')?.textContent.includes('host is not online')",
-    'specific persistent host-offline error',
-    40000,
-  );
-  await absent.shot('absent-host-error');
-  pass('unavailable host reports connection failure, not missing planet');
+  if (hosted) {
+    await absent.wait(
+      "window.stichos.state.multiplayer.status==='online'",
+      'node room still joins after its creator leaves',
+    );
+    assert.equal((await absent.state()).multiplayer.room, room);
+    await absent.shot('creator-left-room-still-online');
+    pass('the world node keeps the room open after its creator leaves', room);
+    await absent.click('#s-together');
+    await absent.click('#s-room-leave');
+    await absent.click('#v-room-public');
+    await absent.wait(
+      "window.stichos.state.multiplayer.status==='online'",
+      'public world node rendezvous',
+    );
+    const publicRoom = (await absent.state()).multiplayer.room;
+    assert.equal(publicRoom, 'P40000008');
+    await friend.click('#s-together');
+    await friend.click('#s-room-leave');
+    await friend.click('#v-room-public');
+    await friend.wait(
+      "window.stichos.state.multiplayer.status==='online'",
+      'second traveler joins the same public world',
+    );
+    assert.equal((await friend.state()).multiplayer.room, publicRoom);
+    await absent.wait(
+      'window.stichos.state.multiplayer.peers.length===1',
+      'public world peers share presence',
+    );
+    await friend.click('[data-chat-channel=world]');
+    await friend.fill('#v-chat-input', 'A shared signal from the always-on world.');
+    await friend.key('Enter', 'Enter', 13);
+    await absent.wait(
+      "document.querySelector('#v-chat-log').textContent.includes('A shared signal from the always-on world.')",
+      'public world delivers room chat',
+    );
+    await absent.shot('public-world-chat');
+    pass(
+      'independent travelers rendezvous and communicate on the persistent public planet',
+      publicRoom,
+    );
+  } else {
+    await absent.wait(
+      "!!document.querySelector('#v-room-failure')?.textContent.includes('host is not online')",
+      'specific persistent host-offline error',
+      40000,
+    );
+    await absent.shot('absent-host-error');
+    pass('unavailable host reports connection failure, not missing planet');
+  }
   fs.writeFileSync(
     path.join(out, 'results.json'),
     JSON.stringify(
@@ -338,6 +389,8 @@ try {
         time: new Date(),
         link,
         room,
+        transport: hosted ? 'world-node' : 'browser-peer',
+        checks: results,
         results: states.map((s) => ({
           name: s.identityName,
           id: s.browserIdentity,

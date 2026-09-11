@@ -58,6 +58,7 @@ export class MultiplayerConnection {
   private resumeToken = '';
   private knownAuthority: JsonWebKey | undefined;
   private endpoint = '';
+  private publicWorld = false;
   private lastPose = 0;
   private lastCombatAck = 0;
   private peerRecords = new Map<string, Peer>();
@@ -104,6 +105,7 @@ export class MultiplayerConnection {
     resume = false,
     hostedRestore?: SavedRoom,
     forceHost = false,
+    publicWorld = false,
   ): Promise<void> {
     room = room.trim().toUpperCase();
     const peerHosted = endpoint === 'peer:';
@@ -124,6 +126,7 @@ export class MultiplayerConnection {
     }
     const epoch = ++this.epoch;
     this.endpoint = peerHosted ? 'peer:' : url.href;
+    this.publicWorld = !peerHosted && publicWorld;
     this.reconnectIdentity = identity;
     this.lastCombatAck = 0;
     this.lastError = '';
@@ -175,6 +178,7 @@ export class MultiplayerConnection {
           protocol: MULTIPLAYER_PROTOCOL,
           ...identity,
           room: forceHost && !hostedRestore ? undefined : room || undefined,
+          ...(this.publicWorld ? { publicWorld: true } : {}),
           challenge,
           resumeToken: (pinnedKey ? token : '') || undefined,
         });
@@ -284,6 +288,7 @@ export class MultiplayerConnection {
         else if (message.type === 'error') {
           if (!welcomed) {
             clearTimeout(timeout);
+            this.lastError = message.reason;
             reject(Error(message.reason));
             socket.close();
           } else this.onMessage(message.reason);
@@ -298,6 +303,7 @@ export class MultiplayerConnection {
       let queued: ServerMessage[] = [],
         queuedBytes = 0;
       const rejectPin = (reason: string) => {
+        this.lastError = reason;
         failed = true;
         clearTimeout(timeout);
         queued = [];
@@ -458,6 +464,10 @@ export class MultiplayerConnection {
       );
     return this.connect('peer:', identity, code, false, undefined, true);
   }
+  joinPublicWorld(endpoint: string, code: string, identity: RoomIdentity) {
+    if (endpoint === 'peer:') throw Error('A persistent public world needs a world node.');
+    return this.connect(endpoint, identity, code, false, undefined, false, true);
+  }
   sendChat(text: string, channel: ChatChannel = 'say') {
     return this.request({ type: 'chat', requestId: '', channel, text });
   }
@@ -468,7 +478,15 @@ export class MultiplayerConnection {
     return this.request({ type: 'production', requestId: '', machineId, jobId, propId, ...point });
   }
   reconnect(identity: RoomIdentity) {
-    return this.connect(this.endpoint, identity, this.room, true);
+    return this.connect(
+      this.endpoint,
+      identity,
+      this.room,
+      true,
+      undefined,
+      false,
+      this.publicWorld,
+    );
   }
   disconnect(forget = true) {
     this.epoch++;

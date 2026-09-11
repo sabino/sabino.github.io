@@ -8,6 +8,7 @@ import { drawProduction } from './production-art';
 import { creationHtml, mountCreation } from './creation';
 import { mountGalaxy } from './galaxy';
 import { findWalkingPath } from './pathfinding.ts';
+import { hasCompleteRoomAddress, preferredRoomEndpoint, worldNodeEndpoint } from './world-node.ts';
 import {
   STICHOS_SEED,
   planetAt,
@@ -124,10 +125,13 @@ const peerEmotes = new Map<string, { text: string; until: number }>();
 let sharedActionPending = false;
 let multiplayerRoster = '';
 let roomName = 'Traveler';
-let roomServer = 'peer:';
+let roomServer = worldNodeEndpoint();
 try {
   roomName = localStorage.getItem('verso.room.name') || 'Traveler';
-  roomServer = localStorage.getItem('verso.room.server') || roomServer;
+  roomServer = preferredRoomEndpoint(
+    localStorage.getItem('verso.room.server'),
+    localStorage.getItem('verso.room.connection.v2') === 'chosen',
+  );
 } catch {}
 let started = false,
   paused = true,
@@ -509,11 +513,17 @@ async function joinInvitation(invite: RoomInvitation) {
   if (joiningPublic) return;
   const source = game;
   roomError = '';
-  roomDraft = invite.endpoint === 'peer:' ? roomAddress(invite) : roomLink(location.href, invite);
+  roomDraft = hasCompleteRoomAddress(invite.endpoint)
+    ? roomAddress(invite)
+    : roomLink(location.href, invite);
   roomServer = invite.endpoint;
   roomName = game.player.name;
   try {
-    if (invite.public) {
+    if (invite.public && invite.endpoint !== 'peer:') {
+      joiningPublic = true;
+      toast('Opening this planet’s shared world…', 12000);
+      await multiplayer.joinPublicWorld(invite.endpoint, invite.room, roomIdentity());
+    } else if (invite.public) {
       joiningPublic = true;
       toast('Listening for this planet’s public frequency…', 16000);
       const { discoverRoom } = await import('./multiplayer');
@@ -576,15 +586,17 @@ async function findRoom(raw: string) {
     return;
   }
   findingRoom = true;
-  toast('Contacting the host of this legacy room code…', 40000);
+  const endpoint =
+    /^U[1-4][A-Z0-9]{7}$/.test(code) || /^[A-F0-9]{10}$/.test(code) ? 'peer:' : worldNodeEndpoint();
+  toast('Looking up this room’s planet…', 40000);
   const revision = modalRevision;
   try {
     const { discoverRoom } = await import('./multiplayer');
-    const found = await discoverRoom('peer:', code);
+    const found = await discoverRoom(endpoint, code);
     if (revision !== modalRevision) return;
     const invite = {
       room: code,
-      endpoint: 'peer:',
+      endpoint,
       seed: found.seed,
       generation: found.generation,
     };
@@ -633,8 +645,8 @@ function galaxyMenu() {
       const invite: RoomInvitation = {
         seed: p.seed,
         generation: p.generation,
-        room: publicRoomCode(p.seed, p.generation),
-        endpoint: 'peer:',
+        room: publicRoomCode(p.seed, p.generation, worldNodeEndpoint()),
+        endpoint: worldNodeEndpoint(),
         public: true,
       };
       if (started && p.seed === game.world.seed) {
@@ -1568,7 +1580,8 @@ function roomIdentity() {
 function togetherMenu() {
   if (sharedActionPending) return;
   const active = multiplayer.status === 'online',
-    browserRoom = roomServer === 'peer:';
+    browserRoom = roomServer === 'peer:',
+    completeCode = hasCompleteRoomAddress(roomServer);
   const invite: RoomInvitation = {
     seed: game.world.seed,
     generation: game.world.generation,
@@ -1576,7 +1589,7 @@ function togetherMenu() {
     endpoint: roomServer,
   };
   const link = active ? roomLink(location.href, invite) : '';
-  const codeToShare = active ? (browserRoom ? roomAddress(invite) : link) : '';
+  const codeToShare = active ? (completeCode ? roomAddress(invite) : link) : '';
   const failure = roomError || multiplayer.lastError;
   const owned = savedWorlds().filter(
     (w) => w.owned && w.seed === game.world.seed && w.generation === game.world.generation,
@@ -1585,8 +1598,8 @@ function togetherMenu() {
     'together',
     `<div class="v-window-heading"><div><small>${esc(currentPlanet.name)} · ${active ? 'Connected' : 'Find your people'}</small><h2>${active ? esc(roomTitle(multiplayer.room)) : 'Play together'}</h2></div><button id="s-room-return" aria-label="Return to the world">×</button></div><p id="v-room-failure" class="v-room-error" role="alert" ${failure ? '' : 'hidden'}>${esc(failure)}</p>${
       active
-        ? `<div class="v-room-layout"><div><small>${browserRoom ? 'Room + planet code' : 'Node room ID · share the full invitation'}</small><div class="v-room-code" id="v-room-code" data-room="${esc(multiplayer.room)}">${esc(browserRoom ? roomAddress(invite) : multiplayer.room)}</div><p>${multiplayer.peers.length + 1} of 8 travelers<br>Share the code, link, or QR.</p><div class="s-menu-buttons"><button id="v-copy-code">${browserRoom ? 'Copy code' : 'Copy invitation'}</button><button id="v-share-room">Share link</button></div></div><div id="v-room-qr" class="v-room-qr" aria-label="QR code to join this room"></div></div><details class="v-room-link"><summary>Full invitation link</summary><input id="s-room-invitation" readonly aria-label="Room join URL" value="${esc(link)}"><button id="s-room-copy">Copy link</button></details><div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}${p.id === multiplayer.peerId ? ' · you' : ''}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}</span>${p.id !== multiplayer.peerId ? `<button data-meet-peer="${esc(p.id)}">Track</button>` : ''}</p>`).join('')}</div><p class="v-muted">${browserRoom ? 'The host keeps this room open. Signed checkpoints preserve shared changes for the same host to resume later.' : 'This world runs on a dedicated node; its operator controls availability.'} Press Enter to talk; Local reaches nearby people, Room reaches this whole room.</p><div class="v-room-emotes"><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thanks</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>`
-        : `<form id="s-room-form"><label>Your traveler name<input id="s-room-name" value="${esc(roomName)}" maxlength="32" required></label><label>Room code or invitation link<input id="s-room-code" value="${esc(roomDraft || multiplayer.room)}" placeholder="Leave empty to host a new room" maxlength="600" autocapitalize="characters"></label><div class="s-menu-buttons"><button class="s-primary" type="submit">${multiplayer.status === 'connecting' ? 'Connecting…' : 'Join or host'}</button>${multiplayer.reconnectable ? '<button id="s-room-reconnect" type="button">Reconnect</button>' : ''}</div><details class="v-room-mode"><summary>Connection options</summary><label>Connection<select id="s-room-mode"><option value="peer" ${browserRoom ? 'selected' : ''}>Browser room</option><option value="server" ${!browserRoom ? 'selected' : ''}>Dedicated world node</option></select></label><label id="s-room-server-label" ${browserRoom ? 'hidden' : ''}>World node<input id="s-room-server" value="${esc(browserRoom ? '' : roomServer)}" placeholder="wss://your-world-node.example/ws" maxlength="240"></label></details></form>${
+        ? `<div class="v-room-layout"><div><small>${completeCode ? 'Room + planet code' : 'Custom node · share the full invitation'}</small><div class="v-room-code" id="v-room-code" data-room="${esc(multiplayer.room)}">${esc(completeCode ? roomAddress(invite) : multiplayer.room)}</div><p>${multiplayer.peers.length + 1} of 8 travelers<br>Share the code, link, or QR.</p><div class="s-menu-buttons"><button id="v-copy-code">${completeCode ? 'Copy code' : 'Copy invitation'}</button><button id="v-share-room">Share link</button></div></div><div id="v-room-qr" class="v-room-qr" aria-label="QR code to join this room"></div></div><details class="v-room-link"><summary>Full invitation link</summary><input id="s-room-invitation" readonly aria-label="Room join URL" value="${esc(link)}"><button id="s-room-copy">Copy link</button></details><div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}${p.id === multiplayer.peerId ? ' · you' : ''}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}</span>${p.id !== multiplayer.peerId ? `<button data-meet-peer="${esc(p.id)}">Track</button>` : ''}</p>`).join('')}</div><p class="v-muted">${browserRoom ? 'The host keeps this room open. Signed checkpoints preserve shared changes for the same host to resume later.' : 'This shared world stays on the world node when everyone closes the game. Your browser keeps your personal life.'} Press Enter to talk; Local reaches nearby people, Room reaches this whole room.</p><div class="v-room-emotes"><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thanks</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>`
+        : `<form id="s-room-form"><label>Your traveler name<input id="s-room-name" value="${esc(roomName)}" maxlength="32" required></label><label>Room code or invitation link<input id="s-room-code" value="${esc(roomDraft || multiplayer.room)}" placeholder="Leave empty to create a new room" maxlength="600" autocapitalize="characters"></label><div class="s-menu-buttons"><button class="s-primary" type="submit">${multiplayer.status === 'connecting' ? 'Connecting…' : 'Join or create room'}</button>${multiplayer.reconnectable ? '<button id="s-room-reconnect" type="button">Reconnect</button>' : ''}</div><details class="v-room-mode"><summary>Connection options</summary><label>Connection<select id="s-room-mode"><option value="peer" ${browserRoom ? 'selected' : ''}>Browser room · host must stay online</option><option value="server" ${!browserRoom ? 'selected' : ''}>Persistent world node</option></select></label><label id="s-room-server-label" ${browserRoom ? 'hidden' : ''}>World node<input id="s-room-server" value="${esc(browserRoom ? worldNodeEndpoint() : roomServer)}" placeholder="wss://your-world-node.example/ws" maxlength="240"></label></details></form>${
             owned.length
               ? `<h3>Resume a world you host</h3><div class="s-menu-buttons">${owned
                   .slice(0, 4)
@@ -1596,7 +1609,7 @@ function togetherMenu() {
                   )
                   .join('')}</div>`
               : ''
-          }<button id="v-room-public">Meet people on this planet</button><p class="v-muted">A public frequency lets travelers find the same planet without an invitation. A complete room code includes the planet; older codes need an online host to look it up. Browser rooms use direct connections and require their host online. Pear-based world nodes can keep replicated history; no public storage node is connected by default.</p>`
+          }<button id="v-room-public">Meet people on this planet</button><p class="v-muted">A public frequency lets travelers meet on this planet without an invitation. Complete codes include the planet. The default world node preserves shared rooms while browsers are closed; browser rooms remain available in Connection options. Personal lives stay in this browser.</p>`
     }<p id="v-network-status" class="v-muted" role="status"></p>`,
   );
   renderNetworkStatus();
@@ -1604,12 +1617,18 @@ function togetherMenu() {
   const publicButton = document.getElementById('v-room-public');
   if (publicButton)
     publicButton.onclick = () => {
+      const mode = el<HTMLSelectElement>('s-room-mode');
+      if (mode)
+        roomServer =
+          mode.value === 'peer:' || mode.value === 'peer'
+            ? 'peer:'
+            : el<HTMLInputElement>('s-room-server').value.trim() || worldNodeEndpoint();
       closeModal();
       void joinInvitation({
         seed: game.world.seed,
         generation: game.world.generation,
-        room: publicRoomCode(game.world.seed, game.world.generation),
-        endpoint: 'peer:',
+        room: publicRoomCode(game.world.seed, game.world.generation, roomServer),
+        endpoint: roomServer,
         public: true,
       });
     };
@@ -1667,8 +1686,12 @@ function togetherMenu() {
         }),
     );
   } else {
-    el<HTMLSelectElement>('s-room-mode').onchange = () =>
-      (el('s-room-server-label').hidden = el<HTMLSelectElement>('s-room-mode').value === 'peer');
+    el<HTMLSelectElement>('s-room-mode').onchange = () => {
+      const peer = el<HTMLSelectElement>('s-room-mode').value === 'peer';
+      el('s-room-server-label').hidden = peer;
+      if (!peer && !el<HTMLInputElement>('s-room-server').value)
+        el<HTMLInputElement>('s-room-server').value = worldNodeEndpoint();
+    };
     el<HTMLFormElement>('s-room-form').onsubmit = async (e) => {
       e.preventDefault();
       if (multiplayer.status === 'connecting') return;
@@ -1691,6 +1714,7 @@ function togetherMenu() {
       try {
         localStorage.setItem('verso.room.name', roomName);
         localStorage.setItem('verso.room.server', roomServer);
+        localStorage.setItem('verso.room.connection.v2', 'chosen');
         if (code) {
           if (addressed) roomServer = addressed.endpoint;
           const { discoverRoom } = await import('./multiplayer');
@@ -1702,11 +1726,14 @@ function togetherMenu() {
               generation: info.generation,
               room: code,
               endpoint: roomServer,
+              ...(addressed?.public ? { public: true } : {}),
             });
             return;
           }
         }
-        await multiplayer.connect(roomServer, roomIdentity(), code || '');
+        if (addressed?.public && roomServer !== 'peer:')
+          await multiplayer.joinPublicWorld(roomServer, code || '', roomIdentity());
+        else await multiplayer.connect(roomServer, roomIdentity(), code || '');
         if (modal === 'together') togetherMenu();
         toast('Your room is ready. Share its code or link.');
       } catch (error) {
@@ -1717,11 +1744,13 @@ function togetherMenu() {
     const reconnect = document.getElementById('s-room-reconnect');
     if (reconnect)
       reconnect.onclick = async () => {
+        roomError = '';
         try {
           await multiplayer.reconnect(roomIdentity());
           togetherMenu();
         } catch (error) {
-          toast(error instanceof Error ? error.message : 'Could not reconnect.');
+          roomError = error instanceof Error ? error.message : 'Could not reconnect.';
+          togetherMenu();
         }
       };
     document.querySelectorAll<HTMLElement>('[data-resume-world]').forEach(
@@ -1733,7 +1762,8 @@ function togetherMenu() {
             togetherMenu();
             toast('Your saved shared world is open again.');
           } catch (error) {
-            toast(error instanceof Error ? error.message : 'Could not resume this world.');
+            roomError = error instanceof Error ? error.message : 'Could not resume this world.';
+            togetherMenu();
           }
         }),
     );
@@ -1745,7 +1775,9 @@ function renderNetworkStatus() {
   const d = multiplayer.networkDiagnostic;
   target.textContent = d
     ? `${d.hosting ? 'Hosting' : 'Joining'} · ${d.stage} · discovery ${d.signalling ? 'online' : 'offline'} · ${d.route === 'relay' ? 'relayed connection' : d.route === 'direct' ? 'direct connection' : d.route === 'local-host' ? 'local host' : 'finding a route'}${d.roundTripMs === undefined ? '' : ` · ${d.roundTripMs} ms`} · ${d.relayConfigured ? 'relay configured' : 'no relay configured'}`
-    : '';
+    : roomServer !== 'peer:'
+      ? `World node · ${multiplayer.status} · shared rooms persist between visits`
+      : '';
 }
 multiplayer.onNetworkChange = renderNetworkStatus;
 function appendChat(name: string, text: string, system = false, at = Date.now()) {
