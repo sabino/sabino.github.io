@@ -615,7 +615,7 @@ export function makeRegionalBuilding(
       faceRight = bx + bw - east,
       fy = foot - v.height,
       top = Math.min(v.top, fy - 27),
-      ridgeY = top + Math.max(16, (fy - top) * 0.32),
+      ridgeY = top + Math.max(18, (fy - top) * 0.22),
       peak = fy - v.rise;
     if (v.central)
       poly(
@@ -800,8 +800,8 @@ export function makeRegionalBuilding(
       const ridge = bx + (bw - east) / 2;
       roofPlane(
         [
-          [bx - 7, top + 12],
-          [ridge, top - v.rise * 0.5],
+          [bx - 7, top],
+          [ridge, top - v.rise],
           [ridge, peak],
           [bx - 7, fy],
         ],
@@ -809,15 +809,15 @@ export function makeRegionalBuilding(
       );
       roofPlane(
         [
-          [ridge, top - v.rise * 0.5],
-          [bx + bw + 6, top + 5],
+          [ridge, top - v.rise],
+          [bx + bw + 6, top - 8],
           [bx + bw + 6, fy - 11],
           [ridge, peak],
         ],
         color(roof, -35),
       );
-      line(c, ridge, top - v.rise * 0.5, ridge, peak - 2, color(roof, 32), 4);
-      line(c, ridge + 4, top - v.rise * 0.5 + 2, ridge + 4, peak - 1, color(roof, -39), 3);
+      line(c, ridge, top - v.rise, ridge, peak - 2, color(roof, 32), 4);
+      line(c, ridge + 4, top - v.rise + 2, ridge + 4, peak - 1, color(roof, -39), 3);
       const gable = [
         [bx - 6, fy],
         [ridge, peak],
@@ -833,62 +833,67 @@ export function makeRegionalBuilding(
         line(c, ridge, peak + 18, bx + 10, fy - 4, color(wood, -27), 3);
         line(c, ridge, peak + 18, faceRight - 10, fy - 4, color(wood, -27), 3);
       }
-      if (v.rise > 30) windowFrame(ridge, fy - 7, 18, Math.min(26, v.rise - 18), false);
+      if (v.rise > 30) {
+        const atticFoot = fy - Math.max(7, v.rise * 0.16),
+          atticHeight = Math.min(43, v.rise * 0.45);
+        windowFrame(ridge, atticFoot, Math.min(30, bw * 0.25), atticHeight, false);
+        if (culture.wallMaterial === 'timber' && v.rise > 65)
+          clip(gable, () => {
+            line(
+              c,
+              bx - 4,
+              fy - v.rise * 0.21,
+              faceRight + 4,
+              fy - v.rise * 0.21,
+              color(wood, -34),
+              5,
+            );
+            line(
+              c,
+              bx - 4,
+              fy - v.rise * 0.21,
+              faceRight + 4,
+              fy - v.rise * 0.21,
+              color(wood, 18),
+              1,
+            );
+            for (const side of [-1, 1])
+              line(
+                c,
+                ridge + side * bw * 0.25,
+                fy,
+                ridge + side * bw * 0.25,
+                fy - v.rise * 0.52,
+                color(wood, -29),
+                4,
+              );
+          });
+      }
       rect(c, bx - 7, fy, bw - east + 14, 5, dark);
       rect(c, bx - 7, fy, bw - east + 14, 1, color(wood, 26));
     } else {
-      // Cross-ridged side volumes leave a broad slope for genuinely projecting dormers.
-      roofPlane(
-        [
-          [bx - 8, top + 10],
-          [bx + bw + 4, top + 3],
-          [bx + bw + 7, ridgeY],
-          [bx - 8, ridgeY + 7],
-        ],
-        color(roof, -18),
-      );
-      roofPlane(
-        [
-          [bx - 8, ridgeY + 7],
-          [bx + bw + 7, ridgeY],
-          [bx + bw + 8, fy - 10],
-          [faceRight + 8, fy],
-          [bx - 8, fy],
-        ],
-        color(roof, 5),
-      );
-      // Hipped return facets and a raised cap make the ridge visibly recede in space.
-      roofPlane(
-        [
-          [bx - 8, ridgeY + 7],
-          [bx + 12, ridgeY + 1],
-          [bx + 3, fy],
-          [bx - 8, fy],
-        ],
-        color(roof, 26),
-      );
-      roofPlane(
-        [
-          [bx + bw - 16, ridgeY + 2],
-          [bx + bw + 7, ridgeY],
-          [bx + bw + 8, fy - 10],
-          [faceRight + 8, fy],
-        ],
-        color(roof, -32),
-      );
-      poly(
-        c,
-        [
-          [bx - 10, ridgeY + 6],
-          [bx + bw + 9, ridgeY - 1],
-          [bx + bw + 9, ridgeY + 5],
-          [bx - 10, ridgeY + 12],
-        ],
-        color(roof, -30),
-      );
-      line(c, bx - 10, ridgeY + 5, bx + bw + 9, ridgeY - 2, color(roof, 44), 3);
-      for (let px = bx + 3; px < bx + bw; px += 18)
-        rect(c, px, ridgeY + 4 - ((px - bx) / bw) * 7, 2, 6, color(roof, -11));
+      // A hipped roof has one receding ridge and four planar faces. Its front slope is
+      // a trapezoid, not a vertical rectangle with a decorative strip across the top.
+      const hip = Math.min(69, bw * 0.23),
+        rl = bx + hip,
+        rr = faceRight - hip * 0.7,
+        rearLeft = [bx - 6, top + 10],
+        rearRight = [bx + bw + 4, top + 5],
+        ridgeLeft = [rl, ridgeY],
+        ridgeRight = [rr, ridgeY - 5],
+        frontLeft = [bx - 9, fy],
+        frontRight = [faceRight + 9, fy];
+      roofPlane([rearLeft, rearRight, ridgeRight, ridgeLeft], color(roof, -21));
+      roofPlane([rearLeft, ridgeLeft, frontLeft], color(roof, 24));
+      roofPlane([ridgeRight, rearRight, [bx + bw + 8, fy - 15], frontRight], color(roof, -36));
+      roofPlane([ridgeLeft, ridgeRight, frontRight, frontLeft], color(roof, 3));
+      // Each hip edge joins the same ridge and front eave; the cap has a visible underside.
+      line(c, rl, ridgeY, bx - 9, fy, color(roof, 34), 3);
+      line(c, rr, ridgeY - 5, faceRight + 9, fy, color(roof, -8), 3);
+      line(c, rl, ridgeY, rr, ridgeY - 5, color(roof, -31), 7);
+      line(c, rl, ridgeY - 2, rr, ridgeY - 7, color(roof, 45), 3);
+      for (let px = rl + 8; px < rr; px += 18)
+        rect(c, px, ridgeY - ((px - rl) / Math.max(1, rr - rl)) * 5, 2, 5, color(roof, -12));
       poly(
         c,
         [
@@ -905,7 +910,7 @@ export function makeRegionalBuilding(
         rect(c, px, fy + 4, 1, 8, color(wood, 17));
       }
       if (kind !== 'storehouse' && kind !== 'workshop' && fy - ridgeY > 32) {
-        for (let dx = bx + 32; dx < faceRight - 18; dx += 79) {
+        for (let dx = bx + hip + 24; dx < faceRight - hip * 0.65 - 19; dx += 79) {
           if (Math.abs(dx - mid) < 38 && bw > 155) continue;
           const dy = ridgeY + (fy - ridgeY) * 0.62;
           poly(
@@ -1014,8 +1019,8 @@ export function makeRegionalBuilding(
   }
   const buildingFoot = front - g.raised;
   const monument = kind === 'church' || kind === 'hall',
-    centralWidth = Math.min(w * (monument ? 0.44 : 0.38), monument ? 184 : 116),
-    portalWidth = Math.max(kind === 'church' ? 88 : 68, centralWidth),
+    centralWidth = Math.min(w * (monument ? 0.42 : 0.43), monument ? 264 : 168),
+    portalWidth = Math.min(w - 20, Math.max(kind === 'church' ? 88 : 68, centralWidth)),
     portalLeft = mid - portalWidth / 2 + 6;
   if (g.glass) {
     drawVolume({
@@ -1067,7 +1072,10 @@ export function makeRegionalBuilding(
       foot: buildingFoot,
       top: back - 5,
       height: g.facade + 14,
-      rise: Math.max(32, g.rise),
+      rise:
+        advanced || g.rise === 0
+          ? Math.max(32, g.rise)
+          : Math.max(g.rise, (buildingFoot - g.facade - back) * 0.7),
       central: true,
       flat: advanced || g.rise === 0,
     });
@@ -1082,14 +1090,22 @@ export function makeRegionalBuilding(
       flat: advanced || g.rise === 0,
       gallery: g.gallery && !advanced,
     });
-    const ph = kind === 'inn' ? g.facade + 8 : kind === 'storehouse' ? 56 : g.facade - 1;
+    const ph = kind === 'inn' ? g.facade + 8 : kind === 'storehouse' ? 56 : g.facade - 1,
+      mainEave = buildingFoot - 7 - g.facade,
+      mainRidge = back + Math.max(18, (mainEave - back) * 0.22),
+      crossEave = buildingFoot - ph,
+      crossRise = Math.max(38, crossEave - mainRidge - 9),
+      crossDepth = Math.max(26, Math.min(46, (mainEave - back) * 0.24));
     drawVolume({
       left: portalLeft,
       width: portalWidth,
       foot: buildingFoot,
-      top: back + Math.max(32, (eave - back) * 0.46),
+      top:
+        advanced || g.rise === 0
+          ? back + Math.max(32, (eave - back) * 0.46)
+          : crossEave - crossDepth,
       height: ph,
-      rise: Math.max(24, g.rise * 0.8),
+      rise: advanced || g.rise === 0 ? Math.max(24, g.rise * 0.8) : crossRise,
       central: true,
       flat: advanced || g.rise === 0,
       windows: false,
