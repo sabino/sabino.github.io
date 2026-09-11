@@ -3,3 +3,5 @@ dist/
 .dream-loop/
 .DS_Store
 *.log
+.verso-server/
+.env.local
