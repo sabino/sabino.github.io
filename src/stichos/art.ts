@@ -2,7 +2,7 @@ import { random, deriveSeed } from '../procedural/random.ts';
 import type { Appearance, BuildingKind, PropKind, Terrain, Tile } from './types.ts';
 import { drawWeapon, weaponGenome } from './equipment.ts';
 import { drawArtifact } from './artifact-art.ts';
-import { humanoidGenome } from './humanoid-genome.ts';
+import { humanoidGenome, tailoringGenome } from './humanoid-genome.ts';
 import { drawLaborTool } from './labor-art.ts';
 import { drawPlant } from './botany.ts';
 import type { PlantKind } from './botany.ts';
@@ -1558,7 +1558,8 @@ function drawHumanoidParts(
 ) {
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
-  const anatomy = humanoidGenome(look.seed);
+  const anatomy = humanoidGenome(look.seed),
+    tailoring = tailoringGenome(look.seed);
   ctx.scale(scale * look.build * 1.28 * anatomy.width, scale * look.height * anatomy.height);
   const face = ((Math.round(heading) % 4) + 4) % 4;
   const side = face === 1 || face === 3,
@@ -1566,7 +1567,8 @@ function drawHumanoidParts(
   const step = moving ? Math.sin(phase) : 0,
     bob = moving ? Math.abs(Math.sin(phase * 2)) : 0;
   const cloak = color(look.coat, -9),
-    coat = look.coat;
+    coat = look.coat,
+    sleeve = tailoring.sleeve === 'underlayer' ? color(look.trousers, 28) : coat;
   const motion = actionMotion(action),
     strength = motion.strength;
   const handPose = (s: number, front: boolean) => {
@@ -1601,8 +1603,8 @@ function drawHumanoidParts(
       const hand = handPose(s, front);
       const elbowX = ax + (side ? east * 2 : s * 2),
         elbowY = (-25 - bob + hand.y) * 0.5 + 2;
-      line(ctx, ax, -25 - bob, elbowX, elbowY, color(coat, front ? 9 : -15), 3);
-      line(ctx, elbowX, elbowY, hand.x, hand.y, color(coat, front ? 14 : -8), 3);
+      line(ctx, ax, -25 - bob, elbowX, elbowY, color(sleeve, front ? 9 : -15), 3);
+      line(ctx, elbowX, elbowY, hand.x, hand.y, color(sleeve, front ? 14 : -8), 3);
       rect(ctx, hand.x - 1, hand.y - anatomy.cuff, 3, anatomy.cuff, color(look.trim, -10));
       rect(ctx, hand.x - 1, hand.y, 3, 3, look.skin);
       if (!front && motion.kind === 'heal') {
@@ -1622,7 +1624,7 @@ function drawHumanoidParts(
       -25 - bob,
       ax + (front ? attack * 5 : 0),
       -16 + sway + lift,
-      color(coat, front ? 9 : -15),
+      color(sleeve, front ? 9 : -15),
       3,
     );
     rect(ctx, ax, -15 + sway + lift, 3, 3, look.skin);
@@ -1687,16 +1689,17 @@ function drawHumanoidParts(
   }
   if (weaponBehindBody) heldArmAndItem();
   if (look.cloak) {
+    const hem = -28 + tailoring.capeLength;
     poly(
       ctx,
       [
         [-6, -28 - bob],
         [5, -28 - bob],
-        [8 + step, -7],
-        [3, -5],
-        [-1, -7],
-        [-6, -5],
-        [-8 - step, -8],
+        [8 + step, hem - 2],
+        [3, hem],
+        [0, hem - (tailoring.capeSplit ? 4 : 0)],
+        [-5, hem],
+        [-8 - step, hem - 2],
       ],
       color(cloak, -17),
     );
@@ -1705,50 +1708,128 @@ function drawHumanoidParts(
       [
         [-5, -27 - bob],
         [4, -27 - bob],
-        [6 + step, -8],
-        [1, -10],
-        [-5, -8],
+        [6 + step, hem - 3],
+        [1, hem - 2],
+        [-5, hem - 3],
       ],
       cloak,
     );
-    line(ctx, -4, -25 - bob, -6, -10, color(cloak, 17));
-    line(ctx, 1, -24, 3, -9, color(cloak, -12));
+    line(ctx, -4, -25 - bob, -6, hem - 4, color(cloak, 17));
+    line(ctx, 1, -24, 3, hem - 4, color(cloak, -12));
   }
   if (!motion.kind || weaponBehindBody) arm(-1, false);
+  const hem = tailoring.bottom,
+    width = anatomy.waist + tailoring.flare;
+  // A shirt remains visible through open coats and under sleeveless work garments.
+  poly(
+    ctx,
+    [
+      [-anatomy.shoulders, -27 - bob],
+      [anatomy.shoulders, -27 - bob],
+      [anatomy.waist, -14],
+      [-anatomy.waist, -14],
+    ],
+    color(look.trousers, 28),
+  );
   poly(
     ctx,
     [
       [-anatomy.shoulders, -27 - bob],
       [anatomy.shoulders, -27 - bob],
       [anatomy.waist, anatomy.beltY],
-      [anatomy.hem, anatomy.coatBottom - 1],
-      [2, anatomy.coatBottom],
-      [-anatomy.hem, anatomy.coatBottom - 1],
+      [width, hem - 1],
+      [tailoring.split, hem],
+      [0, hem - tailoring.split],
+      [-width, hem - 1],
       [-anatomy.waist, anatomy.beltY],
     ],
     coat,
   );
-  rect(ctx, -4, -25 - bob, 2, 13, color(coat, 17));
-  rect(ctx, 3, -25 - bob, 2, 12, color(coat, -18));
-  rect(ctx, -anatomy.waist, anatomy.beltY, anatomy.waist * 2 + 1, 2, '#2c3738');
-  rect(ctx, side ? east * 2 : 0, anatomy.beltY, 2, 2, '#d2b781');
+  line(ctx, -anatomy.shoulders + 1, -25 - bob, -width + 1, hem - 2, color(coat, 17));
+  line(ctx, anatomy.shoulders - 1, -25 - bob, width - 1, hem - 2, color(coat, -18));
   if (face !== 0) {
-    for (let i = 0; i < anatomy.buttons; i++)
-      rect(ctx, side ? east * 2 : 0, -23 + i * 2, 1, 1, color(look.trim, 28));
-    for (let i = 0; i < anatomy.pockets; i++) {
-      const px = (i ? -anatomy.pocketSide : anatomy.pocketSide) * (anatomy.waist - 1);
-      rect(ctx, px - 1, anatomy.beltY + 3, 3, 3, color(coat, -20));
-      rect(ctx, px - 1, anatomy.beltY + 3, 3, 1, color(coat, 20));
+    const axis = side ? east * 2 : 0;
+    if (tailoring.closure === 'open') {
+      poly(
+        ctx,
+        [
+          [axis - 2, -27 - bob],
+          [axis + 2, -27 - bob],
+          [axis + 2, hem],
+          [axis - 2, hem],
+        ],
+        color(look.trousers, 28),
+      );
+      line(ctx, axis - 3, -25 - bob, axis - 2, hem - 2, look.trim);
+      line(ctx, axis + 3, -25 - bob, axis + 2, hem - 2, color(look.trim, -12));
+      line(ctx, axis - 3, -26 - bob, axis - 1, -21, look.trim, 2);
+    } else if (tailoring.closure === 'wrap') {
+      line(ctx, -3, -26 - bob, 3, -17, look.trim, 2);
+      line(ctx, 3, -17, -1, hem - 2, color(coat, -12));
+    } else if (tailoring.closure === 'laces') {
+      rect(ctx, axis - 1, -25 - bob, 3, 7, color(coat, -28));
+      for (let i = 0; i < 3; i++)
+        line(ctx, axis - 1, -24 - bob + i * 2, axis + 1, -23 - bob + i * 2, look.trim);
+    } else {
+      line(ctx, axis, -25 - bob, axis, -14, color(coat, -13));
+      for (let i = 0; i < anatomy.buttons; i++)
+        rect(ctx, axis + tailoring.buttonSide, -23 + i * 2, 1, 1, color(look.trim, 28));
     }
-    if (anatomy.patch)
-      rect(ctx, -anatomy.pocketSide * 3 - 1, anatomy.coatBottom - 3, 2, 2, color(coat, 12));
-  } else line(ctx, anatomy.seam, -25 - bob, anatomy.seam, anatomy.coatBottom - 2, color(coat, -12));
-  if (face !== 0) {
-    line(ctx, -2, -25 - bob, 0, -17, look.trim);
-    line(ctx, 2, -25 - bob, 0, -17, color(look.trim, 20));
-    rect(ctx, 0, -22, 1, 1, '#e1d3a6');
-    if (anatomy.collar === 1) rect(ctx, -3, -27 - bob, 7, 2, color(look.trim, -12));
-    else if (anatomy.collar === 2) line(ctx, -4, -26 - bob, 1, -21, look.trim, 2);
+    if (tailoring.cut === 'apron') {
+      const fabric = color(look.trim, -12);
+      poly(
+        ctx,
+        [
+          [-3, -24 - bob],
+          [3, -24 - bob],
+          [3, -18],
+          [5, hem - 1],
+          [-5, hem - 1],
+          [-3, -18],
+        ],
+        fabric,
+      );
+      line(ctx, -4, -27 - bob, -2, -21, color(fabric, 18));
+      line(ctx, 4, -27 - bob, 2, -21, color(fabric, 18));
+      rect(ctx, -3, -13, 6, 4, color(fabric, -22));
+      rect(ctx, -3, -13, 6, 1, color(fabric, 18));
+    }
+    if (tailoring.cut !== 'apron')
+      for (let i = 0; i < tailoring.pockets; i++) {
+        const px = (i ? -anatomy.pocketSide : anatomy.pocketSide) * (anatomy.waist - 1);
+        const py = Math.min(-14, hem - 4);
+        rect(ctx, px - 1, py, 3, 3, color(coat, -20));
+        rect(ctx, px - 1, py, 3, 1, color(coat, 20));
+      }
+    if (tailoring.embroidery)
+      line(ctx, -width + 1, hem - 2, width - 1, hem - 2, color(look.trim, -8));
+    if (tailoring.collar === 1) rect(ctx, -3, -27 - bob, 7, 2, color(look.trim, -12));
+    else if (tailoring.collar === 2) line(ctx, -4, -26 - bob, 1, -22, look.trim, 2);
+    else if (tailoring.collar === 3) {
+      rect(ctx, -4, -27 - bob, 3, 3, color(coat, 23));
+      rect(ctx, 2, -27 - bob, 3, 3, color(coat, 12));
+    }
+  } else {
+    line(ctx, anatomy.seam, -25 - bob, anatomy.seam, hem - 2, color(coat, -12));
+    if (tailoring.cut === 'apron')
+      line(ctx, -anatomy.shoulders + 1, -25 - bob, anatomy.waist - 1, -17, look.trim);
+  }
+  if (tailoring.fastening === 'belt') {
+    rect(ctx, -anatomy.waist, anatomy.beltY, anatomy.waist * 2 + 1, 2, '#2c3738');
+    if (face !== 0) rect(ctx, side ? east * 2 : 0, anatomy.beltY, 2, 2, '#d2b781');
+  } else if (tailoring.fastening === 'sash') {
+    line(ctx, -anatomy.waist, anatomy.beltY + 1, anatomy.waist, anatomy.beltY - 1, look.trim, 2);
+    if (face !== 0) {
+      line(
+        ctx,
+        anatomy.waist - 1,
+        anatomy.beltY,
+        anatomy.waist + 1,
+        Math.min(-4, hem),
+        color(look.trim, 12),
+        2,
+      );
+    }
   }
   // Neck, skull silhouette, hair/hood and a readable face at only a few pixels.
   rect(ctx, -2, -29 - bob, 4, 3, color(look.skin, -15));

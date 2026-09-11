@@ -34,3 +34,62 @@ export function humanoidGenome(seed: number) {
     seam: r() < 0.5 ? -1 : 1,
   };
 }
+
+export type GarmentCut = 'open-coat' | 'tunic' | 'robe' | 'apron' | 'vest' | 'jacket';
+export type GarmentClosure = 'open' | 'buttons' | 'laces' | 'wrap';
+export type WaistFastening = 'none' | 'belt' | 'sash';
+
+/** Tailoring is a correlated construction grammar, not a mandatory coat and belt.
+ * Anatomy and palette stay independent, so player color customization is preserved.
+ */
+export function tailoringGenome(seed: number) {
+  const r = random(deriveSeed(seed, 'stichos-tailoring-v2'));
+  const cut = (['open-coat', 'tunic', 'robe', 'apron', 'vest', 'jacket'] as const)[
+    Math.floor(r() * 6)
+  ];
+  const closure: GarmentClosure =
+    cut === 'open-coat' || cut === 'vest'
+      ? 'open'
+      : cut === 'robe'
+        ? 'wrap'
+        : cut === 'tunic'
+          ? 'laces'
+          : 'buttons';
+  const choice = r();
+  const fastening: WaistFastening =
+    cut === 'robe'
+      ? choice < 0.72
+        ? 'sash'
+        : 'none'
+      : cut === 'apron' || cut === 'open-coat' || cut === 'vest'
+        ? 'none'
+        : choice < 0.25
+          ? 'belt'
+          : choice < 0.38
+            ? 'sash'
+            : 'none';
+  return {
+    cut,
+    closure,
+    fastening,
+    bottom:
+      cut === 'robe'
+        ? -3
+        : cut === 'open-coat'
+          ? -6
+          : cut === 'apron'
+            ? -7
+            : cut === 'tunic'
+              ? -9
+              : -13,
+    flare: cut === 'robe' ? 3 : cut === 'open-coat' ? 2.2 : cut === 'tunic' ? 1.5 : 0.65,
+    split: cut === 'open-coat' ? 3 : cut === 'tunic' ? 1 : 0,
+    collar: Math.floor(r() * 4),
+    pockets: cut === 'robe' ? 0 : cut === 'apron' ? 1 : Math.floor(r() * 3),
+    sleeve: cut === 'vest' || cut === 'apron' ? ('underlayer' as const) : ('outer' as const),
+    capeLength: 11 + Math.floor(r() * 13),
+    capeSplit: r() < 0.45,
+    embroidery: r() < 0.3,
+    buttonSide: r() < 0.5 ? -1 : 1,
+  };
+}
