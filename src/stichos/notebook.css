@@ -33,7 +33,7 @@
   border-radius: 7px 13px 11px 5px;
   border: 1px solid #72836a;
   background:
-    repeating-linear-gradient(94deg, #b6c59a08 0 1px, transparent 1px 4px),
+    radial-gradient(ellipse at 9% 4%, #a9c49a12, transparent 35%),
     linear-gradient(100deg, #2d4944, #183638 48%, #213d3b);
   box-shadow:
     inset 4px 0 6px #061d22,
@@ -314,30 +314,70 @@
   display: grid;
   grid-template-columns: 34% minmax(0, 1fr);
   background:
-    repeating-linear-gradient(103deg, #78654804 0 1px, transparent 1px 4px),
-    radial-gradient(ellipse at 2% 95%, #a28a4930, transparent 50%), #e7ddc2;
+    var(--s-paper-grain), radial-gradient(ellipse at 3% 96%, #99733c25, transparent 43%),
+    radial-gradient(ellipse at 75% 6%, #fff8e66b, transparent 37%),
+    radial-gradient(ellipse at 48% 57%, #69746709, transparent 25%), #ebe5d2;
   min-height: 0;
   overflow: hidden;
   border-radius: 9px 11px 0 0;
-  box-shadow: inset 0 1px #fff6dccc;
+  box-shadow:
+    inset 0 2px 3px #fff6dccc,
+    inset 0 5px 10px #ac91691b;
+  clip-path: polygon(
+    0 4px,
+    6% 1px,
+    15% 3px,
+    27% 1px,
+    34% 3px,
+    43% 0,
+    59% 2px,
+    76% 0,
+    88% 2px,
+    98% 1px,
+    calc(100% - 1px) 6px,
+    100% 24%,
+    calc(100% - 2px) 53%,
+    100% 79%,
+    calc(100% - 1px) 100%,
+    0 100%,
+    1px 71%,
+    0 48%,
+    2px 18%
+  );
 }
 .s-notebook-spread:not(.single-leaf)::before {
   content: '';
   position: absolute;
-  left: calc(34% - 15px);
+  left: calc(34% - 20px);
   top: 0;
   bottom: 0;
-  width: 30px;
+  width: 40px;
   z-index: 2;
   pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    #65533429 31%,
-    #483b2e80 47%,
-    #f8edcc 52%,
-    #ac95653d 66%,
-    transparent
+  background:
+    radial-gradient(ellipse at 48% 18%, #3e33232b, transparent 39%),
+    radial-gradient(ellipse at 47% 82%, #56412933, transparent 37%),
+    linear-gradient(
+      90deg,
+      transparent,
+      #65533429 27%,
+      #483b2e88 46%,
+      #f8edcc 52%,
+      #ac956549 67%,
+      transparent
+    );
+  clip-path: polygon(
+    14% 0,
+    90% 0,
+    83% 18%,
+    98% 41%,
+    84% 62%,
+    91% 81%,
+    78% 100%,
+    14% 100%,
+    23% 82%,
+    8% 59%,
+    20% 34%
   );
 }
 .s-notebook-spread:not(.single-leaf)::after {
@@ -365,7 +405,18 @@
   min-height: 0;
   padding: 24px 27px 18px 30px;
   border-right: 1px solid #9b8c6880;
-  background: linear-gradient(90deg, transparent 89%, #7f6a472b 97%, #f3e8cb 99%, #574a3236);
+  background:
+    radial-gradient(ellipse at 0 4%, #9a78492a, transparent 43%),
+    radial-gradient(ellipse at 100% 80%, #7f63351a, transparent 29%),
+    linear-gradient(
+      90deg,
+      #82664012,
+      transparent 5%,
+      transparent 86%,
+      #7f6a472b 97%,
+      #f3e8cb 99%,
+      #574a3236
+    );
 }
 .s-notebook-overline {
   color: #746146;
@@ -438,12 +489,15 @@
   position: absolute;
   right: -9px;
   bottom: -4px;
-  width: 133px;
-  height: 130px;
+  width: 166px;
+  height: 156px;
   margin: 0;
-  color: #354e4a;
-  opacity: 0.78;
-  transform: rotate(8deg);
+  color: #29443f;
+  opacity: 1;
+  transform: rotate(6deg);
+}
+.s-notebook-marginalia .s-botanical-study g {
+  stroke-width: 1.5;
 }
 .plain-type .s-notebook-contents nav button {
   font:
@@ -467,18 +521,23 @@
   scrollbar-width: thin;
   scrollbar-color: #9a9475 transparent;
   background:
-    linear-gradient(90deg, #77624113, transparent 35px),
-    radial-gradient(ellipse at 95% 0, #fff8de99, transparent 70%);
+    radial-gradient(ellipse at 100% 0, #9f7e492a, transparent 24%),
+    radial-gradient(ellipse at 100% 88%, #9d794b20, transparent 31%),
+    radial-gradient(ellipse at 0 68%, #72572f19, transparent 27%),
+    linear-gradient(90deg, #77624119, transparent 38px, transparent calc(100% - 15px), #997b4830),
+    radial-gradient(ellipse at 78% 25%, #fffbed55, transparent 62%);
 }
 .s-notebook-leaf::after {
   content: '';
   position: absolute;
-  top: 10px;
-  bottom: 10px;
-  right: 6px;
-  width: 3px;
-  border-right: 1px solid #aa94604f;
-  border-left: 1px solid #aa946035;
+  top: 6px;
+  bottom: 7px;
+  right: 5px;
+  width: 7px;
+  border-right: 1px solid #aa946059;
+  border-left: 1px solid #fff8df87;
+  background: linear-gradient(90deg, transparent, #9a805426 70%, #d3c3a55c);
+  clip-path: polygon(20% 0, 100% 0, 84% 22%, 100% 52%, 77% 72%, 95% 100%, 8% 100%, 23% 68%, 0 43%);
   pointer-events: none;
 }
 .s-notebook-leaf h3 {

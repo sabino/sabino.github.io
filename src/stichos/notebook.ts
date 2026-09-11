@@ -17,6 +17,31 @@ const esc = (s: unknown) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
 const paragraphs = (text: readonly string[]) => text.map((p) => `<p>${esc(p)}</p>`).join('');
+const paperTextures = new Map<number, string>();
+/** A small cached procedural fibre tile: no directional hatch or downloaded paper asset. */
+function paperTexture(seed: number) {
+  const key = seed >>> 0;
+  const previous = paperTextures.get(key);
+  if (previous) return previous;
+  let state = (key ^ 0x5b274ac1) >>> 0;
+  const sample = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+  const fibres: string[] = [];
+  for (let i = 0; i < 52; i++) {
+    const x = (sample() * 384).toFixed(1),
+      y = (sample() * 384).toFixed(1);
+    const dx = ((sample() - 0.5) * 5).toFixed(1),
+      dy = ((sample() - 0.5) * 3).toFixed(1);
+    fibres.push(`<path d="M${x} ${y}l${dx} ${dy}"/>`);
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="384" height="384" viewBox="0 0 384 384"><filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".71" numOctaves="3" stitchTiles="stitch" seed="${key % 65535}"/><feColorMatrix type="matrix" values="0 0 0 0 .26 0 0 0 0 .21 0 0 0 0 .13 .12 0 0 0 0"/></filter><path fill="#fff" filter="url(#grain)" d="M0 0h384v384H0z"/><g fill="none" stroke="#716548" stroke-width=".6" opacity=".12">${fibres.join('')}</g></svg>`;
+  const texture = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  paperTextures.set(key, texture);
+  while (paperTextures.size > 8) paperTextures.delete(paperTextures.keys().next().value!);
+  return texture;
+}
 
 /** An ink study from the same botanical construction parameters as world plants. */
 function botanicalStudy(seed: number, kind: PlantKind) {
@@ -91,5 +116,5 @@ export function notebookHtml(game: Stichos, view: NotebookView) {
   } else {
     page = `<article class="s-notebook-leaf s-threads-leaf"><span class="s-notebook-overline">3886 · the present investigation</span><h3 id="s-leaf-title" tabindex="-1">What I choose to change.</h3>${threads(game)}</article>`;
   }
-  return `<div class="s-notebook ${game.hasNotebook ? 'physical-book' : 'remembered-book'} ${view.plain ? 'plain-type' : ''}"><header class="s-notebook-header"><div><span class="s-chapter">${game.hasNotebook ? 'Theo Bishop · private notebook' : 'Theo Bishop · remembered pages'}</span><h2>Twenty stíchoi of silence.</h2><p>${game.hasNotebook ? '3866—3886 · Vespera, planet Stíchos' : 'The paper notebook remains with the priest. These words survive in your memory.'}</p></div><button id="s-journal-return" aria-label="${game.hasNotebook ? 'Close notebook cover' : 'Leave remembered pages'}">${game.hasNotebook ? 'Close book' : 'Return'} <kbd>J / Esc</kbd></button></header><nav class="s-notebook-tabs" aria-label="Notebook sections">${tabs.map(([id, text]) => `<button data-notebook-section="${id}" aria-pressed="${id === view.section}">${text}</button>`).join('')}</nav><div class="s-notebook-spread ${contents ? '' : 'single-leaf'}">${contents}${page}</div><footer class="s-notebook-footer"><div class="s-notebook-pages">${footer}</div><div class="s-notebook-tools"><button id="s-notebook-intro">Remember the beginning</button><button id="s-notebook-type" aria-label="Use plain type" aria-pressed="${view.plain}">${view.plain ? 'Handwriting' : 'Plain type'}</button></div></footer></div>`;
+  return `<div class="s-notebook ${game.hasNotebook ? 'physical-book' : 'remembered-book'} ${view.plain ? 'plain-type' : ''}" style="--s-paper-grain:${esc(paperTexture(game.world.seed))}"><header class="s-notebook-header"><div><span class="s-chapter">${game.hasNotebook ? 'Theo Bishop · private notebook' : 'Theo Bishop · remembered pages'}</span><h2>Twenty stíchoi of silence.</h2><p>${game.hasNotebook ? '3866—3886 · Vespera, planet Stíchos' : 'The paper notebook remains with the priest. These words survive in your memory.'}</p></div><button id="s-journal-return" aria-label="${game.hasNotebook ? 'Close notebook cover' : 'Leave remembered pages'}">${game.hasNotebook ? 'Close book' : 'Return'} <kbd>J / Esc</kbd></button></header><nav class="s-notebook-tabs" aria-label="Notebook sections">${tabs.map(([id, text]) => `<button data-notebook-section="${id}" aria-pressed="${id === view.section}">${text}</button>`).join('')}</nav><div class="s-notebook-spread ${contents ? '' : 'single-leaf'}">${contents}${page}</div><footer class="s-notebook-footer"><div class="s-notebook-pages">${footer}</div><div class="s-notebook-tools"><button id="s-notebook-intro">Remember the beginning</button><button id="s-notebook-type" aria-label="Use plain type" aria-pressed="${view.plain}">${view.plain ? 'Handwriting' : 'Plain type'}</button></div></footer></div>`;
 }
