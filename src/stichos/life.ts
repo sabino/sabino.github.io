@@ -16,6 +16,7 @@ import type { ForgeRecipe } from './forge';
 import { artifactIcon } from './artifact-art';
 import type { ArtifactGenome } from './artifacts';
 import type { LaborKind, ToolKind } from './labor';
+import { artifactToolKind } from './labor';
 import { toolIcon } from './labor-art';
 
 const esc = (value: unknown) =>
@@ -140,7 +141,7 @@ export function mountLife(
     const owned = game.artifacts.find((a) => a.design === g?.design);
     return `<p>Sketch a construction from branches, blades, chambers, roots and living tissues. Its shape and materials determine what it does.</p><form id="s-invention-form"><label>A phrase for this design<input id="s-invention-design" value="${esc(design)}" maxlength="64" autocomplete="off" spellcheck="false"></label><div class="s-invention-buttons"><button type="submit">Sketch this phrase</button><button type="button" id="s-invention-next">Next invention →</button></div></form>${
       g
-        ? `<article class="s-invention-sheet"><div class="s-invention-drawing"><img src="${artifactIcon(g.design, 200)}" alt="${esc(g.name)}"><small>${g.parts.length} connected parts · ${esc(g.delivery)}</small></div><div><span class="s-chapter">${esc(g.category)} · a new construction</span><h3>${esc(g.name)}</h3><p>${esc(g.description)}</p>${inventionStats(g)}<small>${g.delivery === 'consume' ? 'Using this consumes the physical object.' : 'Restorative effects apply only after a successful hit. This implement remains with its bearer.'}</small></div></article><details class="s-invention-parts"><summary>Read the construction</summary><div class="s-invention-part-list">${g.parts.map((part, i) => `<span><b>${i + 1}. ${esc(part.kind)}</b>${esc(part.material.name)}<small>${part.length.toFixed(1)} span · ${part.width.toFixed(1)} breadth<br>hardness ${part.material.hardness.toFixed(2)} · density ${part.material.density.toFixed(2)}</small></span>`).join('')}</div></details><p class="s-forge-price">${g.cost.coins} coins · ${Object.entries(
+        ? `<article class="s-invention-sheet"><div class="s-invention-drawing"><img src="${artifactIcon(g.design, 200)}" alt="${esc(g.name)}"><small>${g.parts.length} connected parts · ${esc(g.delivery)}</small></div><div><span class="s-chapter">${esc(g.category)} · a new construction</span><h3>${esc(g.name)}</h3><p>${esc(g.description)}</p>${inventionStats(g)}${artifactToolKind(g) ? `<p>Working purpose: ${artifactToolKind(g)} · requires repeated tool strokes.</p>` : ''}<small>${g.delivery === 'consume' ? 'Using this consumes the physical object.' : 'Restorative effects apply only after a successful hit. This implement remains with its bearer.'}</small></div></article><details class="s-invention-parts"><summary>Read the construction</summary><div class="s-invention-part-list">${g.parts.map((part, i) => `<span><b>${i + 1}. ${esc(part.kind)}</b>${esc(part.material.name)}<small>${part.length.toFixed(1)} span · ${part.width.toFixed(1)} breadth<br>hardness ${part.material.hardness.toFixed(2)} · density ${part.material.density.toFixed(2)}</small></span>`).join('')}</div></details><p class="s-forge-price">${g.cost.coins} coins · ${Object.entries(
             g.cost.items,
           )
             .map(([id, amount]) => `${amount} ${esc(id)}`)
@@ -148,7 +149,7 @@ export function mountLife(
               ' · ',
             )}</p>${owned ? `<button id="s-invention-act" class="s-primary" ${owned.equipped ? 'disabled' : ''}>${owned.equipped ? 'Held by this body' : g.delivery === 'consume' ? 'Use this invention' : 'Equip this invention'}</button>` : `<button id="s-invention-build" class="s-primary" ${preview.ok ? '' : 'disabled'}>Make this invention</button>`}`
         : ''
-    }<p id="s-invention-requirement">${esc(preview.message)}</p><p>New sketches use this world's seed and Theo's next invention number. You can also enter your own phrase. The same phrase reproduces the same construction; keep exploring new phrases and sketches.</p><h3>This body’s inventions · ${game.artifacts.length}</h3><div class="s-invention-owned">${game.artifacts.map((a) => `<article><button data-invention-inspect="${esc(a.design)}"><img src="${artifactIcon(a.design, 88)}" alt=""><strong>${esc(a.genome.name)}</strong><small>${esc(a.genome.delivery)}${a.equipped ? ' · equipped' : ''}</small></button><button data-invention-action="${esc(a.design)}" ${a.equipped ? 'disabled' : ''}>${a.equipped ? 'Equipped' : a.genome.delivery === 'consume' ? 'Use' : 'Equip'}</button><button data-invention-salvage="${esc(a.design)}">Salvage materials</button></article>`).join('') || '<p>No inventions in this body’s pack yet. Make one at a workbench when the materials are ready.</p>'}</div>`;
+    }<p id="s-invention-requirement">${esc(preview.message)}</p><p>New sketches use this world's seed and Theo's next invention number. You can also enter your own phrase. The same phrase reproduces the same construction; keep exploring new phrases and sketches.</p><h3>This body’s inventions · ${game.artifacts.length}</h3><div class="s-invention-owned">${game.artifacts.map((a) => `<article><button data-invention-inspect="${esc(a.design)}"><img src="${artifactIcon(a.design, 88)}" alt=""><strong>${esc(a.genome.name)}</strong><small>${esc(a.genome.delivery)}${a.equipped ? ' · equipped' : ''}</small></button><button data-invention-action="${esc(a.design)}" ${a.equipped ? 'disabled' : ''}>${a.equipped ? 'Equipped' : a.genome.delivery === 'consume' ? 'Use' : 'Equip'}</button>${a.toolKind ? `<p>${a.toolKind} · ${a.durability}/${a.maxDurability} condition</p><button data-invention-repair="${esc(a.design)}" ${a.durability === a.maxDurability ? 'disabled' : ''}>Repair · 4 coins + wood + ore</button>` : ''}<button data-invention-salvage="${esc(a.design)}">Salvage materials</button></article>`).join('') || '<p>No inventions in this body’s pack yet. Make one at a workbench when the materials are ready.</p>'}</div>`;
   }
   function estate() {
     const residence = game.estate.residence;
@@ -157,7 +158,7 @@ export function mountLife(
     )
       .map((kind) => {
         const tool = game.tools.find((t) => t.kind === kind);
-        return `<article>${tool ? `<img class="s-tool-preview" src="${toolIcon(tool.seed, kind, 88)}" alt="${esc(kind)}">` : ''}<small>${esc(kind)}${tool?.equipped ? ' · selected for work' : ''}</small><h4>${tool ? esc(tool.profile.name) : `No ${kind} in this body’s keeping`}</h4>${tool ? `<progress value="${tool.durability}" max="${tool.profile.maxDurability}" aria-label="${kind} condition"></progress><p>${tool.durability}/${tool.profile.maxDurability} condition<br>${tool.profile.staminaCost} energy per stroke · ${tool.profile.cooldown.toFixed(2)}s recovery</p><button data-tool-equip="${kind}" ${tool.equipped ? 'disabled' : ''}>${tool.equipped ? 'Selected' : 'Select tool'}</button><button data-tool-repair="${kind}">Repair at workbench</button>` : `<button data-tool-buy="${kind}">Obtain a working ${kind}</button>`}</article>`;
+        return `<article>${tool ? `<img class="s-tool-preview" src="${toolIcon(tool.seed, kind, 88)}" alt="${esc(kind)}">` : ''}<small>${esc(kind)}${tool?.equipped && !game.activeArtifact ? ' · selected for work' : ''}</small><h4>${tool ? esc(tool.profile.name) : `No ${kind} in this body’s keeping`}</h4>${tool ? `<progress value="${tool.durability}" max="${tool.profile.maxDurability}" aria-label="${kind} condition"></progress><p>${tool.durability}/${tool.profile.maxDurability} condition<br>${tool.profile.staminaCost} energy per stroke · ${tool.profile.cooldown.toFixed(2)}s recovery</p><button data-tool-equip="${kind}" ${tool.equipped && !game.activeArtifact ? 'disabled' : ''}>${tool.equipped && !game.activeArtifact ? 'Selected' : 'Select tool'}</button><button data-tool-repair="${kind}">Repair at workbench</button>` : `<button data-tool-buy="${kind}">Obtain a working ${kind}</button>`}</article>`;
       })
       .join(
         '',
@@ -322,6 +323,14 @@ export function mountLife(
       (button) =>
         (button.onclick = () => {
           design = button.dataset.inventionInspect!;
+          render();
+        }),
+    );
+    container.querySelectorAll<HTMLButtonElement>('[data-invention-repair]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          message = game.repairArtifact(b.dataset.inventionRepair!).message;
+          onChange();
           render();
         }),
     );
