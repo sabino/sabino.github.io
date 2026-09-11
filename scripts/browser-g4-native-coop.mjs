@@ -152,6 +152,8 @@ async function traveler(name, targetUrl = url, mobile = false) {
     await delay(100);
   };
   const click = async (selector) => {
+    await focus();
+    await delay(120);
     for (let attempt = 0; attempt < 12; attempt++) {
       const g = await read(
         `(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e||e.disabled)throw Error('Missing control '+${JSON.stringify(selector)});const r=e.getBoundingClientRect();let top=0,bottom=innerHeight,scroller=null;for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom);if(/auto|scroll/.test(s.overflowY)&&p.scrollHeight>p.clientHeight+1&&!scroller)scroller={x:b.x+b.width/2,y:b.y+b.height/2};}}const x=r.x+r.width/2,y=(Math.max(r.top,top)+Math.min(r.bottom,bottom))/2;if(r.bottom<=top||r.top>=bottom||!e.contains(document.elementFromPoint(x,y)))return{scroll:scroller??{x:innerWidth/2,y:innerHeight/2},delta:Math.max(-500,Math.min(500,(r.top+r.bottom)/2-(top+bottom)/2))};return{x,y};})()`,
@@ -217,13 +219,15 @@ async function traveler(name, targetUrl = url, mobile = false) {
   await page.send('Page.navigate', { url: targetUrl });
   await focus();
   await wait("window.stichos?.state.modal==='title'", 'title ready');
+  await read('document.fonts.ready.then(()=>true)');
+  await delay(350);
   c.build = await read(
     '({url:location.href,scripts:[...document.scripts].map(s=>s.src).filter(Boolean),assets:performance.getEntriesByType("resource").map(e=>e.name).filter(n=>n.includes("/assets/app-"))})',
   );
   return c;
 }
 
-async function accept(c, name) {
+async function accept(c, name, allowConnectionFailure = false) {
   await c.wait("window.stichos.state.modal==='creation'", 'creation', 40000);
   if (c.mobile) await c.click('[data-creation-page=look]');
   await c.fill('#v-create-name', name);
@@ -232,7 +236,7 @@ async function accept(c, name) {
   await c.wait('window.stichos.state.transfer', 'arrival');
   await c.click('#s-skip');
   await c.wait(
-    "window.stichos.state.modal===''&&!window.stichos.state.transfer",
+    `!window.stichos.state.transfer&&(window.stichos.state.modal===''${allowConnectionFailure ? "||window.stichos.state.modal==='together'" : ''})`,
     'arrival complete',
   );
 }
@@ -254,12 +258,40 @@ try {
   await host.wait("!!document.querySelector('#s-room-invitation')", 'invitation');
   const link = await host.read("document.querySelector('#s-room-invitation').value"),
     room = (await host.state()).multiplayer.room;
-  assert.equal(new URL(link).searchParams.get('g'), '4');
-  assert.equal(new URL(link).searchParams.get('planet'), '8');
+  const address = new URL(link).searchParams.get('join');
+  assert.match(address, new RegExp(`^V4-8-${room}-[A-Z0-9]{4}$`));
+  assert.equal(new URL(link).searchParams.size, 1);
+  const offline = await traveler('offline-address');
+  await offline.page.send('Network.emulateNetworkConditions', {
+    offline: true,
+    latency: 0,
+    downloadThroughput: 0,
+    uploadThroughput: 0,
+  });
+  await offline.fill('#v-title-code', address);
+  await offline.click('#v-title-room button[type=submit]');
+  await offline.wait(
+    "window.stichos.state.modal==='creation'",
+    'complete room code resolves planet with networking disabled',
+  );
+  assert.match(await offline.read('document.querySelector("#s-modal").textContent'), /life|Life/);
+  // No life has been accepted and no host lookup was needed to show the planet.
+  await offline.shot('offline-address-creation');
+  await offline.page.send('Network.emulateNetworkConditions', {
+    offline: false,
+    latency: 0,
+    downloadThroughput: -1,
+    uploadThroughput: -1,
+  });
+  pass('complete code selects the planet offline', address);
   await host.shot('host-qr');
   await host.click('#s-room-return');
   const friend = await traveler('friend', link);
   await friend.click('#v-join-invite');
+  if ((await friend.state()).modal === 'title') {
+    await delay(350);
+    await friend.click('#v-join-invite');
+  }
   await accept(friend, 'Beryl Wayfarer');
   await friend.wait(
     "window.stichos.state.multiplayer.status==='online'",
@@ -268,7 +300,7 @@ try {
   );
   await host.wait('window.stichos.state.multiplayer.peers.length===1', 'host sees friend');
   const mobile = await traveler('mobile', url, true);
-  await mobile.fill('#v-title-code', room);
+  await mobile.fill('#v-title-code', address);
   await mobile.click('#v-title-room button[type=submit]');
   await accept(mobile, 'Cedar Signalkeeper');
   await mobile.wait(
@@ -282,6 +314,23 @@ try {
   assert.equal(new Set(states.map((s) => s.browserIdentity)).size, 3);
   for (const s of states) assert.equal(s.player.appearance.technology, 3);
   for (const c of [host, friend, mobile]) await c.shot(c.name + '-world');
+  await host.click('#s-together');
+  await host.click('#s-room-leave');
+  await host.wait("window.stichos.state.multiplayer.status==='offline'", 'host closes room');
+  const absent = await traveler('absent-host', link);
+  await absent.click('#v-join-invite');
+  if ((await absent.state()).modal === 'title') {
+    await delay(350);
+    await absent.click('#v-join-invite');
+  }
+  await accept(absent, 'Delta Returner', true);
+  await absent.wait(
+    "!!document.querySelector('#v-room-failure')?.textContent.includes('host is not online')",
+    'specific persistent host-offline error',
+    40000,
+  );
+  await absent.shot('absent-host-error');
+  pass('unavailable host reports connection failure, not missing planet');
   fs.writeFileSync(
     path.join(out, 'results.json'),
     JSON.stringify(

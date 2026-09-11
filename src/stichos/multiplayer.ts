@@ -1,4 +1,5 @@
 import type { RoomTransport } from './peer-transport';
+import { PEER_CONNECT_TIMEOUT, peerFailure, type PeerNetworkDiagnostic } from './peer-network.ts';
 import type { SharedCombatFrame } from './shared-combat';
 import type { SharedCombatProgression } from './shared-combat';
 import { MULTIPLAYER_PROTOCOL } from './multiplayer-protocol.ts';
@@ -41,6 +42,9 @@ export interface RoomIdentity {
 }
 export class MultiplayerConnection {
   private socket: RoomTransport | WebSocket | null = null;
+  onNetworkChange: () => void = () => {};
+  networkDiagnostic: Readonly<PeerNetworkDiagnostic> | null = null;
+  lastError = '';
   private serial = 0;
   private epoch = 0;
   private pending = new Map<
@@ -122,6 +126,8 @@ export class MultiplayerConnection {
     this.endpoint = peerHosted ? 'peer:' : url.href;
     this.reconnectIdentity = identity;
     this.lastCombatAck = 0;
+    this.lastError = '';
+    this.networkDiagnostic = null;
     this.status = 'connecting';
     this.onChange();
     const pinned = room ? (await loadSavedRoom(room))?.checkpoint : undefined;
@@ -137,18 +143,26 @@ export class MultiplayerConnection {
         : new WebSocket(url);
       this.socket = socket;
       let welcomed = false;
+      const diagnostic = () => (socket as RoomTransport).diagnostic;
+      const failureReason = (fallback: string) => diagnostic()?.error?.reason ?? fallback;
+      if (peerHosted)
+        (socket as RoomTransport).onstatuschange = () => {
+          if (epoch !== this.epoch) return;
+          this.networkDiagnostic = diagnostic() ?? null;
+          if (this.networkDiagnostic?.error) this.lastError = this.networkDiagnostic.error.reason;
+          this.onNetworkChange();
+        };
       const timeout = setTimeout(
         () => {
-          socket.close();
-          reject(
-            Error(
-              peerHosted
-                ? 'The browser room could not connect. The host must keep the game open; some networks require a relay or game server.'
-                : 'The game server did not answer.',
-            ),
+          this.lastError = failureReason(
+            peerHosted && diagnostic()
+              ? peerFailure('timeout', diagnostic()!).reason
+              : 'The game server did not answer.',
           );
+          reject(Error(this.lastError));
+          socket.close();
         },
-        peerHosted ? 20000 : 10000,
+        peerHosted ? PEER_CONNECT_TIMEOUT + 5000 : 10000,
       );
       const challenge = [...crypto.getRandomValues(new Uint8Array(32))]
         .map((b) => b.toString(16).padStart(2, '0'))
@@ -395,14 +409,13 @@ export class MultiplayerConnection {
       };
       socket.onerror = () => {
         clearTimeout(timeout);
-        if (!welcomed)
-          reject(
-            Error(
-              peerHosted
-                ? 'Could not reach that browser room. Check its code and keep the host’s game open.'
-                : 'Cannot reach the game server.',
-            ),
-          );
+        this.lastError = failureReason(
+          peerHosted
+            ? 'Could not reach that browser room. Keep the host’s game open and retry.'
+            : 'Cannot reach the game server.',
+        );
+        if (!welcomed) reject(Error(this.lastError));
+        socket.close();
       };
       socket.onclose = () => {
         clearTimeout(timeout);
@@ -416,7 +429,10 @@ export class MultiplayerConnection {
           this.onMessage(
             'The shared signal was interrupted. Reconnect from Together before gathering again.',
           );
-        else reject(Error('The connection closed before joining the room.'));
+        else {
+          this.lastError ||= failureReason('The connection closed before joining the room.');
+          reject(Error(this.lastError));
+        }
       };
     });
   }
@@ -458,10 +474,13 @@ export class MultiplayerConnection {
     this.epoch++;
     this.socket?.close();
     this.socket = null;
+    this.networkDiagnostic = null;
+    this.onNetworkChange();
     this.cancelClaims();
     this.peerRecords.clear();
     this.status = 'offline';
     if (forget) {
+      this.lastError = '';
       this.room = '';
       this.peerId = '';
       this.resumeToken = '';
@@ -589,12 +608,25 @@ export async function discoverRoom(endpoint: string, room: string): Promise<Room
       else resolve(info!);
     };
     const timeout = setTimeout(
-      () => finish(Error('That world is not currently reachable.')),
-      15000,
+      () =>
+        finish(
+          Error(
+            (socket as RoomTransport).diagnostic
+              ? peerFailure('timeout', (socket as RoomTransport).diagnostic!).reason
+              : 'The world node did not answer.',
+          ),
+        ),
+      peerHosted ? PEER_CONNECT_TIMEOUT + 5000 : 15000,
     );
     socket.onopen = () =>
       socket.send(JSON.stringify({ type: 'hello', room, protocol: MULTIPLAYER_PROTOCOL }));
-    socket.onerror = () => finish(Error('That world is not currently reachable.'));
+    socket.onerror = () =>
+      finish(
+        Error(
+          (socket as RoomTransport).diagnostic?.error?.reason ??
+            'The world node could not be reached.',
+        ),
+      );
     socket.onclose = () => finish(Error('World discovery closed before answering.'));
     socket.onmessage = (event: { data: unknown }) => {
       if (typeof event.data !== 'string' || event.data.length > 8192) return;

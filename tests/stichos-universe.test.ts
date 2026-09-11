@@ -6,6 +6,10 @@ import {
   sectorPlanets,
   readRoomLink,
   roomLink,
+  roomAddress,
+  readRoomAddress,
+  readRoomInput,
+  roomTitle,
   validRoomCode,
   STICHOS_SEED,
 } from '../src/stichos/universe.ts';
@@ -61,4 +65,30 @@ test('public planet frequencies rendezvous deterministically without sharing roo
   assert.notEqual(publicRoomCode(3886), publicRoomCode(3887));
   for (const seed of [0, 3886, 4294967295])
     assert.equal(validRoomCode(publicRoomCode(seed)), publicRoomCode(seed));
+});
+
+test('complete room addresses decode a planet offline, survive sharing and detect typos', () => {
+  for (const seed of [0, 8, 3886, 4294967295])
+    for (const generation of [1, 2, 3, 4] as const) {
+      const invite = { seed, generation, room: 'ABCDEF1234567890', endpoint: 'peer:' };
+      const code = roomAddress(invite);
+      assert.deepEqual(readRoomAddress(code.toLowerCase()), invite);
+      assert.deepEqual(readRoomInput(code), invite);
+      const link = roomLink('https://sabino.pro/games/verso/', invite);
+      assert.equal(new URL(link).searchParams.size, 1);
+      assert.deepEqual(readRoomInput(link), invite);
+      for (let i = 0; i < code.length; i++) {
+        if (code[i] === '-') continue;
+        const changed = code.slice(0, i) + (code[i] === 'A' ? 'B' : 'A') + code.slice(i + 1);
+        assert.equal(readRoomAddress(changed), null, changed);
+      }
+    }
+  assert.equal(readRoomAddress('ABCDEF1234'), null);
+  assert.equal(roomTitle('ABCDEF1234'), roomTitle('abcdef1234'));
+});
+
+test('old invitation URLs remain valid and a corrupt new address never falls back to other query values', () => {
+  const old = 'https://sabino.pro/games/verso/?room=ABCD&planet=8&g=4';
+  assert.deepEqual(readRoomLink(old), { room: 'ABCD', seed: 8, generation: 4, endpoint: 'peer:' });
+  assert.equal(readRoomLink(old + '&join=broken'), null);
 });

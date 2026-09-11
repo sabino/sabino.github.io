@@ -1280,3 +1280,21 @@ button[aria-selected='true'] {
 #s-world {
   filter: contrast(1.14) saturate(1.16);
 }
+
+/* A complete address wraps as text without widening the room on a phone. */
+.v-room-code {
+  font-size: clamp(14px, 2.2vw, 22px);
+  overflow-wrap: anywhere;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+}
+.v-room-error {
+  border: 1px solid #9c695d;
+  background: #352b2b;
+  color: #f2c9b4;
+  padding: 12px;
+  line-height: 1.5;
+}
+.v-room-error[hidden] {
+  display: none;
+}

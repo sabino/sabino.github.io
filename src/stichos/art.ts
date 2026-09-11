@@ -592,18 +592,22 @@ export function makeCivilBuilding(
 /** Bounded, reusable pixel modules. No full landscape or complete character image is loaded. */
 export class StichosArt {
   private cache = new Map<string, Sprite>();
+  private groundCache = new Map<string, Sprite>();
   private get(key: string, make: () => Sprite): Sprite {
-    const found = this.cache.get(key);
+    // Ground already lives in the renderer’s chunk surfaces. Its many unique tile
+    // sprites must never evict the visible plants and props on a chunk boundary.
+    const cache = /^(regional-ground|ground):/.test(key) ? this.groundCache : this.cache;
+    const found = cache.get(key);
     if (found) {
-      this.cache.delete(key);
-      this.cache.set(key, found);
+      cache.delete(key);
+      cache.set(key, found);
       return found;
     }
     const result = make();
-    this.cache.set(key, result);
+    cache.set(key, result);
     // A dense 1600px view at minimum zoom can contain 480 distinct plants/trees.
     // Keep a whole visible set resident so full-seed art never regenerates each frame.
-    while (this.cache.size > 768) this.cache.delete(this.cache.keys().next().value!);
+    while (cache.size > 768) cache.delete(cache.keys().next().value!);
     return result;
   }
   get cacheSize() {

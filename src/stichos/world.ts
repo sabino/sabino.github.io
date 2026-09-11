@@ -133,6 +133,8 @@ export class InfiniteWorld {
   readonly civilization?: CivilizationProfile;
   private cache = new Map<string, Chunk>();
   private lattice = new Map<string, number>();
+  private noiseCorners = new Map<string, { ix: number; iy: number; values: number[] }>();
+  private townCache = new Map<string, TownLayout>();
   private vaultCache = new Map<string, PlacedVault>();
   constructor(seed: number, generation: WorldGeneration = 3) {
     if (generation !== 1 && generation !== 2 && generation !== 3 && generation !== 4)
@@ -185,9 +187,18 @@ export class InfiniteWorld {
       if (this.lattice.size > 8192) this.lattice.delete(this.lattice.keys().next().value!);
       return sample;
     };
+    // Nearby tiles repeatedly sample the same four corners of each noise field.
+    // Cache the values only; preserve interpolation order and every generated bit.
+    let corners = this.noiseCorners.get(address);
+    if (!corners || corners.ix !== ix || corners.iy !== iy) {
+      corners = { ix, iy, values: [value(0, 0), value(1, 0), value(0, 1), value(1, 1)] };
+      this.noiseCorners.set(address, corners);
+      if (this.noiseCorners.size > 64)
+        this.noiseCorners.delete(this.noiseCorners.keys().next().value!);
+    }
     return mix(
-      mix(value(0, 0), value(1, 0), smooth(px - ix)),
-      mix(value(0, 1), value(1, 1), smooth(px - ix)),
+      mix(corners.values[0], corners.values[1], smooth(px - ix)),
+      mix(corners.values[2], corners.values[3], smooth(px - ix)),
       smooth(py - iy),
     );
   }
@@ -426,6 +437,15 @@ export class InfiniteWorld {
     return { settlement, buildings };
   }
   private townV3(gx: number, gy: number): TownLayout {
+    const id = key(gx, gy);
+    const cached = this.townCache.get(id);
+    if (cached) return cached;
+    const layout = this.buildTownV3(gx, gy);
+    this.townCache.set(id, layout);
+    if (this.townCache.size > 64) this.townCache.delete(this.townCache.keys().next().value!);
+    return layout;
+  }
+  private buildTownV3(gx: number, gy: number): TownLayout {
     const origin = gx === 0 && gy === 0;
     const seed = deriveSeed(this.seed, origin ? 'settlement' : 'settlement-v3', gx, gy),
       rng = random(seed);

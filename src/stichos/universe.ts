@@ -83,23 +83,72 @@ export function validRoomCode(raw: string) {
   const code = raw.trim().toUpperCase();
   return /^[A-Z0-9]{4,16}$/.test(code) ? code : null;
 }
+/** A complete browser-room address: generator, planet, room and typo checksum.
+ * Decoding is local; reaching the host is a separate step. Legacy bare IDs still work.
+ */
+function addressChecksum(value: string) {
+  let hash = 0x811c9dc5;
+  for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193);
+  return (hash >>> 0).toString(36).toUpperCase().padStart(7, '0').slice(-4);
+}
+export function roomAddress(invite: PlanetAddress & { room: string }) {
+  const room = validRoomCode(invite.room);
+  if (
+    !room ||
+    !Number.isInteger(invite.seed) ||
+    invite.seed < 0 ||
+    invite.seed > 0xffffffff ||
+    ![1, 2, 3, 4].includes(invite.generation)
+  )
+    throw Error('Invalid room address.');
+  const body = `V${invite.generation}-${invite.seed.toString(36).toUpperCase()}-${room}`;
+  return `${body}-${addressChecksum(body)}`;
+}
+export function readRoomAddress(raw: string): RoomInvitation | null {
+  const code = raw.trim().toUpperCase();
+  const match = /^V([1-4])-([A-Z0-9]{1,7})-([A-Z0-9]{4,16})-([A-Z0-9]{4})$/.exec(code);
+  if (!match || addressChecksum(code.slice(0, -5)) !== match[4]) return null;
+  const seed = parseInt(match[2], 36);
+  if (seed > 0xffffffff || seed.toString(36).toUpperCase() !== match[2]) return null;
+  return { seed, generation: Number(match[1]) as Geography, room: match[3], endpoint: 'peer:' };
+}
+/** A readable display name; the complete code remains the unambiguous address. */
+export function roomTitle(room: string) {
+  const value = parseInt(addressChecksum(room.toUpperCase()), 36);
+  const adjectives = ['Amber', 'Silver', 'Copper', 'Jade', 'Velvet', 'Azure', 'Silent', 'Golden'];
+  const places = [
+    'Harbor',
+    'Orchard',
+    'Haven',
+    'Lantern',
+    'Workshop',
+    'Garden',
+    'Observatory',
+    'Crossing',
+  ];
+  return `${adjectives[value % 8]} ${places[(value >>> 3) % 8]}`;
+}
+export function readRoomInput(raw: string): RoomInvitation | null {
+  return readRoomAddress(raw) ?? readRoomLink(raw);
+}
 export function roomLink(base: string, invite: RoomInvitation) {
   const url = new URL(base);
   url.search = '';
   url.hash = '';
-  url.searchParams.set('room', invite.room);
-  url.searchParams.set('planet', String(invite.seed >>> 0));
-  url.searchParams.set('g', String(invite.generation));
+  url.searchParams.set('join', roomAddress(invite));
   if (invite.endpoint !== 'peer:') url.searchParams.set('server', invite.endpoint);
   return url.href;
 }
 export function readRoomLink(raw: string): RoomInvitation | null {
   try {
-    const url = new URL(raw),
-      room = validRoomCode(url.searchParams.get('room') || '');
-    const seedText = url.searchParams.get('planet'),
+    const url = new URL(raw);
+    const packed = url.searchParams.get('join');
+    const decoded = packed ? readRoomAddress(packed) : null;
+    if (packed && !decoded) return null;
+    const room = decoded?.room ?? validRoomCode(url.searchParams.get('room') || '');
+    const seedText = decoded ? String(decoded.seed) : url.searchParams.get('planet'),
       seed = Number(seedText),
-      generation = Number(url.searchParams.get('g') || 3);
+      generation = decoded?.generation ?? Number(url.searchParams.get('g') || 3);
     const endpoint = url.searchParams.get('server') || 'peer:';
     if (
       !room ||
