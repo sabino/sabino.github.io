@@ -1,0 +1,15 @@
+# Deployment template; replace the domain and absolute dist path before use.
+# The Node backend remains a separate process. No keys belong in this file.
+game.example.com {
+    encode zstd gzip
+
+    @backend path /api/store/* /ws /health
+    handle @backend {
+        reverse_proxy 127.0.0.1:4175
+    }
+
+    handle {
+        root * /srv/verso/dist
+        file_server
+    }
+}

@@ -10,6 +10,16 @@ Copy [server/.env.example](../../server/.env.example) to a private `.env.local` 
 
 To activate a configured test store, explicitly set `VERSO_PAYMENTS_ENABLED=true` and start the server with Node’s `--env-file=.env.local` option. Register or locally forward Stripe events to `/api/store/webhook`: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `charge.refunded`. Complete a test-mode Checkout and verify its webhook before considering live activation. A live key additionally requires an HTTPS public origin. This document does not claim that production billing has been activated or verified.
 
+From the repository directory, the configured backend command is:
+
+```sh
+node --env-file=.env.local --experimental-strip-types server/index.mjs
+```
+
+Use the origin where the player actually opens the game. The example selects the production preview, `http://localhost:4174`; changing ports also changes the browser's game-save origin. Checkout return addresses are derived from this configured URL.
+
+For public HTTPS hosting, [server/Caddyfile.example](../../server/Caddyfile.example) is a reviewable deployment template: static `dist/` files, `/api/store/*` HTTP requests and `/ws` WebSockets share one domain. Replace its domain and absolute file root, set `VERSO_PUBLIC_ORIGIN=https://YOUR-DOMAIN`, and bind the Node backend to loopback with `HOST=127.0.0.1` when it runs behind this proxy. The browser uses same-origin store requests and WSS on HTTPS. Caddy supports WebSocket upgrades through [reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy); mutually exclusive [handle routes](https://caddyserver.com/docs/caddyfile/directives/handle) keep API requests separate from static files. The template has not been deployed, and no public domain or certificate has been provisioned by this work.
+
 ## Ownership and persistence
 
 An opaque, HttpOnly, SameSite wallet cookie identifies this browser; its credential is hashed in the server ledger. A separate CSRF token protects checkout and recovery requests. Purchased entitlements come from this wallet, not from game-save data. Repeated checkout clicks reuse a pending session, and repeated webhook events grant no additional outfit. Full refunds revoke the matching style, including refunds received before a delayed completion event.
