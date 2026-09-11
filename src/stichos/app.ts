@@ -50,7 +50,10 @@ const peerEmotes = new Map<string, { text: string; until: number }>();
 let sharedActionPending = false;
 let multiplayerRoster = '';
 let roomName = 'Theo';
-let roomServer = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.hostname}:4175/ws`;
+let roomServer =
+  location.protocol === 'https:'
+    ? `wss://${location.host}/ws`
+    : `ws://${location.hostname}:4175/ws`;
 try {
   roomName = localStorage.getItem('verso.room.name') || 'Theo';
   roomServer = localStorage.getItem('verso.room.server') || roomServer;
@@ -864,6 +867,18 @@ function lifeMenu() {
   });
   el('s-life-return').onclick = closeModal;
 }
+function endingMenu() {
+  const ending = game.endingSummary;
+  if (!ending) return;
+  save();
+  openModal(
+    'ending',
+    `<div class="s-ending-mark" aria-hidden="true">◇</div><span class="s-chapter">Destino: Stíchos · A choice made awake</span><h2>${esc(ending.title)}</h2><p class="s-ending-prose">${esc(ending.text)}</p><p>For twenty stíchoi, I waited for permission to return. Today I answered for myself. Whatever waits beyond the signal, the people here are no longer a history I can stand outside.</p><p class="s-ending-signature">Theo Bishop · 3886</p><p>Your investigation is complete. Stíchos remains open: choose a profession, cultivate a home, take commissions, travel with friends, or visit a quiet shrine to enter another remembered, willing life.</p><div class="s-menu-buttons"><button id="s-ending-continue" class="s-primary">Keep living on Stíchos</button><button id="s-ending-life">Choose my next calling</button><button id="s-ending-journal">Write the next page</button></div>`,
+  );
+  el('s-ending-continue').onclick = closeModal;
+  el('s-ending-life').onclick = lifeMenu;
+  el('s-ending-journal').onclick = () => journal('threads');
+}
 function roomIdentity() {
   return {
     seed: game.world.seed,
@@ -1247,6 +1262,7 @@ root.addEventListener('click', (event) => {
     save();
   }
   if (d.choice) {
+    const previousEnding = game.campaign.ending;
     const knownQuests = new Set(game.quests.map((q) => q.id));
     const sourceId = game.dialogue?.npcId;
     game.choose(d.choice);
@@ -1261,6 +1277,7 @@ root.addEventListener('click', (event) => {
     updateUI();
     drawMap();
     save();
+    if (!previousEnding && game.campaign.ending) endingMenu();
   }
 });
 el('s-life').onclick = lifeMenu;
@@ -1557,6 +1574,9 @@ Object.defineProperty(window, 'stichos', {
         storyStage: game.storyStage,
         campaign: game.campaign,
         campaignObjective: game.campaignObjective,
+        endingSummary: game.endingSummary,
+        freeLife: game.freeLife,
+        knownIdentities: game.knownIdentities,
         progression: game.progression,
         nearbyHomes: game.nearbyHomes,
         bodyId: game.bodyId,

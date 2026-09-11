@@ -166,3 +166,70 @@
     gap: 2px;
   }
 }
+.s-life-story {
+  background: linear-gradient(120deg, #34474066, #1a302c);
+  padding: 20px;
+  border: 1px solid #9a94625e;
+}
+.s-life-story h3 {
+  font:
+    26px Georgia,
+    serif;
+  color: #ded5b8;
+  margin: 10px 0;
+}
+.s-life-story progress {
+  width: 100%;
+  accent-color: #b5c698;
+}
+.s-life-story details {
+  margin-top: 16px;
+}
+.s-life-story summary {
+  cursor: pointer;
+  color: #c6bc99;
+}
+.s-ending-mark {
+  font:
+    80px Georgia,
+    serif;
+  color: #c6b885;
+  line-height: 1;
+  text-shadow: 0 0 25px #90c2ad55;
+  margin-bottom: 24px;
+}
+.s-window .s-ending-prose {
+  font:
+    22px/1.7 Georgia,
+    serif;
+  color: #dfd7be;
+}
+.s-window .s-ending-signature {
+  font:
+    28px 'Theo Hand',
+    cursive;
+  color: #c6b684;
+  text-align: right;
+}
+.s-ending-mark {
+  animation: s-ending-glow 3s ease-in-out infinite alternate;
+}
+@keyframes s-ending-glow {
+  to {
+    text-shadow: 0 0 38px #90c2ad99;
+    opacity: 0.7;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .s-ending-mark {
+    animation: none;
+  }
+}
+.s-furniture-preview {
+  display: block;
+  image-rendering: pixelated;
+  width: 112px;
+  height: 100px;
+  object-fit: contain;
+  margin: 0 auto 8px;
+}

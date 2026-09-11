@@ -1,10 +1,10 @@
-import { MULTIPLAYER_PROTOCOL } from './multiplayer-protocol';
+import { MULTIPLAYER_PROTOCOL } from './multiplayer-protocol.ts';
 import type {
   ClientMessage,
   ServerMessage,
   Peer,
   MultiplayerGesture,
-} from './multiplayer-protocol';
+} from './multiplayer-protocol.ts';
 import type { Appearance, Point } from './types';
 import type { WorldGeneration } from './world';
 
@@ -210,7 +210,7 @@ export class MultiplayerConnection {
     });
   }
   claim(propId: string, kind: 'gather' | 'loot', point: Point) {
-    return this.request({ type: 'claim', requestId: '', propId, kind, ...point });
+    return this.request({ type: 'claim', requestId: '', propId, kind, x: point.x, y: point.y });
   }
   door(propId: string, open: boolean) {
     return this.request({ type: 'door', requestId: '', propId, open });

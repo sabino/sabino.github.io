@@ -25,11 +25,12 @@ export const PREMIUM_SKINS = Object.freeze([
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
 const cookieName = 'verso_wallet';
-const safeEqual = (a, b) =>
-  typeof a === 'string' &&
-  typeof b === 'string' &&
-  a.length === b.length &&
-  timingSafeEqual(Buffer.from(a), Buffer.from(b));
+const safeEqual = (a, b) => {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const left = Buffer.from(a),
+    right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+};
 
 /** Stripe signs the exact raw body, not a parsed/re-serialized JSON object. */
 export function verifyStripeSignature(raw, header, signingSecret, now = Date.now()) {
@@ -92,6 +93,7 @@ export function createStoreHandler({
   }
   const file = path.join(storageDir, 'wallets.json');
   let database, loading;
+  let durableOwnership = new Map();
   let storageFailed = false;
   let queue = Promise.resolve();
   const prices = new Map(),
@@ -106,7 +108,11 @@ export function createStoreHandler({
           if (parsed.version !== 1 || !parsed.wallets || !Array.isArray(parsed.events))
             throw Error('Invalid purchase ledger.');
           parsed.refundedIntents ??= [];
-          return (database = parsed);
+          database = parsed;
+          durableOwnership = new Map(
+            Object.values(parsed.wallets).map((record) => [record.id, [...record.entitlements]]),
+          );
+          return database;
         } catch (error) {
           if (error.code !== 'ENOENT') throw error;
           return (database = { version: 1, wallets: {}, events: [], refundedIntents: [] });
@@ -119,6 +125,9 @@ export function createStoreHandler({
       await mkdir(storageDir, { recursive: true, mode: 0o700 });
       await writeFile(`${file}.tmp`, JSON.stringify(database), { mode: 0o600 });
       await rename(`${file}.tmp`, file);
+      durableOwnership = new Map(
+        Object.values(database.wallets).map((record) => [record.id, [...record.entitlements]]),
+      );
     } catch (error) {
       // Never expose an entitlement which failed to reach durable storage.
       // Restart after storage is repaired; the last atomic ledger remains intact.
@@ -136,6 +145,24 @@ export function createStoreHandler({
     queue = next.catch(() => {});
     return next;
   }
+  function setCredential(res, credential) {
+    res.setHeader(
+      'Set-Cookie',
+      `${cookieName}=${credential}; Path=/api/store; HttpOnly; SameSite=Lax; Max-Age=31536000${publicUrl.protocol === 'https:' ? '; Secure' : ''}`,
+    );
+  }
+  const walletView = (record) => ({
+    csrf: record.csrf,
+    entitlements: [...(durableOwnership.get(record.id) ?? [])],
+    recoveryConfigured: !!record.recoveryHash,
+  });
+  function limited(key, maximum = 8) {
+    const recent = (attempts.get(key) || []).filter((time) => now() - time < 60000);
+    if (recent.length >= maximum) return true;
+    attempts.set(key, [...recent, now()]);
+    while (attempts.size > 5000) attempts.delete(attempts.keys().next().value);
+    return false;
+  }
   async function wallet(req, res) {
     const token = req.headers.cookie
       ?.split(';')
@@ -149,10 +176,7 @@ export function createStoreHandler({
       const credential = secret();
       const record = { id: secret(), csrf: secret(), entitlements: [], orders: {} };
       db.wallets[hash(credential)] = record;
-      res.setHeader(
-        'Set-Cookie',
-        `${cookieName}=${credential}; Path=/api/store; HttpOnly; SameSite=Lax; Max-Age=31536000${publicUrl.protocol === 'https:' ? '; Secure' : ''}`,
-      );
+      setCredential(res, credential);
       return record;
     });
   }
@@ -383,7 +407,62 @@ export function createStoreHandler({
         reply(res, 200, { enabled, testMode: !live, skins: catalog });
       } else if (req.method === 'GET' && pathname === '/api/store/wallet') {
         const record = await wallet(req, res);
-        reply(res, 200, { csrf: record.csrf, entitlements: record.entitlements });
+        reply(res, 200, walletView(record));
+      } else if (
+        req.method === 'POST' &&
+        ['/api/store/recovery', '/api/store/recover'].includes(pathname)
+      ) {
+        if (
+          !incoming ||
+          !allowedOrigins.has(incoming) ||
+          !String(req.headers['content-type']).startsWith('application/json')
+        ) {
+          reply(res, 403, { error: 'Invalid wallet request.' });
+          return true;
+        }
+        const current = await wallet(req, res);
+        if (!safeEqual(current.csrf, req.headers['x-verso-csrf'])) {
+          reply(res, 403, { error: 'Refresh the wallet before continuing.' });
+          return true;
+        }
+        if (
+          limited(`recovery:${req.socket.remoteAddress}`, 12) ||
+          limited(`wallet:${current.id}`, 6)
+        ) {
+          reply(res, 429, { error: 'Please wait before another wallet recovery attempt.' });
+          return true;
+        }
+        const request = JSON.parse((await body(req, 4096)).toString('utf8'));
+        if (pathname === '/api/store/recovery') {
+          const recoveryCode = `VR1-${secret()}`;
+          await transaction(() => {
+            current.recoveryHash = hash(recoveryCode);
+          });
+          reply(res, 200, { ...walletView(current), recoveryCode });
+        } else {
+          const code = typeof request.recoveryCode === 'string' ? request.recoveryCode.trim() : '';
+          if (!/^VR1-[a-f0-9]{64}$/.test(code)) {
+            reply(res, 400, { error: 'That recovery code could not be verified.' });
+            return true;
+          }
+          const recoveryHash = hash(code);
+          const record = Object.values(database.wallets).find((value) =>
+            safeEqual(value.recoveryHash, recoveryHash),
+          );
+          if (!record) {
+            reply(res, 400, { error: 'That recovery code could not be verified.' });
+            return true;
+          }
+          const credential = secret();
+          await transaction(() => {
+            for (const [key, value] of Object.entries(database.wallets))
+              if (value.id === record.id) delete database.wallets[key];
+            record.csrf = secret();
+            database.wallets[hash(credential)] = record;
+          });
+          setCredential(res, credential);
+          reply(res, 200, walletView(record));
+        }
       } else if (req.method === 'POST' && pathname === '/api/store/checkout') {
         if (!enabled) {
           reply(res, 503, { error: 'The store is not open yet.' });
@@ -402,13 +481,10 @@ export function createStoreHandler({
           reply(res, 403, { error: 'Refresh the store before purchasing.' });
           return true;
         }
-        const prior = attempts.get(record.id) || [];
-        const recent = prior.filter((time) => now() - time < 60000);
-        if (recent.length >= 8) {
+        if (limited(`checkout:${record.id}`)) {
           reply(res, 429, { error: 'Please wait before trying again.' });
           return true;
         }
-        attempts.set(record.id, [...recent, now()]);
         const request = JSON.parse((await body(req, 4096)).toString('utf8'));
         const skin = PREMIUM_SKINS.find((s) => s.id === request.skinId);
         if (!skin) {

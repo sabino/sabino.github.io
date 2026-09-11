@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHmac } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createStoreHandler, verifyStripeSignature } from '../server/payments.mjs';
@@ -120,6 +120,7 @@ async function fixture(t: any, enabled = true) {
   }
   return {
     base,
+    storageDir,
     env,
     cookie,
     wallet,
@@ -233,4 +234,87 @@ test('out-of-order and repeated paid webhooks cannot restore a fully refunded ou
   assert.deepEqual(await f.owned(), []);
   f.reload();
   assert.deepEqual(await f.owned(), []);
+});
+
+test('private recovery codes restore paid outfits durably without trusting a save or retaining old browser credentials', async (t) => {
+  const f = await fixture(t);
+  await f.checkout();
+  await f.webhook(f.completion());
+  const post = (route: string, payload: unknown, cookie = f.cookie, csrf = f.wallet.csrf) =>
+    fetch(`${f.base}/api/store/${route}`, {
+      method: 'POST',
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        'Content-Type': 'application/json',
+        'X-Verso-CSRF': csrf,
+      },
+      body: JSON.stringify(payload),
+    });
+  assert.equal((await post('recovery', {}, f.cookie, 'invented')).status, 403);
+  const generated = await (await post('recovery', {})).json();
+  assert.match(generated.recoveryCode, /^VR1-[a-f0-9]{64}$/);
+  assert.equal(generated.recoveryConfigured, true);
+  const ledger = await readFile(path.join(f.storageDir, 'wallets.json'), 'utf8');
+  assert.equal(
+    ledger.includes(generated.recoveryCode),
+    false,
+    'recovery secret is never stored in plaintext',
+  );
+  f.reload();
+  const freshResponse = await fetch(`${f.base}/api/store/wallet`, { headers: { Origin: origin } });
+  const freshCookie = freshResponse.headers.get('set-cookie')!.split(';')[0],
+    fresh = await freshResponse.json();
+  const recoveredResponse = await post(
+    'recover',
+    { recoveryCode: generated.recoveryCode },
+    freshCookie,
+    fresh.csrf,
+  );
+  assert.equal(recoveredResponse.status, 200);
+  const recovered = await recoveredResponse.json(),
+    recoveredCookie = recoveredResponse.headers.get('set-cookie')!.split(';')[0];
+  assert.deepEqual(recovered.entitlements, ['aurora-mantle']);
+  assert.notEqual(recovered.csrf, f.wallet.csrf);
+  assert.notEqual(recoveredCookie, f.cookie);
+  assert.deepEqual(await f.owned(), [], 'previous browser credential is invalidated');
+  assert.equal(
+    (await post('checkout', { skinId: 'aurora-mantle' }, recoveredCookie, f.wallet.csrf)).status,
+    403,
+  );
+  assert.deepEqual(
+    await (
+      await post('checkout', { skinId: 'aurora-mantle' }, recoveredCookie, recovered.csrf)
+    ).json(),
+    { owned: true },
+  );
+  f.reload();
+  const verified = await (
+    await fetch(`${f.base}/api/store/wallet`, { headers: { Cookie: recoveredCookie } })
+  ).json();
+  assert.deepEqual(verified.entitlements, ['aurora-mantle']);
+});
+
+test('rotating a recovery code revokes the previous code and recovery attempts are rate limited', async (t) => {
+  const f = await fixture(t, false);
+  const post = (route: string, payload: unknown) =>
+    fetch(`${f.base}/api/store/${route}`, {
+      method: 'POST',
+      headers: {
+        Origin: origin,
+        Cookie: f.cookie,
+        'Content-Type': 'application/json',
+        'X-Verso-CSRF': f.wallet.csrf,
+      },
+      body: JSON.stringify(payload),
+    });
+  const old = await (await post('recovery', {})).json();
+  const next = await (await post('recovery', {})).json();
+  assert.notEqual(old.recoveryCode, next.recoveryCode);
+  assert.equal((await post('recover', { recoveryCode: old.recoveryCode })).status, 400);
+  assert.equal((await post('recover', { recoveryCode: 'not a wallet' })).status, 400);
+  assert.equal((await post('recover', { recoveryCode: 'VR1-' + 'a'.repeat(64) })).status, 400);
+  assert.equal((await post('recover', { recoveryCode: 'VR1-' + 'b'.repeat(64) })).status, 400);
+  assert.equal((await post('recover', { recoveryCode: next.recoveryCode })).status, 429);
+  assert.equal(f.requests.length, 0);
 });

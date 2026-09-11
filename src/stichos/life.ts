@@ -10,19 +10,37 @@ import {
 import type { ProgressionAction, Profession } from './progression';
 import { drawPortrait } from './portrait';
 import { weaponIcon } from './equipment';
+import { furnitureIcon } from './progression-art';
 
 const esc = (value: unknown) =>
   String(value).replace(
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
-type LifeTab = 'skills' | 'homes' | 'wardrobe' | 'store';
+type LifeTab = 'purpose' | 'skills' | 'homes' | 'wardrobe' | 'store';
 export function mountLife(container: HTMLElement, game: Stichos, onChange: () => void) {
-  let tab: LifeTab = 'skills';
+  let tab: LifeTab = 'purpose';
   let selectedHome = game.progression.homes[0]?.id ?? '';
   let message = '';
   let revision = 0;
   const actions: ProgressionAction[] = [];
+  function purpose() {
+    const story = game.campaign,
+      life = game.freeLife,
+      ending = game.endingSummary;
+    const contract = life.contract;
+    return `<article class="s-life-story"><small>${story.ending ? 'The investigation is complete' : story.started ? `Act ${story.act + 1} of 6 · ${esc(story.actTitle)}` : 'Twenty years of silence'}</small><h3>${ending ? esc(ending.title) : esc(story.title)}</h3><p>${ending ? esc(ending.text) : story.started ? `${story.completed}/${story.total} leads resolved. Follow the current thread in your journal and atlas.` : 'The cathedral radio is broken. Begin with the clinic, the engineer and the Sallas records in Vespera.'}</p><progress value="${story.completed}" max="${story.total}" aria-label="Investigation progress"></progress>${ending ? `<details><summary>The choices you carried here</summary>${ending.decisions.map((decision) => `<h4>${esc(decision.title)}</h4><p>${esc(decision.text)}</p>`).join('')}</details>` : ''}</article><h3>${life.unlocked ? 'Choose a life worth staying for' : 'The work of a life'}</h3><p>Follow these callings at your own pace. Noticeboards offer new local commissions; botanists need supplies, and correspondence carries the six families’ secrets along the roads.</p><div class="s-life-grid">${life.milestones.map((goal) => `<article><small>${goal.complete ? 'Accomplished' : `${goal.progress} / ${goal.goal}`}</small><h4>${esc(goal.title)}</h4><p>${esc(goal.description)}</p><progress value="${goal.progress}" max="${goal.goal}" aria-label="${esc(goal.title)}"></progress></article>`).join('')}</div><h3>Local commissions · ${life.contractsCompleted} completed</h3>${contract?.status === 'active' ? `<article><h4>${esc(contract.title)}</h4><p>${esc(contract.description)}</p><p>${contract.progress}/${contract.required} completed · ${contract.reward} coins on delivery<br>Report at ${esc(contract.town)}: ${Math.round(contract.board.x)}, ${Math.round(contract.board.y)}.</p></article>` : '<p>Read a settlement noticeboard to choose work in gathering, medicine, cultivation or road protection.</p>'}<h3>Other lives you have encountered</h3><p>${life.unlocked ? 'At a quiet shrine, the restored signal can reach these remembered people. Every living, willing host keeps their own belongings; returning to the priest also returns you to the physical notebook.' : 'Finish the return investigation to reach remembered willing hosts beyond the nearby shrine. For now, learn the people and places around you.'}</p>${
+      life.unlocked
+        ? `<div class="s-life-grid">${game.knownIdentities
+            .slice(0, 32)
+            .map(
+              (person) =>
+                `<article><small>${esc(person.role)} · ${esc(game.world.clans[person.clan].name)}</small><h4>${esc(person.name)}</h4><p>${esc(person.consent)}<br>${Math.round(person.x)}, ${Math.round(person.y)} · ${person.available ? 'Can answer at a quiet shrine' : 'Currently unavailable'}</p></article>`,
+            )
+            .join('')}</div>`
+        : ''
+    }`;
+  }
   function actionButton(action: ProgressionAction, label: string) {
     const preview = game.progressionPreview(action),
       index = actions.push(action) - 1;
@@ -80,7 +98,7 @@ export function mountLife(container: HTMLElement, game: Stichos, onChange: () =>
             )
             .join(
               '',
-            )}</div><h3>Furnish this home</h3><div class="s-life-grid">${FURNITURE.map((part) => `<article><small>${part.slot} · crafting ${part.level}</small><h4>${esc(part.name)}</h4><p>${esc(part.description)}</p>${actionButton({ kind: 'furnish', homeId: home.id, furnitureId: part.id }, home.furniture[part.slot] === part.id ? 'Installed' : home.furniture[part.slot] ? 'Replace furnishing' : 'Make furnishing')}</article>`).join('')}</div></article>`
+            )}</div><h3>Furnish this home</h3><div class="s-life-grid">${FURNITURE.map((part) => `<article><img class="s-furniture-preview" src="${furnitureIcon(part.id, game.world.seed)}" alt=""><small>${part.slot} · crafting ${part.level}</small><h4>${esc(part.name)}</h4><p>${esc(part.description)}</p>${actionButton({ kind: 'furnish', homeId: home.id, furnitureId: part.id }, home.furniture[part.slot] === part.id ? 'Installed' : home.furniture[part.slot] ? 'Replace furnishing' : 'Make furnishing')}</article>`).join('')}</div></article>`
         : ''
     }<h3>Nearby addresses</h3>${offered.length ? `<div class="s-life-grid">${offered.map((address) => `<article><h4>${esc(address.name)}</h4><p>${Math.round(address.x)}, ${Math.round(address.y)} · ${Math.round(Math.hypot(address.x - game.player.x, address.y - game.player.y))} paces away</p>${actionButton({ kind: 'buy-home', address }, 'Purchase home')}</article>`).join('')}</div>` : '<p>No unowned house or inn doorway nearby. Follow the streets to another building.</p>'}`;
   }
@@ -98,7 +116,7 @@ export function mountLife(container: HTMLElement, game: Stichos, onChange: () =>
   function render() {
     const current = ++revision;
     actions.length = 0;
-    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['skills', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ skills: 'Professions', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'skills' ? skills() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
+    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['purpose', 'skills', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', skills: 'Professions', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'purpose' ? purpose() : tab === 'skills' ? skills() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
     container.querySelectorAll<HTMLButtonElement>('[data-life-tab]').forEach(
       (button) =>
         (button.onclick = () => {

@@ -20,7 +20,8 @@ const mounted = new WeakMap<HTMLElement, symbol>();
 const verifiedWallets = new WeakMap<Stichos, string[]>();
 const walletRequests = new WeakMap<Stichos, number>();
 
-const storeOrigin = () => `${location.protocol}//${location.hostname}:4175`;
+const storeOrigin = () =>
+  location.protocol === 'https:' ? location.origin : `http://${location.hostname}:4175`;
 const nextWalletRequest = (game: Stichos) => {
   const value = (walletRequests.get(game) ?? 0) + 1;
   walletRequests.set(game, value);
