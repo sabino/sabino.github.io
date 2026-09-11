@@ -3,8 +3,55 @@ export interface Point {
   x: number;
   y: number;
 }
-export type Terrain = 'snow' | 'grass' | 'ice' | 'water' | 'road' | 'floor' | 'wall' | 'bridge';
-export type Biome = 'frostwood' | 'tundra' | 'marsh' | 'highlands' | 'settlement';
+export type Terrain =
+  | 'snow'
+  | 'grass'
+  | 'ice'
+  | 'water'
+  | 'road'
+  | 'floor'
+  | 'wall'
+  | 'bridge'
+  | 'sand'
+  | 'mud'
+  | 'basalt';
+export type Biome =
+  | 'frostwood'
+  | 'tundra'
+  | 'marsh'
+  | 'highlands'
+  | 'woodland'
+  | 'meadow'
+  | 'wetland'
+  | 'dunes'
+  | 'badlands'
+  | 'volcanic'
+  | 'alpine'
+  | 'settlement';
+export type TreeForm = 'conifer' | 'broadleaf' | 'willow' | 'acacia' | 'palm' | 'cactus' | 'snag';
+export type RockMaterial = 'granite' | 'slate' | 'sandstone' | 'basalt' | 'limestone';
+export type ArchitectureStyle = 'gothic' | 'timber' | 'adobe' | 'stilt' | 'basalt' | 'alpine';
+/** Regional building grammar: shared local materials, climate adaptations and clan craft. */
+export interface ArchitecturalCulture {
+  seed: number;
+  style: ArchitectureStyle;
+  wallMaterial: 'stone' | 'timber' | 'adobe' | 'basalt';
+  roof: 'steep' | 'flat' | 'terraced' | 'gable';
+  wallColor: string;
+  roofColor: string;
+  woodColor: string;
+  accentColor: string;
+  window: 'arch' | 'square' | 'slit';
+  raised: boolean;
+}
+export interface TileEcology {
+  moisture: number;
+  elevation: number;
+  geothermal: number;
+  treeForm: TreeForm;
+  rockMaterial: RockMaterial;
+  groundCover: number;
+}
 export type ItemId =
   | 'cequin'
   | 'heartleaf'
@@ -34,6 +81,8 @@ export interface Tile extends Point {
   detail: number;
   building?: string;
   buildingKind?: BuildingKind;
+  architecture?: ArchitecturalCulture;
+  ecology?: TileEcology;
   site?: string;
   clan?: number;
 }
@@ -59,6 +108,8 @@ export interface Prop extends Point {
   id: string;
   seed: number;
   kind: PropKind;
+  vegetation?: TreeForm;
+  mineral?: RockMaterial;
   solid: boolean;
   name: string;
   clan?: number;
@@ -114,6 +165,7 @@ export interface Settlement extends Point {
   clan: number;
   kind: 'cathedral' | 'village' | 'foundry';
   rank?: 'city' | 'village' | 'hamlet';
+  architecture?: ArchitecturalCulture;
   radius: number;
 }
 export interface Chunk {

@@ -30,7 +30,7 @@ test('generation one preserves existing wilderness terrain, obstacles, residents
   }
   assert.equal(new InfiniteWorld(2).generation, 3);
   assert.notDeepEqual(new InfiniteWorld(2, 1).chunk(2, 2), new InfiniteWorld(2, 2).chunk(2, 2));
-  assert.throws(() => new InfiniteWorld(2, 4 as 2), /Unsupported/);
+  assert.throws(() => new InfiniteWorld(2, 5 as 2), /Unsupported/);
 });
 
 test('warped climate is continuous across positive, negative and distant chunk seams', () => {

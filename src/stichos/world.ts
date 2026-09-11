@@ -1,7 +1,15 @@
 import { deriveSeed, random, mix } from '../procedural/random.ts';
+import {
+  regionalClimate,
+  regionalTerrain,
+  ecologyProfile,
+  architecturalCulture,
+  type RegionalClimate,
+} from './ecology.ts';
 import { generateVault, VAULT_SIZE, type VaultLayout } from './vault.ts';
 import type {
   Appearance,
+  ArchitecturalCulture,
   BuildingKind,
   Biome,
   Chunk,
@@ -19,7 +27,7 @@ export const PLANET_NAME = 'Stíchos';
 export const ORIGIN_CITY_NAME = 'Vespera';
 export const ORIGIN_CATHEDRAL_NAME = 'Cathedral of Vespera';
 export const CHUNK_SIZE = 16;
-export type WorldGeneration = 1 | 2 | 3;
+export type WorldGeneration = 1 | 2 | 3 | 4;
 export const CITY_SPACING = 640;
 export const STOP_SPACING = CITY_SPACING / 3;
 export type WildernessBiome = Exclude<Biome, 'settlement'>;
@@ -30,7 +38,8 @@ export interface WorldClimate {
   coldness: number;
   temperature: number;
   biome: WildernessBiome;
-  weights: Record<WildernessBiome, number>;
+  weights: Record<string, number>;
+  geothermal?: number;
 }
 export interface VaultSite extends Point {
   id: string;
@@ -127,6 +136,7 @@ interface Building {
   halfY: number;
   name: string;
   kind?: BuildingKind;
+  architecture?: ArchitecturalCulture;
 }
 interface TownLayout {
   settlement: Settlement;
@@ -143,7 +153,7 @@ export class InfiniteWorld {
   private lattice = new Map<string, number>();
   private vaultCache = new Map<string, PlacedVault>();
   constructor(seed: number, generation: WorldGeneration = 3) {
-    if (generation !== 1 && generation !== 2 && generation !== 3)
+    if (generation !== 1 && generation !== 2 && generation !== 3 && generation !== 4)
       throw new RangeError('Unsupported world generation');
     this.seed = Number.isFinite(seed) ? seed >>> 0 : 0;
     this.generation = generation;
@@ -153,7 +163,7 @@ export class InfiniteWorld {
   }
 
   private get spacing() {
-    return this.generation === 3 ? STOP_SPACING : TOWN_SPACING;
+    return this.generation >= 3 ? STOP_SPACING : TOWN_SPACING;
   }
   private roadCenter(index: number) {
     return Math.round(index * this.spacing);
@@ -168,7 +178,7 @@ export class InfiniteWorld {
     // Stops on the routes between cities are guaranteed. Some cross-country
     // junctions are deliberately empty, preserving larger stretches of wilderness.
     return (
-      this.generation !== 3 ||
+      this.generation < 3 ||
       gx % 3 === 0 ||
       gy % 3 === 0 ||
       deriveSeed(this.seed, 'settlement-presence-v3', gx, gy) % 5 < 3
@@ -202,6 +212,7 @@ export class InfiniteWorld {
   climate(x: number, y: number): WorldClimate {
     x = Number.isFinite(x) ? x : 0;
     y = Number.isFinite(y) ? y : 0;
+    if (this.generation === 4) return regionalClimate(this.seed, x, y, this.noise.bind(this));
     if (this.generation === 1) {
       const elevation =
         this.noise(x, y, 29, 'elevation') * 0.7 + this.noise(x, y, 11, 'folds') * 0.3;
@@ -251,7 +262,7 @@ export class InfiniteWorld {
     const high = ramp(0.53, 0.73, elevation),
       wet = ramp(0.43, 0.74, moisture),
       frozen = ramp(0.39, 0.68, coldness);
-    const raw: Record<WildernessBiome, number> = {
+    const raw: Record<string, number> = {
       highlands: high,
       marsh: (1 - high) * wet * (1 - frozen * 0.6),
       frostwood: (1 - high) * (1 - wet * 0.5) * (1 - frozen),
@@ -260,7 +271,7 @@ export class InfiniteWorld {
     const total = Object.values(raw).reduce((sum, value) => sum + value, 0);
     const weights = Object.fromEntries(
       Object.entries(raw).map(([biome, weight]) => [biome, weight / total]),
-    ) as Record<WildernessBiome, number>;
+    ) as Record<string, number>;
     const biome = (Object.keys(weights) as WildernessBiome[]).reduce(
       (best, candidate) => (weights[candidate] > weights[best] ? candidate : best),
       'frostwood',
@@ -327,7 +338,7 @@ export class InfiniteWorld {
 
   private vaultsForChunk(x0: number, y0: number): PlacedVault[] {
     if (this.generation === 1) return [];
-    if (this.generation === 3) {
+    if (this.generation >= 3) {
       const result: PlacedVault[] = [],
         spacing = this.spacing;
       for (
@@ -371,7 +382,7 @@ export class InfiniteWorld {
     return result;
   }
   private town(gx: number, gy: number): TownLayout {
-    if (this.generation === 3) return this.townV3(gx, gy);
+    if (this.generation >= 3) return this.townV3(gx, gy);
     const seed = deriveSeed(this.seed, 'settlement', gx, gy),
       rng = random(seed),
       origin = gx === 0 && gy === 0;
@@ -554,10 +565,25 @@ export class InfiniteWorld {
         });
       });
     }
+    if (this.generation === 4) {
+      const climate = this.climate(x, y) as RegionalClimate;
+      settlement.architecture = architecturalCulture(
+        seed,
+        climate,
+        clan,
+        CLANS[clan].color,
+        origin,
+      );
+      for (const b of buildings) {
+        b.architecture = settlement.architecture;
+        if (!origin || b.kind !== 'church')
+          b.name = `${b.kind === 'church' ? 'Cathedral' : b.kind === 'greenhouse' ? 'Botanical conservatory' : names[b.kind!].replace('Snowbound', 'Family').replace('Winter ', '')} of ${name}`;
+      }
+    }
     return { settlement, buildings };
   }
   private layouts(x: number, y: number, radius = 20): TownLayout[] {
-    if (this.generation === 3) {
+    if (this.generation >= 3) {
       const result: TownLayout[] = [];
       for (
         let gy = Math.floor((y - radius - 40) / this.spacing);
@@ -607,6 +633,7 @@ export class InfiniteWorld {
           : biome === 'frostwood' || biome === 'marsh'
             ? 'grass'
             : 'snow';
+    if (this.generation === 4) terrain = regionalTerrain(climate as RegionalClimate);
     const tile: Tile = {
       x,
       y,
@@ -617,6 +644,17 @@ export class InfiniteWorld {
       temperature: climate.temperature,
       detail,
     };
+    if (this.generation === 4) {
+      const ecology = ecologyProfile(climate as RegionalClimate);
+      tile.ecology = {
+        moisture,
+        elevation,
+        geothermal: climate.geothermal!,
+        treeForm: ecology.treeForm,
+        rockMaterial: ecology.rockMaterial,
+        groundCover: ecology.groundCover,
+      };
+    }
     const highway = this.highway(x, y);
     if (highway) tile.terrain = terrain === 'water' || terrain === 'ice' ? 'bridge' : 'road';
     for (const { settlement: s, buildings } of layouts) {
@@ -626,7 +664,15 @@ export class InfiniteWorld {
       tile.biome = 'settlement';
       tile.clan = s.clan;
       tile.height = 0;
-      tile.terrain = highway || Math.abs(dx) <= 1 || Math.abs(dy) <= 1 ? 'road' : 'snow';
+      tile.terrain =
+        highway || Math.abs(dx) <= 1 || Math.abs(dy) <= 1
+          ? 'road'
+          : this.generation === 4
+            ? terrain === 'water' || terrain === 'ice'
+              ? 'floor'
+              : terrain
+            : 'snow';
+      if (s.architecture) tile.architecture = s.architecture;
       if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) tile.terrain = 'floor';
       if (!highway && Math.abs(dx) >= 2 && Math.abs(dx) <= 4 && dy >= 4 && dy <= 8)
         tile.terrain = 'grass';
@@ -637,6 +683,7 @@ export class InfiniteWorld {
           tile.terrain = edge && !door ? 'wall' : 'floor';
           tile.building = b.id;
           if (b.kind) tile.buildingKind = b.kind;
+          if (b.architecture) tile.architecture = b.architecture;
         }
     }
     // Buildings that meet a trunk road form an arcade instead of sealing the
@@ -675,7 +722,7 @@ export class InfiniteWorld {
     clan?: number,
     building?: string,
   ): Prop {
-    return {
+    const prop: Prop = {
       id: id ?? `${kind}:${x}:${y}`,
       x,
       y,
@@ -686,6 +733,26 @@ export class InfiniteWorld {
       clan,
       building,
     };
+    if (this.generation === 4 && (kind === 'pine' || kind === 'rock')) {
+      const ecology = ecologyProfile(this.climate(x, y) as RegionalClimate);
+      if (kind === 'pine') {
+        prop.vegetation = ecology.treeForm;
+        const names = {
+          conifer: 'Frostwood conifer',
+          broadleaf: 'Crownwood tree',
+          willow: 'Water willow',
+          acacia: 'Ironbark acacia',
+          palm: 'Oasis palm',
+          cactus: 'Timber cactus',
+          snag: 'Charred snag',
+        };
+        prop.name = `${id?.includes(':timber:') ? 'Cultivated ' : ''}${names[ecology.treeForm]}`;
+      } else {
+        prop.mineral = ecology.rockMaterial;
+        prop.name = `${id?.includes(':ore:') ? 'Workshop ' : ''}${ecology.rockMaterial} ore`;
+      }
+    }
+    return prop;
   }
   private resident(
     s: Settlement,
@@ -698,6 +765,23 @@ export class InfiniteWorld {
     const seed = deriveSeed(s.seed, 'resident', index, role),
       rng = random(seed);
     const name = `${pick(['Ana', 'Iven', 'Mira', 'Oren', 'Neris', 'Toma', 'Edda', 'Sorin', 'Vela', 'Darin', 'Leva', 'Arin'], rng)} ${pick(['Vale', 'Thorn', 'Reed', 'Rusk', 'Fen', 'Moss', 'Wren', 'Ash', 'Kerr', 'Voss', 'Silt', 'Frost'], rng)}`;
+    const look = appearance(seed, role, s.clan);
+    if (this.generation === 4) {
+      const gear = random(deriveSeed(seed, 'v4-resident-carried-gear', role));
+      look.weapon =
+        role === 'guard' || role === 'raider'
+          ? gear() < 0.62
+            ? 'sword'
+            : 'bow'
+          : role === 'pilgrim'
+            ? gear() < 0.38
+              ? 'staff'
+              : 'none'
+            : role === 'botanist' && gear() < 0.24
+              ? 'staff'
+              : 'none';
+      if (look.weapon !== 'none') look.weaponSeed = deriveSeed(seed, 'v4-resident-weapon', role);
+    }
     const hp = role === 'guard' || role === 'raider' ? 75 : 50;
     return {
       id: id ?? `${s.id}:resident:${index}`,
@@ -707,7 +791,7 @@ export class InfiniteWorld {
       x,
       y,
       clan: s.clan,
-      appearance: appearance(seed, role, s.clan),
+      appearance: look,
       maxHp: hp,
       hp,
       home: { x, y },
@@ -739,7 +823,7 @@ export class InfiniteWorld {
       if (!contains(p)) return;
       if (p.solid && this.highway(p.x, p.y)) return;
       if (
-        this.generation === 3 &&
+        this.generation >= 3 &&
         ['pine', 'rock'].includes(p.kind) &&
         p.solid &&
         !p.id.includes(':timber:') &&
@@ -775,7 +859,8 @@ export class InfiniteWorld {
             ),
           );
           if (
-            tile.terrain === 'snow' &&
+            (tile.terrain === 'snow' ||
+              (this.generation === 4 && ['grass', 'mud'].includes(tile.terrain))) &&
             !tile.building &&
             clearWall &&
             Math.max(dx, Math.abs(dy)) >= 7 &&
@@ -790,7 +875,7 @@ export class InfiniteWorld {
               ([dx, dy]) => deriveSeed(this.seed, 'ecology', x + dx, y + dy) / 0xffffffff >= 0.16,
             );
             const forestry =
-              this.generation !== 3 ||
+              this.generation < 3 ||
               (Math.max(dx, Math.abs(dy)) >= town.radius - 4 &&
                 this.noise(x, y, 13, 'settlement-greenbelt') > 0.4);
             if (roll < 0.14 && clearNeighbor && forestry)
@@ -799,45 +884,79 @@ export class InfiniteWorld {
                   'pine',
                   x,
                   y,
-                  this.generation === 3 ? 'Shelterbelt frostwood' : 'Cathedral frostwood',
+                  this.generation >= 3 ? 'Shelterbelt frostwood' : 'Cathedral frostwood',
                 ),
               );
-            else if (this.generation !== 3 && roll >= 0.14 && roll < 0.16 && clearNeighbor)
+            else if (this.generation < 3 && roll >= 0.14 && roll < 0.16 && clearNeighbor)
               add(this.prop('rock', x, y, 'Weathered mineral stone'));
-            else if (this.generation !== 3 && roll < 0.2)
+            else if (this.generation < 3 && roll < 0.2)
               add(this.prop('mushroom', x, y, 'Snowcap colony'));
           }
           continue;
         }
-        if (!['snow', 'grass', 'ice'].includes(tile.terrain)) continue;
-        if (roll < 0.026) {
-          const kind: PropKind =
-            tile.biome === 'marsh'
-              ? 'heartleaf'
-              : tile.biome === 'highlands'
-                ? 'emberroot'
-                : 'cequin';
-          add(
-            this.prop(
-              kind,
-              x,
-              y,
-              { heartleaf: 'Heartleaf', emberroot: 'Emberroot', cequin: 'Cequin' }[kind],
-            ),
-          );
-        } else if (
-          tile.biome === 'frostwood' &&
-          roll < 0.18 &&
-          (this.generation !== 3 || this.noise(x, y, 17, 'forest-stands') > 0.38)
-        )
-          add(this.prop('pine', x, y, 'Frostwood pine'));
-        else if (
-          tile.biome === 'highlands' &&
-          roll < 0.11 &&
-          (this.generation !== 3 || this.noise(x, y, 12, 'mineral-outcrops') > 0.48)
-        )
-          add(this.prop('rock', x, y, 'Iron-bearing stone'));
-        else if (roll > 0.992) add(this.prop('mushroom', x, y, 'Winter fungus'));
+        if (this.generation === 4) {
+          if (['snow', 'grass', 'sand', 'mud', 'basalt'].includes(tile.terrain)) {
+            const climate = this.climate(x, y) as RegionalClimate;
+            const ecology = ecologyProfile(climate);
+            const grove = ramp(0.28, 0.62, this.noise(x, y, 31, 'v4-forest-stands'));
+            const outcrop = ramp(0.38, 0.7, this.noise(x, y, 23, 'v4-mineral-strata'));
+            const trees = ecology.treeDensity * grove;
+            const rocks = ecology.rockDensity * outcrop;
+            if (roll < trees) add(this.prop('pine', x, y, 'Regional tree'));
+            else if (roll < trees + rocks) add(this.prop('rock', x, y, 'Mineral outcrop'));
+            else if (roll < trees + rocks + ecology.herbDensity) {
+              const kind =
+                climate.geothermal > 0.42 ||
+                climate.elevation > 0.65 ||
+                climate.biome === 'badlands'
+                  ? 'emberroot'
+                  : climate.moisture > 0.58
+                    ? 'heartleaf'
+                    : 'cequin';
+              add(
+                this.prop(
+                  kind,
+                  x,
+                  y,
+                  { cequin: 'Cequin', heartleaf: 'Heartleaf', emberroot: 'Emberroot' }[kind],
+                ),
+              );
+            } else if (roll > 0.996 && climate.moisture > 0.52 && climate.temperature > -12)
+              add(this.prop('mushroom', x, y, 'Shade fungus'));
+          }
+          // Continue below into shared wanderer generation; resource decisions above are final.
+        } else {
+          if (!['snow', 'grass', 'ice'].includes(tile.terrain)) continue;
+          if (roll < 0.026) {
+            const kind: PropKind =
+              tile.biome === 'marsh'
+                ? 'heartleaf'
+                : tile.biome === 'highlands'
+                  ? 'emberroot'
+                  : 'cequin';
+            add(
+              this.prop(
+                kind,
+                x,
+                y,
+                { heartleaf: 'Heartleaf', emberroot: 'Emberroot', cequin: 'Cequin' }[kind],
+              ),
+            );
+          } else if (
+            tile.biome === 'frostwood' &&
+            roll < 0.18 &&
+            (this.generation < 3 || this.noise(x, y, 17, 'forest-stands') > 0.38)
+          )
+            add(this.prop('pine', x, y, 'Frostwood pine'));
+          else if (
+            tile.biome === 'highlands' &&
+            roll < 0.11 &&
+            (this.generation < 3 || this.noise(x, y, 12, 'mineral-outcrops') > 0.48)
+          )
+            add(this.prop('rock', x, y, 'Iron-bearing stone'));
+          else if (roll > 0.992) add(this.prop('mushroom', x, y, 'Winter fungus'));
+        }
+        if (this.generation === 4 && ['water', 'wall', 'ice'].includes(tile.terrain)) continue;
         const occupied = chunk.props.some((p) => p.x === x && p.y === y && p.solid);
         if (
           !occupied &&
@@ -946,7 +1065,7 @@ export class InfiniteWorld {
           'rock',
           s.x + 5,
           s.y + 6,
-          this.generation === 3 ? 'Workshop ore stock' : 'Iron-bearing stone',
+          this.generation >= 3 ? 'Workshop ore stock' : 'Iron-bearing stone',
           `${s.id}:ore:1`,
           s.clan,
         ),
@@ -956,7 +1075,7 @@ export class InfiniteWorld {
           'rock',
           s.x + 5,
           s.y + 7,
-          this.generation === 3 ? 'Workshop ore stock' : 'Iron-bearing stone',
+          this.generation >= 3 ? 'Workshop ore stock' : 'Iron-bearing stone',
           `${s.id}:ore:2`,
           s.clan,
         ),
@@ -1019,7 +1138,7 @@ export class InfiniteWorld {
           );
         add(
           this.prop(
-            this.generation === 3
+            this.generation >= 3
               ? (
                   {
                     church: 'shrine',
@@ -1057,7 +1176,7 @@ export class InfiniteWorld {
         ['pilgrim', 2, 4],
       ];
       const presentResidents =
-        this.generation === 3 && s.rank === 'hamlet'
+        this.generation >= 3 && s.rank === 'hamlet'
           ? residents.filter(([role]) => ['botanist', 'merchant', 'pilgrim'].includes(role))
           : residents;
       presentResidents.forEach(([role, dx, dy, id], index) => {
@@ -1111,7 +1230,7 @@ export class InfiniteWorld {
     x = integer(x);
     y = integer(y);
     radius = Math.min(
-      this.generation === 3 ? 2048 : 128,
+      this.generation >= 3 ? 2048 : 128,
       Math.max(0, Number.isFinite(radius) ? radius : 0),
     );
     return this.layouts(x, y, radius)
@@ -1123,7 +1242,7 @@ export class InfiniteWorld {
     x = integer(x);
     y = integer(y);
     radius = Math.min(128, Math.max(0, Number.isFinite(radius) ? radius : 0));
-    if (this.generation === 3) {
+    if (this.generation >= 3) {
       const result: VaultSite[] = [];
       for (
         let gy = Math.ceil((y - radius - this.spacing / 2 - 1) / this.spacing);
