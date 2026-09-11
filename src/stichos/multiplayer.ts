@@ -490,6 +490,7 @@ export class MultiplayerConnection {
     combatActive = false,
     progression?: SharedCombatProgression,
     bodyId?: string,
+    name?: string,
   ) {
     const time = performance.now();
     if (this.status !== 'online' || (!force && time - this.lastPose < 100)) return;
@@ -504,6 +505,7 @@ export class MultiplayerConnection {
       combatActive,
       progression,
       bodyId,
+      name,
     });
   }
   acknowledgeCombat(eventId: number) {

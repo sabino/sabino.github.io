@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter, once } from 'node:events';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
@@ -16,6 +16,7 @@ import {
   verifyRoomHello,
 } from '../src/stichos/room-checkpoint.ts';
 import { createCoopServer } from '../server/coop.mjs';
+import { attachRoomDisk } from '../server/room-disk.mjs';
 import { RoomPersistence } from '../src/stichos/room-persistence.ts';
 import {
   getBrowserPlayerId,
@@ -141,6 +142,81 @@ test('authoritative spatial speech, planet chat, bounded history and replay do n
   const late = traveler(hub, { room, position: { x: 0, y: 40 } });
   assert.equal(late.welcome.chat.length, 200);
   assert.equal(hub.exportRoom(room)!.state.chat.length, 200);
+});
+
+test('a renamed body updates presence and subsequent chat while retaining historical authors through authority restore', (t) => {
+  const { hub, advance } = fixture(t);
+  const a = traveler(hub),
+    room = a.welcome.room;
+  const b = traveler(hub, { room, name: 'Witness' });
+  a.send({ type: 'chat', requestId: 'before', channel: 'world', text: 'First life' });
+  const pose = { type: 'pose', x: 0, y: 5, heading: 1, phase: 0, appearance: look };
+  a.send({ ...pose, name: '  Elara  ', bodyId: 'body:new-life' });
+  assert.equal(b.socket.get('pose').peer.name, 'Elara');
+  assert.equal(b.socket.get('pose').peer.bodyId, 'body:new-life');
+  a.send(pose);
+  assert.equal(b.socket.get('pose').peer.name, 'Elara', 'omitting a name retains the room alias');
+  for (const name of ['', '   ', 'x'.repeat(65), 'bad\nname', 7]) {
+    a.send({ ...pose, name });
+    assert.equal(a.socket.get('error').code, 'invalid_pose');
+    assert.equal(b.socket.get('pose').peer.name, 'Elara');
+  }
+  advance(1000);
+  a.send({ type: 'chat', requestId: 'after', channel: 'world', text: 'Second life' });
+  assert.equal(b.socket.get('chat').message.name, 'Elara');
+  const record = hub.exportRoom(room)!;
+  assert.deepEqual(
+    record.state.chat.map((c: any) => c.name),
+    ['Theo', 'Elara'],
+  );
+  const restored = new CoopRooms({ durable: true });
+  restored.restoreRoom(record.state, record.privateState);
+  const observer = traveler(restored, { room, name: 'Observer' });
+  t.after(() => observer.socket.close());
+  assert.equal(
+    restored.exportRoom(room)!.privateState.members.find((p: any) => p.id === a.welcome.peerId)
+      .name,
+    'Elara',
+  );
+  assert.deepEqual(
+    observer.welcome.chat.map((c: any) => c.name),
+    ['Theo', 'Elara'],
+  );
+});
+
+test('private disk backups above the old cap restore and oversized writes preserve the last good checkpoint', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'verso-disk-bound-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { hub } = fixture(t),
+    a = traveler(hub),
+    room = a.welcome.room;
+  const exportRoom = hub.exportRoom.bind(hub);
+  let padding = 'x'.repeat(9_000_000);
+  // Storage-boundary fixture: expand only the trusted private envelope, never public world data.
+  hub.exportRoom = (id: string) => {
+    const record = exportRoom(id)!;
+    return { ...record, privateState: { ...record.privateState, storageBoundaryFixture: padding } };
+  };
+  const disk = await attachRoomDisk(hub, directory);
+  await disk.flush();
+  const path = join(directory, `${room}.json`),
+    previous = await readFile(path, 'utf8');
+  assert.ok(Buffer.byteLength(previous) > 8_000_000);
+  const restored = new CoopRooms({ durable: true });
+  await attachRoomDisk(restored, directory);
+  assert.equal(restored.exportRoom(room)!.state.seed, 3886);
+  padding = 'x'.repeat(32_000_001);
+  await assert.rejects(() => disk.flush(), /storage limit/);
+  assert.equal(
+    await readFile(path, 'utf8'),
+    previous,
+    'failed write preserves the last signed backup',
+  );
+  await writeFile(path, padding);
+  await assert.rejects(
+    () => attachRoomDisk(new CoopRooms({ durable: true }), directory),
+    /storage limit/,
+  );
 });
 
 test('signed public checkpoints reject mutation, wrong authority and rollback and exclude private credentials and spatial speech', async (t) => {
@@ -337,7 +413,9 @@ test('browser credentials survive a new client instance and signed visitor repli
   await a.connect(url, who);
   const room = a.room,
     peerId = a.peerId;
+  a.pose({ x: 0, y: 5, heading: 0, phase: 0 }, look, true, false, undefined, 'body:elara', 'Elara');
   assert.equal((await a.sendChat('Persisted world chat', 'world')).ok, true);
+  assert.equal(server.hub.exportRoom(room)!.state.chat[0].name, 'Elara');
   const serial = readRoomCredential(url, room)!.serial;
   assert.ok(serial > 0);
   a.disconnect();
@@ -348,6 +426,7 @@ test('browser credentials survive a new client instance and signed visitor repli
   assert.equal(b.peerId, peerId);
   assert.equal(getBrowserPlayerId(), id);
   assert.equal(b.chatHistory[0].text, 'Persisted world chat');
+  assert.equal(b.chatHistory[0].name, 'Elara');
   await b.sendChat('another message', 'world');
   assert.ok(readRoomCredential(url, room)!.serial > serial);
   const exported = server.hub.exportRoom(room)!,

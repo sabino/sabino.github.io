@@ -369,6 +369,7 @@ export class CoopRooms {
         !finite(message.heading, -1e6, 1e6) ||
         !finite(message.phase, 0, Number.MAX_SAFE_INTEGER) ||
         !appearanceValid(message.appearance) ||
+        (message.name !== undefined && (!text(message.name, 1, 64) || !message.name.trim())) ||
         (message.combatActive !== undefined && typeof message.combatActive !== 'boolean') ||
         (message.bodyId !== undefined && !bodyIdValid(message.bodyId)) ||
         (message.progression !== undefined && !validSharedCombatProgression(message.progression))
@@ -377,6 +378,7 @@ export class CoopRooms {
       if (room.world.blocked(message.x, message.y, room.removed))
         return this.error(connection, 'blocked_pose', 'That position is blocked.');
       Object.assign(member, {
+        name: message.name === undefined ? member.name : message.name.trim(),
         x: message.x,
         y: message.y,
         heading: message.heading,

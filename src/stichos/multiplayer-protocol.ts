@@ -78,6 +78,7 @@ export type MultiplayerClientMessage =
       combatActive?: boolean;
       bodyId?: string;
       progression?: SharedCombatProgression;
+      name?: string;
     }
   | { type: 'combat'; requestId: string; kind: 'attack' | 'ward'; heading: number }
   | { type: 'combat'; requestId: string; kind: 'parley'; guardIds: string[] }
