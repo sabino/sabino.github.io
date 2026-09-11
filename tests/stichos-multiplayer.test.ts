@@ -8,12 +8,15 @@ import { MultiplayerConnection } from '../src/stichos/multiplayer.ts';
 import { resolveForge } from '../src/stichos/forge.ts';
 import { generateArtifact } from '../src/stichos/artifacts.ts';
 import { artifactToolKind } from '../src/stichos/labor.ts';
+import { MULTIPLAYER_PROTOCOL } from '../src/stichos/multiplayer-protocol.ts';
+import { validSharedCombatFrame } from '../src/stichos/shared-combat.ts';
+import { weaponProfile } from '../src/stichos/equipment.ts';
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const look = () => ({ ...appearance(42, 'pilgrim', 1), weapon: 'staff' });
 const identity = (extra = {}) => ({
   type: 'join',
-  protocol: 1,
+  protocol: MULTIPLAYER_PROTOCOL,
   seed: 3886,
   generation: 3,
   name: 'Theo',
@@ -451,7 +454,7 @@ test('HTTP store routing receives the exact raw request body before the shared s
   const response = await fetch(`${http}/api/store/webhook`, { method: 'POST', body: raw });
   assert.equal(response.status, 200);
   assert.equal(observed, raw);
-  assert.equal((await (await fetch(`${http}/health`)).json()).protocol, 1);
+  assert.equal((await (await fetch(`${http}/health`)).json()).protocol, MULTIPLAYER_PROTOCOL);
   assert.equal((await fetch(`${http}/missing`)).status, 404);
 });
 
@@ -587,4 +590,194 @@ test('arbitrary canonical artifact designs reach other peers without accepting m
   invalid.send(identity({ appearance: { ...look(), artifactDesign: '\u0000' } }));
   assert.equal((await invalid.next('error')).code, 'invalid_join');
   assert.equal(server.hub.rooms.size, 1);
+});
+
+test('real room sockets share PvE HP/death and replay only unacknowledged contributor receipts after reconnect', async (t) => {
+  let clock = 10000;
+  const { server, url } = await serverFixture(t, { now: () => clock });
+  const world = new InfiniteWorld(3886, 3),
+    vault = world.vaultsAround(107, 107, 24)[0];
+  assert.ok(vault);
+  const npc = world
+    .npcsAround(vault.x, vault.y, 24)
+    .find((n) => n.id.startsWith(`${vault.id}:guard:`))!;
+  assert.ok(npc);
+  const position = adjacent(world, npc),
+    heading = Math.atan2(npc.y - position.y, npc.x - position.x);
+  const extras = { position, combatActive: true, bodyId: 'theo-test-body' };
+  const alice = await join(url, extras);
+  const bob = await join(url, {
+    ...extras,
+    bodyId: 'mira-test-body',
+    room: alice.welcome.room,
+    name: 'Mira',
+  });
+  assert.equal(validSharedCombatFrame(alice.welcome.combat), true);
+  alice.send({ type: 'combat', requestId: 'r1', kind: 'attack', heading, damage: 1e9 });
+  const first = await alice.next('combat_result');
+  assert.equal(first.ok, true);
+  assert.equal(first.frame.hits[0].damage, weaponProfile(42, 'staff', 1).damage);
+  assert.equal(first.frame.hits[0].actorBodyId, 'theo-test-body');
+  const mirrored = await bob.next('combat_frame', (m) =>
+    m.frame.hits.some((h: any) => h.id === first.frame.hits[0].id),
+  );
+  assert.deepEqual(mirrored.frame, first.frame);
+  assert.equal(validSharedCombatFrame(mirrored.frame), true);
+  const partial = first.frame.snapshot.enemies.find((n: any) => n.id === npc.id).hp;
+  const lateWounded = await join(url, { position, room: alice.welcome.room, name: 'Witness' });
+  assert.equal(
+    lateWounded.welcome.combat.snapshot.enemies.find((n: any) => n.id === npc.id).hp,
+    partial,
+  );
+  assert.equal(lateWounded.welcome.combat.hits.length, 0);
+  alice.socket.close();
+  await once(alice.socket, 'close');
+  let kill: any;
+  for (let i = 1; i <= 5 && !kill; i++) {
+    clock += 1000;
+    bob.send({
+      type: 'pose',
+      ...position,
+      heading,
+      phase: 0,
+      appearance: look(),
+      combatActive: true,
+      bodyId: 'mira-test-body',
+    });
+    bob.send({ type: 'combat', requestId: `r${i}`, kind: 'attack', heading });
+    const result = await bob.next('combat_result');
+    assert.equal(result.ok, true);
+    kill = result.frame.deaths.find((d: any) => d.npcId === npc.id);
+  }
+  assert.ok(kill);
+  assert.deepEqual(new Set(kill.contributors), new Set([alice.welcome.peerId, bob.welcome.peerId]));
+  assert.equal(kill.killerBodyId, 'mira-test-body');
+  const resumed = await join(url, {
+    ...extras,
+    room: alice.welcome.room,
+    resumeToken: alice.welcome.resumeToken,
+  });
+  assert.equal(resumed.welcome.peerId, alice.welcome.peerId);
+  assert.ok(resumed.welcome.combat.snapshot.dead.includes(npc.id));
+  assert.equal(resumed.welcome.combat.deaths.filter((d: any) => d.npcId === npc.id).length, 1);
+  assert.ok(resumed.welcome.combat.hits.some((h: any) => h.id === first.frame.hits[0].id));
+  assert.ok(
+    resumed.welcome.combat.hits.every((h: any) =>
+      h.target === 'peer'
+        ? h.targetId === resumed.welcome.peerId
+        : h.actorId === resumed.welcome.peerId,
+    ),
+  );
+  resumed.send({ type: 'combat', requestId: 'r1', kind: 'attack', heading });
+  const replay = await resumed.next('combat_result');
+  assert.equal(replay.ok, true);
+  assert.equal(replay.frame.snapshot.dead.filter((id: string) => id === npc.id).length, 1);
+  const ack = Math.max(
+    0,
+    ...replay.frame.hits.map((h: any) => h.id),
+    ...replay.frame.deaths.map((d: any) => d.id),
+  );
+  resumed.send({ type: 'combat_ack', eventId: ack });
+  await pause(15);
+  const member = server.hub.rooms.get(alice.welcome.room).members.get(alice.welcome.peerId);
+  assert.equal(member.combatHits.size, 0);
+  assert.equal(member.combatDeaths.size, 0);
+  resumed.socket.close();
+  await once(resumed.socket, 'close');
+  const clean = await join(url, {
+    ...extras,
+    room: alice.welcome.room,
+    resumeToken: alice.welcome.resumeToken,
+  });
+  assert.equal(clean.welcome.combat.hits.length, 0);
+  assert.equal(clean.welcome.combat.deaths.length, 0);
+  const late = await join(url, { position, room: alice.welcome.room, name: 'Later' });
+  assert.ok(late.welcome.combat.snapshot.dead.includes(npc.id));
+  assert.equal(late.welcome.combat.deaths.length, 0);
+});
+
+test('room combat rejects invalid progression, inactivity, cooldown and reused intent IDs while accepting exact bounded upgrades', async (t) => {
+  let clock = 10000;
+  const { url } = await serverFixture(t, { now: () => clock });
+  const p = await join(url);
+  p.send({ type: 'combat', requestId: 'r1', kind: 'attack', heading: 0 });
+  assert.equal((await p.next('combat_result')).ok, false);
+  p.send({
+    type: 'pose',
+    x: 0,
+    y: 5,
+    heading: 0,
+    phase: 0,
+    appearance: look(),
+    combatActive: true,
+    progression: { level: 51, combatXp: 0, upgrade: 0 },
+  });
+  assert.equal((await p.next('error')).code, 'invalid_pose');
+  p.send({
+    type: 'pose',
+    x: 0,
+    y: 5,
+    heading: 0,
+    phase: 0,
+    appearance: look(),
+    combatActive: true,
+    progression: { level: 8, combatXp: 500, upgrade: 2 },
+  });
+  p.send({ type: 'combat', requestId: 'r2', kind: 'attack', heading: 0 });
+  assert.equal((await p.next('combat_result')).ok, true);
+  p.send({ type: 'combat', requestId: 'r3', kind: 'attack', heading: 0 });
+  assert.equal((await p.next('combat_result')).ok, false);
+  p.send({ type: 'combat', requestId: 'r2', kind: 'ward', heading: 0 });
+  assert.match((await p.next('combat_result')).reason, /different request/);
+  clock += 1000;
+  p.send({ type: 'combat', requestId: 'r4', kind: 'attack', heading: 1e9 });
+  assert.equal((await p.next('combat_result')).ok, false);
+  p.send({ type: 'combat_ack', eventId: Number.MAX_SAFE_INTEGER });
+  assert.equal((await p.next('error')).code, 'invalid_combat_ack');
+  p.send({
+    type: 'combat',
+    requestId: 'r5',
+    kind: 'parley',
+    guardIds: ['vault:0:0:guard:0', 'vault:0:0:guard:1'],
+  });
+  assert.equal((await p.next('combat_result')).ok, false);
+});
+
+test('combat replay remains rejected after bounded response eviction and a dialogue truce reaches late joiners', async (t) => {
+  let clock = 10000;
+  const { server, url } = await serverFixture(t, { now: () => clock, messageBurst: 1000 });
+  const world = new InfiniteWorld(3886, 3),
+    vault = world.vaultsAround(107, 107, 24)[0];
+  const notice = world
+    .propsAround(vault.entrance.x + 1, 212, 3)
+    .find((p) => p.id === `${vault.id}:notice`)!;
+  assert.ok(notice);
+  const p = await join(url, { position: notice, combatActive: false });
+  const guardIds = world
+    .npcsAround(vault.x, vault.y, 24)
+    .filter((n) => n.id.startsWith(`${vault.id}:guard:`))
+    .map((n) => n.id);
+  p.send({ type: 'combat', requestId: 'r1', kind: 'parley', guardIds });
+  const truce = await p.next('combat_result');
+  assert.equal(truce.ok, true);
+  assert.equal(validSharedCombatFrame(truce.frame), true);
+  assert.deepEqual(truce.frame.snapshot.peaceful, guardIds.sort());
+  for (let i = 2; i < 135; i++)
+    p.send({ type: 'combat', requestId: `r${i}`, kind: 'attack', heading: Infinity });
+  await p.next('combat_result', (m) => m.requestId === 'r134');
+  clock += 1000;
+  p.send({ type: 'combat', requestId: 'r1', kind: 'parley', guardIds });
+  const stale = await p.next('combat_result', (m) => m.requestId === 'r1');
+  assert.equal(stale.ok, false);
+  assert.match(stale.reason, /already processed/);
+  const room = server.hub.rooms.get(p.welcome.room),
+    member = room.members.get(p.welcome.peerId);
+  assert.ok(member.requests.size <= 128);
+  assert.ok(
+    [...member.requests.values()].every((entry: any) => !entry.result.frame),
+    'retry cache holds outcomes instead of repeated full snapshots',
+  );
+  const q = await join(url, { room: p.welcome.room });
+  assert.deepEqual(q.welcome.combat.snapshot.peaceful, guardIds.sort());
+  assert.equal(q.welcome.combat.deaths.length, 0);
 });

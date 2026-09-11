@@ -1,7 +1,8 @@
 import type { Appearance, Point } from './types.ts';
 import type { WorldGeneration } from './world.ts';
+import type { SharedCombatFrame, SharedCombatProgression } from './shared-combat.ts';
 
-export const MULTIPLAYER_PROTOCOL = 1 as const;
+export const MULTIPLAYER_PROTOCOL = 2 as const;
 export const MAX_ROOM_PLAYERS = 8;
 export type MultiplayerGesture = 'wave' | 'thanks' | 'help';
 
@@ -12,6 +13,8 @@ export interface MultiplayerPeer extends Point {
   heading: number;
   phase: number;
   appearance: Appearance;
+  combatActive?: boolean;
+  bodyId?: string;
 }
 
 export type MultiplayerClientMessage =
@@ -25,8 +28,24 @@ export type MultiplayerClientMessage =
       appearance: Appearance;
       position: Point;
       resumeToken?: string;
+      combatActive?: boolean;
+      bodyId?: string;
+      progression?: SharedCombatProgression;
     }
-  | { type: 'pose'; x: number; y: number; heading: number; phase: number; appearance: Appearance }
+  | {
+      type: 'pose';
+      x: number;
+      y: number;
+      heading: number;
+      phase: number;
+      appearance: Appearance;
+      combatActive?: boolean;
+      bodyId?: string;
+      progression?: SharedCombatProgression;
+    }
+  | { type: 'combat'; requestId: string; kind: 'attack' | 'ward'; heading: number }
+  | { type: 'combat'; requestId: string; kind: 'parley'; guardIds: string[] }
+  | { type: 'combat_ack'; eventId: number }
   | {
       type: 'claim';
       requestId: string;
@@ -53,11 +72,20 @@ export type MultiplayerServerMessage =
       peers: MultiplayerPeer[];
       removed: string[];
       opened: string[];
+      combat: SharedCombatFrame;
     }
   | { type: 'peerJoined'; peer: MultiplayerPeer }
   | { type: 'peerLeft'; peerId: string }
   | { type: 'pose'; peer: MultiplayerPeer }
   | { type: 'claimResult'; requestId: string; ok: boolean; reason?: string }
+  | {
+      type: 'combat_result';
+      requestId: string;
+      ok: boolean;
+      reason?: string;
+      frame: SharedCombatFrame;
+    }
+  | { type: 'combat_frame'; frame: SharedCombatFrame }
   | {
       type: 'world';
       /** The actor receives its acknowledgement first and handles its own local inventory. */

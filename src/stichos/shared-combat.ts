@@ -1,5 +1,6 @@
 import { weaponProfile } from './equipment.ts';
 import { generateArtifact, normalizeArtifactDesign } from './artifacts.ts';
+import { createProgression, skillBonuses } from './progression.ts';
 import type { Appearance, Npc, Point } from './types.ts';
 import type { InfiniteWorld } from './world.ts';
 import { STOP_SPACING } from './world.ts';
@@ -9,6 +10,13 @@ export interface SharedCombatPeer extends Point {
   heading: number;
   appearance: Appearance;
   combatActive: boolean;
+  progression?: SharedCombatProgression;
+  bodyId?: string;
+}
+export interface SharedCombatProgression {
+  level: number;
+  combatXp: number;
+  upgrade: number;
 }
 export interface SharedIntent {
   kind: 'slash' | 'arrow';
@@ -32,6 +40,10 @@ export interface SharedProjectile extends Point {
   speed: number;
   damage: number;
   color: string;
+  effect?: 'stagger' | 'breath' | 'warmth';
+  artifactDesign?: string;
+  actorBodyId?: string;
+  strikeId?: number;
 }
 export interface SharedCombatHit {
   id: number;
@@ -41,11 +53,17 @@ export interface SharedCombatHit {
   damage: number;
   kind: 'slash' | 'arrow' | 'ward';
   color: string;
+  effect?: 'stagger' | 'breath' | 'warmth';
+  artifactDesign?: string;
+  actorBodyId?: string;
+  targetBodyId?: string;
+  strikeId?: number;
 }
 export interface SharedCombatDeath {
   id: number;
   npcId: string;
   killerId: string;
+  killerBodyId?: string;
   contributors: string[];
 }
 export interface SharedCombatSnapshot {
@@ -71,6 +89,8 @@ interface CombatProfile {
   cooldown: number;
   delivery: 'contact' | 'projectile' | 'pulse';
   color: string;
+  effect?: 'stagger' | 'breath' | 'warmth';
+  artifactDesign?: string;
 }
 const MAX_COORDINATE = Number.MAX_SAFE_INTEGER - 4096;
 const clamp = (v: number, low: number, high: number) => Math.max(low, Math.min(high, v));
@@ -81,6 +101,185 @@ const pointValid = (p: Point) =>
   Math.abs(p.x) <= MAX_COORDINATE &&
   Math.abs(p.y) <= MAX_COORDINATE;
 const copy = <T>(v: T): T => structuredClone(v);
+
+const object = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === 'object' && !Array.isArray(v);
+const finite = (v: unknown, low: number, high: number): v is number =>
+  typeof v === 'number' && Number.isFinite(v) && v >= low && v <= high;
+const integer = (v: unknown, low = 0, high = Number.MAX_SAFE_INTEGER): v is number =>
+  finite(v, low, high) && Number.isInteger(v);
+const text = (v: unknown, max = 160): v is string =>
+  typeof v === 'string' &&
+  v.length > 0 &&
+  v.length <= max &&
+  !/[\u0000-\u001f\u007f]/.test(v) &&
+  !['__proto__', 'constructor', 'prototype'].includes(v);
+const color = (v: unknown): v is string =>
+  typeof v === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v);
+const point = (v: unknown): v is Record<string, unknown> & Point =>
+  object(v) &&
+  finite(v.x, -MAX_COORDINATE, MAX_COORDINATE) &&
+  finite(v.y, -MAX_COORDINATE, MAX_COORDINATE);
+const design = (v: unknown) => {
+  try {
+    return typeof v === 'string' && normalizeArtifactDesign(v) === v;
+  } catch {
+    return false;
+  }
+};
+const optionalText = (v: unknown) => v === undefined || text(v);
+const appearance = (v: unknown) =>
+  object(v) &&
+  integer(v.seed, -0xffffffff, 0xffffffff) &&
+  (v.weaponSeed === undefined || integer(v.weaponSeed, 0, 0xffffffff)) &&
+  (v.artifactDesign === undefined || design(v.artifactDesign)) &&
+  ['skin', 'hair', 'coat', 'trim', 'trousers'].every((key) => color(v[key])) &&
+  finite(v.height, 0.5, 2) &&
+  finite(v.build, 0.5, 2) &&
+  integer(v.hairStyle, 0, 100) &&
+  integer(v.hat, 0, 100) &&
+  typeof v.cloak === 'boolean' &&
+  ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
+const benefits = (v: Record<string, unknown>) =>
+  (v.effect === undefined || ['stagger', 'breath', 'warmth'].includes(v.effect as string)) &&
+  (v.artifactDesign === undefined || design(v.artifactDesign)) &&
+  optionalText(v.actorBodyId) &&
+  (v.strikeId === undefined || integer(v.strikeId, 1));
+const boundedArray = (
+  v: unknown,
+  max: number,
+  check: (entry: unknown) => boolean,
+): v is unknown[] => {
+  if (!Array.isArray(v) || v.length > max) return false;
+  for (let i = 0; i < v.length; i++) if (!check(v[i])) return false;
+  return true;
+};
+const unique = (values: readonly unknown[]) => new Set(values).size === values.length;
+export function validSharedCombatProgression(value: unknown): value is SharedCombatProgression {
+  return (
+    object(value) &&
+    integer(value.level, 1, 50) &&
+    integer(value.combatXp, 0, 1000000) &&
+    integer(value.upgrade, 0, 3)
+  );
+}
+/** Constant shape checks only: no world generation, rendering, mutation, or simulation. */
+export function validSharedCombatFrame(value: unknown): value is SharedCombatFrame {
+  try {
+    if (!object(value) || !object(value.snapshot)) return false;
+    const s = value.snapshot;
+    if (
+      !integer(s.seq) ||
+      !boundedArray(s.enemies, 512, (n) => {
+        if (
+          !point(n) ||
+          !text(n.id) ||
+          !text(n.name) ||
+          n.role !== 'raider' ||
+          !integer(n.seed, -0xffffffff, 0xffffffff) ||
+          !integer(n.clan, 0, 100) ||
+          !appearance(n.appearance) ||
+          !finite(n.maxHp, 1, 10000) ||
+          !finite(n.hp, 0, n.maxHp) ||
+          !point(n.home) ||
+          !finite(n.speed, 0, 4) ||
+          !finite(n.heading, -1e6, 1e6) ||
+          !finite(n.phase, 0, Number.MAX_SAFE_INTEGER) ||
+          typeof n.hostile !== 'boolean' ||
+          !finite(n.cooldown, 0, 30)
+        )
+          return false;
+        if (n.intent === undefined) return true;
+        const i = n.intent;
+        return (
+          object(i) &&
+          ['slash', 'arrow'].includes(i.kind as string) &&
+          finite(i.heading, -1e6, 1e6) &&
+          finite(i.duration, 0, 10) &&
+          finite(i.remaining, 0, i.duration) &&
+          finite(i.range, 0, 32) &&
+          color(i.color) &&
+          text(i.targetId) &&
+          finite(i.damage, 0, 1000)
+        );
+      }) ||
+      !unique(s.enemies.map((n) => (n as { id: string }).id))
+    )
+      return false;
+    if (
+      !boundedArray(
+        s.projectiles,
+        128,
+        (p) =>
+          point(p) &&
+          integer(p.id, 1) &&
+          text(p.actorId) &&
+          ['peer', 'npc'].includes(p.owner as string) &&
+          finite(p.heading, -1e6, 1e6) &&
+          finite(p.remaining, 0, 32) &&
+          finite(p.speed, 0.1, 32) &&
+          finite(p.damage, 0, 1000) &&
+          color(p.color) &&
+          benefits(p),
+      ) ||
+      !unique(s.projectiles.map((p) => (p as { id: number }).id))
+    )
+      return false;
+    if (
+      !boundedArray(s.dead, 16384, (v) => text(v)) ||
+      !unique(s.dead) ||
+      !boundedArray(s.peaceful, 16384, (v) => text(v)) ||
+      !unique(s.peaceful)
+    )
+      return false;
+    const dead = new Set(s.dead);
+    if (
+      s.peaceful.some((id) => dead.has(id)) ||
+      s.enemies.some((n) => dead.has((n as { id: string }).id))
+    )
+      return false;
+    if (
+      !boundedArray(
+        value.hits,
+        1024,
+        (h) =>
+          object(h) &&
+          integer(h.id, 1) &&
+          text(h.actorId) &&
+          text(h.targetId) &&
+          ['peer', 'npc'].includes(h.target as string) &&
+          finite(h.damage, 0, 1000) &&
+          ['slash', 'arrow', 'ward'].includes(h.kind as string) &&
+          color(h.color) &&
+          benefits(h) &&
+          optionalText(h.targetBodyId),
+      ) ||
+      !unique(value.hits.map((h) => (h as { id: number }).id))
+    )
+      return false;
+    if (
+      !boundedArray(
+        value.deaths,
+        1024,
+        (d) =>
+          object(d) &&
+          integer(d.id, 1) &&
+          text(d.npcId) &&
+          text(d.killerId) &&
+          optionalText(d.killerBodyId) &&
+          boundedArray(d.contributors, 32, (v) => text(v)) &&
+          d.contributors.length > 0 &&
+          unique(d.contributors) &&
+          d.contributors.includes(d.killerId),
+      ) ||
+      !unique(value.deaths.map((d) => (d as { id: number }).id))
+    )
+      return false;
+    return unique([...value.hits, ...value.deaths].map((e) => (e as { id: number }).id));
+  } catch {
+    return false;
+  }
+}
 
 /** Portable room authority: generated hostile bodies only. Inventory/health remain client-owned.
  * Callers authenticate peers, deduplicate action requests, charge stamina and apply hit receipts.
@@ -170,17 +369,18 @@ export class SharedCombat {
   private validPeer(peer: SharedCombatPeer) {
     return (
       !!peer &&
-      typeof peer.id === 'string' &&
-      peer.id.length > 0 &&
-      peer.id.length <= 160 &&
+      text(peer.id) &&
+      optionalText(peer.bodyId) &&
       peer.combatActive === true &&
       pointValid(peer) &&
-      Number.isFinite(peer.heading) &&
+      finite(peer.heading, -1e6, 1e6) &&
       !this.blocked(peer)
     );
   }
 
-  private profile(look: Appearance): CombatProfile {
+  private profile(look: Appearance, progression?: SharedCombatProgression): CombatProfile {
+    if (progression !== undefined && !validSharedCombatProgression(progression))
+      throw Error('Invalid combat progression.');
     // Validate before keying: JSON serializes NaN/null/undefined similarly inside arrays.
     if (!look || !Number.isInteger(look.seed) || Math.abs(look.seed) > 0xffffffff)
       throw Error('Invalid equipped body.');
@@ -194,16 +394,22 @@ export class SharedCombat {
       normalizeArtifactDesign(look.artifactDesign) !== look.artifactDesign
     )
       throw Error('Invalid artifact design.');
-    const key = JSON.stringify([look?.seed, look?.weaponSeed, look?.weapon, look?.artifactDesign]);
+    const key = JSON.stringify([
+      look?.seed,
+      look?.weaponSeed,
+      look?.weapon,
+      look?.artifactDesign,
+      progression,
+    ]);
     const cached = this.profiles.get(key);
     if (cached) return cached;
-    const profile = this.buildProfile(look);
+    const profile = this.buildProfile(look, progression);
     this.profiles.set(key, profile);
     while (this.profiles.size > 128) this.profiles.delete(this.profiles.keys().next().value!);
     return profile;
   }
 
-  private buildProfile(look: Appearance): CombatProfile {
+  private buildProfile(look: Appearance, progression?: SharedCombatProgression): CombatProfile {
     if (!look || !Number.isInteger(look.seed) || Math.abs(look.seed) > 0xffffffff)
       throw Error('Invalid equipped body.');
     if (
@@ -217,13 +423,26 @@ export class SharedCombat {
       const artifact = generateArtifact(look.artifactDesign);
       if (artifact.category !== 'implement' || artifact.delivery === 'consume')
         throw Error('This object is not a weapon.');
-      return { ...artifact.properties, delivery: artifact.delivery, color: artifact.color };
+      return {
+        ...artifact.properties,
+        delivery: artifact.delivery,
+        color: artifact.color,
+        artifactDesign: artifact.design,
+      };
     }
     if (!['staff', 'sword', 'bow', 'none'].includes(look.weapon))
       throw Error('Invalid equipped weapon.');
     const kind = look.weapon === 'none' ? 'staff' : look.weapon;
+    const state = createProgression(look.seed);
+    state.xp.combat = progression?.combatXp ?? 0;
+    const skill = skillBonuses(state),
+      rank = progression?.upgrade ?? 0;
+    const base = weaponProfile(look.weaponSeed ?? look.seed, kind, progression?.level ?? 1);
     return {
-      ...weaponProfile(look.weaponSeed ?? look.seed, kind, 1),
+      ...base,
+      damage: base.damage + skill.damageBonus + rank * 2,
+      range: base.range + rank * 0.08,
+      cooldown: base.cooldown * skill.cooldownMultiplier * (1 - rank * 0.04),
       delivery: kind === 'bow' ? ('projectile' as const) : ('contact' as const),
     };
   }
@@ -282,15 +501,20 @@ export class SharedCombat {
     actorId: string,
     kind: SharedCombatHit['kind'],
     color: string,
+    benefits?: Pick<CombatProfile, 'artifactDesign' | 'effect'> & {
+      actorBodyId?: string;
+      strikeId?: number;
+    },
   ) {
     if (npc.hp <= 0 || !npc.hostile || this.dead.has(npc.id) || !this.recordable(npc.id))
       return false;
     const damage = Math.min(npc.hp, amount);
     npc.hp = Math.max(0, npc.hp - amount);
     delete npc.intent;
-    npc.cooldown = Math.max(npc.cooldown, 0.35);
+    npc.cooldown = Math.max(npc.cooldown, benefits?.effect === 'stagger' ? 1.35 : 0.35);
     const contributors = this.contributors.get(npc.id) ?? new Set<string>();
     contributors.add(actorId);
+    while (contributors.size > 32) contributors.delete(contributors.values().next().value!);
     this.contributors.set(npc.id, contributors);
     this.hits.push({
       id: ++this.serial,
@@ -300,6 +524,11 @@ export class SharedCombat {
       damage,
       kind,
       color,
+      ...(benefits?.effect ? { effect: benefits.effect } : {}),
+      ...(benefits?.artifactDesign ? { artifactDesign: benefits.artifactDesign } : {}),
+      ...(benefits?.actorBodyId ? { actorBodyId: benefits.actorBodyId } : {}),
+      targetBodyId: npc.id,
+      ...(benefits?.strikeId ? { strikeId: benefits.strikeId } : {}),
     });
     if (npc.hp <= 0) {
       this.dead.add(npc.id);
@@ -310,6 +539,7 @@ export class SharedCombat {
         id: ++this.serial,
         npcId: npc.id,
         killerId: actorId,
+        ...(benefits?.actorBodyId ? { killerBodyId: benefits.actorBodyId } : {}),
         contributors: [...contributors].sort(),
       });
       this.contributors.delete(npc.id);
@@ -323,11 +553,16 @@ export class SharedCombat {
     kind: 'attack' | 'ward' = 'attack',
   ): SharedCombatResult {
     this.refreshCollision();
-    if (!this.validPeer(peer) || !Number.isFinite(heading) || !['attack', 'ward'].includes(kind))
+    if (
+      !this.validPeer(peer) ||
+      !Number.isFinite(heading) ||
+      Math.abs(heading) > 1e6 ||
+      !['attack', 'ward'].includes(kind)
+    )
       return this.result(false, 'A living, active traveler on clear ground is required.');
     let profile: ReturnType<SharedCombat['profile']>;
     try {
-      profile = this.profile(peer.appearance);
+      profile = this.profile(peer.appearance, peer.progression);
     } catch (error) {
       return this.result(false, error instanceof Error ? error.message : 'Invalid weapon.');
     }
@@ -345,10 +580,11 @@ export class SharedCombat {
     for (const npc of this.world.npcsAround(peer.x, peer.y, 16)) this.load(npc);
     const range = kind === 'ward' ? 2.7 : profile.range;
     const color = kind === 'ward' ? '#9abde9' : profile.color;
+    const strikeId = ++this.serial;
     if (kind === 'attack' && profile.delivery === 'projectile') {
       if (this.projectiles.length >= 128) return this.result(false, 'Too many projectiles.');
       this.projectiles.push({
-        id: ++this.serial,
+        id: strikeId,
         actorId: peer.id,
         owner: 'peer',
         x: peer.x,
@@ -358,6 +594,10 @@ export class SharedCombat {
         speed: 9,
         damage: profile.damage,
         color,
+        ...(profile.effect ? { effect: profile.effect } : {}),
+        ...(profile.artifactDesign ? { artifactDesign: profile.artifactDesign } : {}),
+        ...(peer.bodyId ? { actorBodyId: peer.bodyId } : {}),
+        strikeId,
       });
     } else {
       const radial = kind === 'ward' || profile.delivery === 'pulse';
@@ -374,10 +614,15 @@ export class SharedCombat {
       for (const npc of radial ? targets : targets.slice(0, 1)) {
         const struck = this.damage(
           npc,
-          kind === 'ward' ? 15 : profile.damage,
+          kind === 'ward' ? 14 + (peer.progression?.level ?? 1) : profile.damage,
           peer.id,
           radial ? 'ward' : 'slash',
           color,
+          {
+            ...(kind === 'ward' ? {} : profile),
+            ...(peer.bodyId ? { actorBodyId: peer.bodyId } : {}),
+            strikeId,
+          },
         );
         if (struck && kind === 'ward' && npc.hp > 0) {
           const d = Math.max(0.01, distance(peer, npc));
@@ -394,7 +639,7 @@ export class SharedCombat {
   parley(peer: SharedCombatPeer, guardIds: readonly string[]): SharedCombatResult {
     this.refreshCollision();
     if (
-      !this.validPeer(peer) ||
+      !this.validPeer({ ...peer, combatActive: true }) ||
       !Array.isArray(guardIds) ||
       guardIds.length !== 2 ||
       new Set(guardIds).size !== 2
@@ -502,6 +747,7 @@ export class SharedCombat {
                 speed: 7,
                 damage: intent.damage,
                 color: intent.color,
+                actorBodyId: npc.id,
               });
           } else if (
             distance(npc, original) <= intent.range &&
@@ -516,6 +762,8 @@ export class SharedCombat {
               damage: intent.damage,
               kind: 'slash',
               color: intent.color,
+              actorBodyId: npc.id,
+              ...(original.bodyId ? { targetBodyId: original.bodyId } : {}),
             });
           }
         }
@@ -580,6 +828,8 @@ export class SharedCombat {
               damage: arrow.damage,
               kind: 'arrow',
               color: arrow.color,
+              actorBodyId: arrow.actorId,
+              ...(peer.bodyId ? { targetBodyId: peer.bodyId } : {}),
             });
             arrow.remaining = 0;
           }
@@ -588,7 +838,7 @@ export class SharedCombat {
             (n) => n.hp > 0 && n.hostile && distance(n, arrow) < 0.4,
           );
           if (npc) {
-            this.damage(npc, arrow.damage, arrow.actorId, 'arrow', arrow.color);
+            this.damage(npc, arrow.damage, arrow.actorId, 'arrow', arrow.color, arrow);
             arrow.remaining = 0;
           }
         }
