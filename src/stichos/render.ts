@@ -723,6 +723,7 @@ export class StichosRenderer {
       game.opened.has(prop.id),
       game.world.clans[prop.clan ?? 0]?.color ?? '#68837c',
       prop.kind === 'door' ? building?.kind : undefined,
+      game.world.generation >= 3 && /:ore:\d+$/.test(prop.id),
     );
     // These planted resource trees are visibly pruned, with the same trunk footprint.
     const verticalScale = s * (prop.kind === 'pine' && /:timber:\d+$/.test(prop.id) ? 0.65 : 1);

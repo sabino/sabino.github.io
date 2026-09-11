@@ -76,6 +76,8 @@ export type NpcRole =
 export interface Appearance {
   /** Body-owned forged item seed; never changes this person's anatomy. */
   weaponSeed?: number;
+  /** A generated physical object; anatomy still derives from seed. */
+  artifactDesign?: string;
   seed: number;
   skin: string;
   hair: string;

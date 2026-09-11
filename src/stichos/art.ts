@@ -1,6 +1,8 @@
 import { random, deriveSeed } from '../procedural/random.ts';
 import type { Appearance, BuildingKind, PropKind, Terrain, Tile } from './types.ts';
 import { drawWeapon, weaponGenome } from './equipment.ts';
+import { drawArtifact } from './artifact-art.ts';
+import { humanoidGenome } from './humanoid-genome.ts';
 import { drawPlant } from './botany.ts';
 import type { PlantKind } from './botany.ts';
 import { actionMotion } from './actor-motion.ts';
@@ -805,7 +807,56 @@ export class StichosArt {
     opened = false,
     tint = '#687e80',
     doorStyle?: CivilBuildingKind | 'church',
+    stockpile = false,
   ): Sprite {
+    if (kind === 'rock' && stockpile)
+      return this.get(`ore-stock:${seed >>> 0}`, () =>
+        image(
+          48,
+          48,
+          (ctx) => {
+            const r = random(deriveSeed(seed, 'mineral-workyard'));
+            rect(ctx, 7, 32, 34, 8, '#31414a');
+            for (let row = 0; row < 2; row++)
+              for (let n = 0; n < 3; n++) {
+                const x = 11 + n * 10 + (row ? 4 : 0),
+                  y = 31 - row * 8,
+                  w = 4 + Math.floor(r() * 3);
+                poly(
+                  ctx,
+                  [
+                    [x - w, y],
+                    [x - w + 1, y - 7],
+                    [x + 1, y - 10],
+                    [x + w, y - 6],
+                    [x + w - 1, y + 1],
+                  ],
+                  '#667d8b',
+                );
+                poly(
+                  ctx,
+                  [
+                    [x - w + 1, y - 7],
+                    [x + 1, y - 10],
+                    [x + 2, y - 4],
+                    [x - 2, y - 2],
+                  ],
+                  '#a0b6c0',
+                );
+                line(ctx, x + 1, y - 8, x + w - 1, y - 3, '#c9c4a0');
+              }
+            rect(ctx, 5, 35, 38, 3, '#735f4b');
+            rect(ctx, 5, 35, 38, 1, '#9b8c70');
+            for (const x of [7, 37]) {
+              rect(ctx, x, 29, 3, 14, '#4a4640');
+              rect(ctx, x, 29, 1, 12, '#9a8b71');
+            }
+            rect(ctx, 9, 40, 30, 2, '#627681');
+          },
+          24,
+          42,
+        ),
+      );
     if (kind === 'cequin' || kind === 'heartleaf' || kind === 'emberroot' || kind === 'mushroom')
       return this.get(`plant:${kind}:${seed >>> 0}`, () => this.herb(kind, seed));
     // Organic silhouettes retain their full coordinate seed; the bounded sprite
@@ -1431,6 +1482,7 @@ export function drawHumanoid(
     look.trousers,
     look.weapon,
     look.weaponSeed ?? look.seed,
+    JSON.stringify(look.artifactDesign ?? ''),
     heading,
     gait,
     moving,
@@ -1498,7 +1550,8 @@ function drawHumanoidParts(
 ) {
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
-  ctx.scale(scale * look.build * 1.28, scale * look.height);
+  const anatomy = humanoidGenome(look.seed);
+  ctx.scale(scale * look.build * 1.28 * anatomy.width, scale * look.height * anatomy.height);
   const face = ((Math.round(heading) % 4) + 4) % 4;
   const side = face === 1 || face === 3,
     east = face === 1 ? 1 : -1;
@@ -1509,7 +1562,7 @@ function drawHumanoidParts(
   const motion = actionMotion(action),
     strength = motion.strength;
   const handPose = (s: number, front: boolean) => {
-    const ax = side ? east * (front ? 5 : -4) : s * 6;
+    const ax = side ? east * (front ? 5 : -4) : s * (anatomy.shoulders + 1);
     let hx = ax + 1,
       hy = -14 + (moving ? step * s * 2 : 0);
     if (motion.kind === 'gather') {
@@ -1533,7 +1586,7 @@ function drawHumanoidParts(
     return { x: hx, y: hy };
   };
   const arm = (s: number, front: boolean) => {
-    const ax = side ? east * (front ? 5 : -4) : s * 6,
+    const ax = side ? east * (front ? 5 : -4) : s * (anatomy.shoulders + 1),
       sway = moving ? step * s * 2 : 0,
       lift = attack > 0 && front ? -8 * Math.sin(attack * Math.PI) : 0;
     if (motion.kind) {
@@ -1542,7 +1595,7 @@ function drawHumanoidParts(
         elbowY = (-25 - bob + hand.y) * 0.5 + 2;
       line(ctx, ax, -25 - bob, elbowX, elbowY, color(coat, front ? 9 : -15), 3);
       line(ctx, elbowX, elbowY, hand.x, hand.y, color(coat, front ? 14 : -8), 3);
-      rect(ctx, hand.x - 1, hand.y - 2, 3, 2, '#aaa18a');
+      rect(ctx, hand.x - 1, hand.y - anatomy.cuff, 3, anatomy.cuff, color(look.trim, -10));
       rect(ctx, hand.x - 1, hand.y, 3, 3, look.skin);
       if (!front && motion.kind === 'heal') {
         rect(ctx, hand.x - 1, hand.y - 5, 3, 5, '#89b6a2');
@@ -1565,7 +1618,7 @@ function drawHumanoidParts(
       3,
     );
     rect(ctx, ax, -15 + sway + lift, 3, 3, look.skin);
-    rect(ctx, ax, -18 + sway + lift, 3, 2, '#9b947d');
+    rect(ctx, ax, -16 - anatomy.cuff + sway + lift, 3, anatomy.cuff, color(look.trim, -10));
   };
   const heldArmAndItem = () => {
     arm(1, true);
@@ -1583,19 +1636,22 @@ function drawHumanoidParts(
             : sign * (0.04 + attack * 0.7));
       const weaponScale = look.weapon === 'bow' ? 0.62 : 0.68;
       const weaponSeed = look.weaponSeed ?? look.seed;
-      const bow = look.weapon === 'bow' ? weaponGenome(weaponSeed, 'bow') : null;
+      const bow =
+        !look.artifactDesign && look.weapon === 'bow' ? weaponGenome(weaponSeed, 'bow') : null;
       ctx.save();
       ctx.translate(wx + sign * attack * 4, hand);
       ctx.rotate(angle);
       if (side && east < 0) ctx.scale(-1, 1);
-      drawWeapon(
-        ctx,
-        weaponSeed,
-        look.weapon,
-        bow ? -(2 + bow.breadth) * weaponScale : 0,
-        bow ? -(13 - bow.length / 2) * weaponScale : 0,
-        weaponScale,
-      );
+      if (look.artifactDesign) drawArtifact(ctx, look.artifactDesign, 0, 0, weaponScale);
+      else
+        drawWeapon(
+          ctx,
+          weaponSeed,
+          look.weapon,
+          bow ? -(2 + bow.breadth) * weaponScale : 0,
+          bow ? -(13 - bow.length / 2) * weaponScale : 0,
+          weaponScale,
+        );
       ctx.restore();
       // A visible gripping hand belongs to the articulated body, over its generated handle.
       rect(ctx, wx + sign * attack * 4, hand, 2, 2, look.skin);
@@ -1604,7 +1660,7 @@ function drawHumanoidParts(
   // Sole, trouser folds, two distinct feet, and the visible rear hand.
   for (const s of [-1, 1]) {
     const sy = s * step * 2,
-      bx = side ? s * step * 3 : s * 3;
+      bx = side ? s * step * 3 : s * anatomy.stance;
     rect(ctx, bx - 2, -12 + sy, 4, 10 - sy, look.trousers);
     rect(ctx, bx - 2, -3 + sy, 5, 3, '#1b2b32');
     rect(ctx, bx - 2, -3 + sy, 3, 1, '#77818a');
@@ -1614,6 +1670,10 @@ function drawHumanoidParts(
   if (motion.kind) ctx.translate((side ? east : 0) * motion.lean, motion.crouch);
   // Looking north puts the held arm, grip and item beyond the back of the body.
   // Paint the complete assembly first so neither a swing nor a bow can cross the hood.
+  if (look.artifactDesign && look.weapon === 'none') {
+    // A sheathed/stowed construction remains a physical object attached to its owner's back.
+    drawArtifact(ctx, look.artifactDesign, -3, -16, 0.55, -0.42);
+  }
   if (weaponBehindBody) heldArmAndItem();
   if (look.cloak) {
     poly(
@@ -1647,22 +1707,37 @@ function drawHumanoidParts(
   poly(
     ctx,
     [
-      [-5, -27 - bob],
-      [5, -27 - bob],
-      [6, -12],
-      [2, -10],
-      [-5, -12],
+      [-anatomy.shoulders, -27 - bob],
+      [anatomy.shoulders, -27 - bob],
+      [anatomy.waist, anatomy.beltY],
+      [anatomy.hem, anatomy.coatBottom - 1],
+      [2, anatomy.coatBottom],
+      [-anatomy.hem, anatomy.coatBottom - 1],
+      [-anatomy.waist, anatomy.beltY],
     ],
     coat,
   );
   rect(ctx, -4, -25 - bob, 2, 13, color(coat, 17));
   rect(ctx, 3, -25 - bob, 2, 12, color(coat, -18));
-  rect(ctx, -5, -16, 11, 2, '#2c3738');
-  rect(ctx, 0, -16, 2, 2, '#d2b781');
+  rect(ctx, -anatomy.waist, anatomy.beltY, anatomy.waist * 2 + 1, 2, '#2c3738');
+  rect(ctx, side ? east * 2 : 0, anatomy.beltY, 2, 2, '#d2b781');
+  if (face !== 0) {
+    for (let i = 0; i < anatomy.buttons; i++)
+      rect(ctx, side ? east * 2 : 0, -23 + i * 2, 1, 1, color(look.trim, 28));
+    for (let i = 0; i < anatomy.pockets; i++) {
+      const px = (i ? -anatomy.pocketSide : anatomy.pocketSide) * (anatomy.waist - 1);
+      rect(ctx, px - 1, anatomy.beltY + 3, 3, 3, color(coat, -20));
+      rect(ctx, px - 1, anatomy.beltY + 3, 3, 1, color(coat, 20));
+    }
+    if (anatomy.patch)
+      rect(ctx, -anatomy.pocketSide * 3 - 1, anatomy.coatBottom - 3, 2, 2, color(coat, 12));
+  } else line(ctx, anatomy.seam, -25 - bob, anatomy.seam, anatomy.coatBottom - 2, color(coat, -12));
   if (face !== 0) {
     line(ctx, -2, -25 - bob, 0, -17, look.trim);
     line(ctx, 2, -25 - bob, 0, -17, color(look.trim, 20));
     rect(ctx, 0, -22, 1, 1, '#e1d3a6');
+    if (anatomy.collar === 1) rect(ctx, -3, -27 - bob, 7, 2, color(look.trim, -12));
+    else if (anatomy.collar === 2) line(ctx, -4, -26 - bob, 1, -21, look.trim, 2);
   }
   // Neck, skull silhouette, hair/hood and a readable face at only a few pixels.
   rect(ctx, -2, -29 - bob, 4, 3, color(look.skin, -15));
@@ -1680,23 +1755,59 @@ function drawHumanoidParts(
     ],
     '#20313a',
   );
-  rect(ctx, -4, -34 - bob, 8, 6, face === 0 ? look.hair : look.skin);
+  poly(
+    ctx,
+    [
+      [-anatomy.skull, -34 - bob],
+      [-anatomy.skull + 0.5, -36 - bob],
+      [anatomy.skull - 0.5, -36 - bob],
+      [anatomy.skull, -33 - bob],
+      [anatomy.jaw, -28 - bob],
+      [-anatomy.jaw, -28 - bob],
+    ],
+    face === 0 ? look.hair : look.skin,
+  );
   rect(ctx, -3, -36 - bob, 6, 2, look.hair);
+  if (anatomy.hairline === 1) rect(ctx, -3, -35 - bob, 2, 2, look.hair);
+  else if (anatomy.hairline === 2) rect(ctx, 1, -35 - bob, 3, 2, look.hair);
+  else if (anatomy.hairline === 3) rect(ctx, -anatomy.skull, -33 - bob, 1, 5, look.hair);
+  else if (anatomy.hairline === 4) rect(ctx, anatomy.skull - 1, -34 - bob, 2, 5, look.hair);
   if (face !== 0) {
     rect(ctx, -4, -34 - bob, 2, 5, color(look.skin, -27));
     rect(ctx, 2, -33 - bob, 2, 3, color(look.skin, 13));
     if (look.hairStyle % 3 === 0) rect(ctx, -3, -35 - bob, 2, 3, look.hair);
     if (look.hairStyle % 3 === 1) rect(ctx, 2, -35 - bob, 2, 3, look.hair);
-    const eyesX = side ? east * 2 : -2;
-    rect(ctx, eyesX - 1, -33 - bob, 2, 1, color(look.hair, -8));
-    rect(ctx, eyesX, -32 - bob, 1, 1, '#223441');
-    if (!side) rect(ctx, 2, -32 - bob, 1, 1, '#223441');
-    rect(ctx, side ? east * 3 : 0, -30 - bob, 1, 1, '#eed7b6');
-    rect(ctx, -2, -28 - bob, 5, 1, color(look.skin, -26));
-    if (look.hairStyle === 4) {
+    const eyeY = -32 - bob - anatomy.eyeLift;
+    const eyesX = side ? east * 2 : -anatomy.eyeGap;
+    rect(ctx, eyesX - 1, eyeY - 1, anatomy.brow === 1 ? 3 : 2, 1, color(look.hair, -8));
+    rect(ctx, eyesX, eyeY, 1, 1, '#223441');
+    if (!side) {
+      rect(ctx, anatomy.eyeGap, eyeY, 1, 1, '#223441');
+      rect(
+        ctx,
+        anatomy.eyeGap - 1,
+        eyeY - 1 - (anatomy.brow === 2 ? 1 : 0),
+        2,
+        1,
+        color(look.hair, -8),
+      );
+    }
+    const noseX = side ? east * (3 + anatomy.nose * 0.4) : 0;
+    rect(
+      ctx,
+      noseX,
+      -31 - bob,
+      1 + Number(anatomy.nose === 2),
+      1 + Number(anatomy.nose === 1),
+      color(look.skin, 19),
+    );
+    rect(ctx, -1, -28 - bob, 3, 1, color(look.skin, -26));
+    if (anatomy.beard === 1 || look.hairStyle === 4) {
       rect(ctx, -3, -29 - bob, 6, 2, color(look.hair, 8));
       rect(ctx, -1, -27 - bob, 3, 1, look.hair);
-    }
+    } else if (anatomy.beard === 2) rect(ctx, -2, -30 - bob, 4, 1, look.hair);
+    else if (anatomy.beard === 3)
+      rect(ctx, side ? east * 3 : -1, -28 - bob, 2, 2, color(look.hair, 10));
   }
   if (look.hat === 1 || look.hat === 3) {
     poly(
