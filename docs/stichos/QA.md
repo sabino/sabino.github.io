@@ -132,7 +132,7 @@ The current generation-3 checks are `--atlas`, `--visual`, and storage. The full
 
 Frozen preview `app-CYu5WpWe.js`, workspace browser `app-1319943` at its discovered loopback CDP endpoint. `scripts/browser-stichos-campaign.mjs` passed **8/8 checks with zero runtime errors** in a disposable browser context. It used the actual file chooser to import saves earned by the complete public-action simulation; no browser simulation fields, position, inventory or quest state were injected.
 
-Verified with real mouse/keyboard input: the Calling page hides the ending before investigation; all four final plaza lamps and radio complete the puzzle; the final decision opens a readable ending celebration; continuing returns to the same world; seven optional purposes and known identities are visible; an owned garden consumes a seed portion, prevents early harvest, advances through actual rest actions and pays its displayed yield; gathered timber/ore fund an equipment upgrade that changes its real profile; a selected willing host lacks the physical notebook, and returning to the original priest restores the exact original inventory and book. The Calling page also fits and closes at390×844.
+Verified with real mouse/keyboard input: the Calling page hides the ending before investigation; all four final plaza lamps and radio complete the puzzle; the final decision opens a readable ending celebration; continuing returns to the same world; seven optional purposes and known identities are visible; an owned garden consumes a seed portion, prevents early harvest, advances through actual rest actions and pays its displayed yield; gathered timber/ore fund an equipment upgrade that changes its real profile; a selected willing host lacks the physical notebook, and returning to the original priest restores the exact original inventory and book. The Calling page also fits and closes at 390×844.
 
 Evidence is in `.dream-loop/stichos-campaign-browser/results.json` and numbered screenshots. `08b-furnished-interior.png` follows an actual walk through the owned inn's south doorway. `04-ending.png` shows the final acknowledgement; `10-remembered-pages.png` shows the distinct memory record in another body.
 
@@ -143,4 +143,22 @@ VERSO_QA_FIXTURES=1 node --experimental-strip-types --test --test-name-pattern='
 node scripts/browser-stichos-campaign.mjs http://127.0.0.1:WORKSPACE_CDP_PORT http://localhost:4174/
 ```
 
-The opt-in fixture files are `.dream-loop/campaign-fixtures/before-final-puzzle.json`, `before-ending.json`, `campaign-complete.json` and `free-life-home.json`. Ordinary test execution does not write them. The source of these states completes the radio opening, all24investigation objectives and post-story home/commission/identity actions through public simulation APIs. Unit tests separately cover all81weapon part combinations, matching forged previews and actual handling, physical weapon ownership across possession, and malformed recipe/owner/seed rejection. The modular forging UI was added after this frozen browser checkpoint and requires its own browser pass.
+The opt-in fixture files are `.dream-loop/campaign-fixtures/before-final-puzzle.json`, `before-ending.json`, `campaign-complete.json` and `free-life-home.json`. Ordinary test execution does not write them. The source of these states completes the radio opening, all 24 investigation objectives and post-story home/commission/identity actions through public simulation APIs. Unit tests separately cover all 81 weapon part combinations, matching forged previews and actual handling, physical weapon ownership across possession, and malformed recipe/owner/seed rejection. The modular forging UI was checked separately on the following frozen build.
+
+## Component forging browser checkpoint
+
+Frozen preview `app-4WUYSu3a.js`, CSS `app-CXxY52q5.css`, service worker `cdf5981529db893f69ba` passed **6/6 focused checks with zero runtime errors** on 11 September 2026. A fresh workspace browser context imported the action-earned `free-life-home.json` through the real file chooser, then gathered three timber trees and two ore deposits through actual world clicks.
+
+Native weapon, material, living-core and proportion selectors changed the rendered construction. Missing timber disabled forging. At the owned home's field bench, the selected long ironbark/Cequin staff consumed exactly the displayed 34 coins, six timber, five ore and two Cequin. Its actual profile matched the preview: 43 strength, 1.77 reach and 0.64-second recovery. The body retained its original appearance seed while its held weapon used forged seed `3770690370`. Repeating the identical construction was disabled.
+
+The Gear panel used the exact preview sprite and matching profile. Pause, browser reload and Continue retained the forged seed, weapon profile, body identity and paid inventory. The Forge controls worked at 390×844 without horizontal overflow and the panel closed. Screenshots were inspected for visible construction, held equipment and readable controls.
+
+The actual local cosmetic service, with purchases unconfigured, disabled all three purchase buttons. Its recovery control generated a code masked by default in the disposable test wallet; no checkout, charge or premium entitlement was created. Recovery-code contents were not logged or included in evidence.
+
+Evidence: [structured results](../../.dream-loop/stichos-forge-browser/results.json), [construction preview](../../.dream-loop/stichos-forge-browser/03-ready-forge-preview.png), [held weapon](../../.dream-loop/stichos-forge-browser/05-weapon-held-in-world.png), [Gear](../../.dream-loop/stichos-forge-browser/06-gear-forged-weapon.png), [mobile Forge](../../.dream-loop/stichos-forge-browser/07-mobile-forge.png), and [masked recovery control](../../.dream-loop/stichos-forge-browser/09-private-recovery-masked.png).
+
+```sh
+node scripts/browser-stichos-campaign.mjs http://127.0.0.1:WORKSPACE_CDP_PORT http://localhost:4174/ --forge
+```
+
+The fixtures must first be generated with the command above. This mode uses only actual UI input and read-only diagnostics, creates its own browser context, and removes its temporary mounted import copies after closing it.
