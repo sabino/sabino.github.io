@@ -860,9 +860,12 @@ export class StichosRenderer {
     const action = this.actorActions.get(player ? '$player' : (person as Npc).id) ?? null;
     const attack = action ? 0 : cooldown > 0.25 ? clamp((cooldown - 0.25) / 0.4, 0, 1) : 0;
     const facing = humanoidDirection(person.heading);
+    const appearance = player
+      ? person.appearance
+      : game.appearanceForBody(person.appearance, (person as Npc).id);
     drawHumanoid(
       ctx,
-      person.appearance,
+      appearance,
       p.x,
       p.y,
       s,
