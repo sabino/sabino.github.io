@@ -73,11 +73,27 @@ export function makeRegionalBuilding(
   image.height = h + 224;
   const c = image.getContext('2d')!;
   c.imageSmoothingEnabled = false;
-  const wall = culture.wallColor,
-    roof = culture.roofColor,
-    wood = culture.woodColor,
+  const mix = (a: string, b: string, t: number) => {
+    const aa = Number.parseInt(a.slice(1), 16),
+      bb = Number.parseInt(b.slice(1), 16);
+    return (
+      '#' +
+      [16, 8, 0]
+        .map((shift) =>
+          Math.round(((aa >> shift) & 255) * (1 - t) + ((bb >> shift) & 255) * t)
+            .toString(16)
+            .padStart(2, '0'),
+        )
+        .join('')
+    );
+  };
+  // Roofs, warm wall faces and deep structural recesses occupy different value bands.
+  // This keeps a northern slate roof from reading as another upright masonry panel.
+  const wall = mix(culture.wallColor, g.technology > 0.67 ? '#81959b' : '#a2987e', 0.28),
+    roof = mix(culture.roofColor, '#223548', 0.28),
+    wood = mix(culture.woodColor, '#71523d', 0.22),
     trim = culture.accentColor,
-    dark = g.structuralColor;
+    dark = mix(g.structuralColor, '#15232d', 0.38);
   const frost = culture.style === 'alpine';
   const clip = (points: number[][], paint: () => void) => {
     c.save();
@@ -113,9 +129,9 @@ export function makeRegionalBuilding(
         const left = Math.max(0, k + (((j / bh) % 2) * bw) / 2),
           right = Math.min(ww, k + (((j / bh) % 2) * bw) / 2 + bw - 1);
         if (right <= left) continue;
-        const face = color(tone, r() * 27 - 13);
+        const face = color(tone, r() * 20 - 10 - (j / Math.max(1, hh)) * 9);
         rect(c, xx + left + 1, yy + j + 1, right - left - 1, Math.min(bh - 1, hh - j - 1), face);
-        rect(c, xx + left + 2, yy + j + 1, Math.max(1, right - left - 3), 1, color(face, 18));
+        rect(c, xx + left + 2, yy + j + 1, Math.max(1, right - left - 3), 1, color(face, 14));
         if (r() > 0.5)
           rect(
             c,
@@ -169,7 +185,7 @@ export function makeRegionalBuilding(
         ];
     poly(c, pts, dark);
     clip(pts, () => {
-      rect(c, left + 3, top + 2, ww - 6, hh - 3, g.illuminated ? '#284e65' : '#786c4f');
+      rect(c, left + 3, top + 2, ww - 6, hh - 3, g.illuminated ? '#183848' : '#4b3f35');
       for (let j = 0; j < hh; j += 10)
         for (let k = 0; k < ww; k += 8)
           rect(
@@ -180,7 +196,7 @@ export function makeRegionalBuilding(
             Math.min(8, hh - j - 3),
             g.illuminated
               ? color(trim, r() * 35 + 12)
-              : ['#c9b080', '#b39668', '#ddc598'][Math.floor(r() * 3)],
+              : ['#dbad6f', '#ab804f', '#ffe0a0'][Math.floor(r() * 3)],
           );
       line(c, cx, top, cx, foot, color(wood, -16), 2);
       line(c, left, foot - hh / 2, left + ww, foot - hh / 2, color(wood, -16), 2);
@@ -190,37 +206,67 @@ export function makeRegionalBuilding(
       for (const side of [-1, 1])
         rect(c, cx + side * (ww / 2 + 4) - 2, top + 6, 3, hh - 5, color(wall, 18));
   };
+  const shallowStroke = (x0: number, y0: number, x1: number, y1: number, tone: string) => {
+    const steps = Math.max(1, Math.abs(Math.round(y1 - y0)) + 1),
+      width = (x1 - x0) / steps;
+    for (let n = 0; n < steps; n++)
+      rect(c, x0 + n * width, y0 + ((y1 - y0) * n) / Math.max(1, steps - 1), width + 1, 1, tone);
+  };
   const roofPlane = (points: number[][], tone: string, metallic = g.technology > 0.67) => {
     const minX = Math.min(...points.map((p) => p[0])),
       maxX = Math.max(...points.map((p) => p[0])),
       minY = Math.min(...points.map((p) => p[1])),
-      maxY = Math.max(...points.map((p) => p[1]));
-    poly(c, points, color(tone, -19));
+      maxY = Math.max(...points.map((p) => p[1])),
+      depth = maxY - minY;
+    poly(c, points, color(tone, -25));
     clip(points, () => {
-      // Overlapping slate courses catch the north-west light; panel seams follow the roof.
-      const sh = metallic ? 22 : 8,
-        sw = metallic ? 38 : 14;
-      for (let yy = minY - sh, row = 0; yy < maxY + sh; yy += sh, row++) {
-        for (let xx = minX - sw; xx < maxX + sw; xx += sw) {
-          const px = xx + ((row % 2) * sw) / 2,
-            t = color(tone, r() * 17 - 8 - ((yy - minY) / Math.max(1, maxY - minY)) * 9);
-          rect(c, px, yy, sw - 1, sh - 1, t);
-          rect(c, px + 1, yy, sw - 3, 1, color(t, 25));
-          rect(c, px + sw - 2, yy + 2, 1, sh - 2, color(t, -23));
+      // Courses compress towards the rear and cross the slate at a shallow angle.
+      // Their horizontal overlap differs from the chunky vertical wall blocks below.
+      let yy = minY - 8,
+        row = 0;
+      while (yy < maxY + 12) {
+        const t = Math.max(0, Math.min(1, (yy - minY) / Math.max(1, depth))),
+          sh = metallic ? 14 + t * 8 : 4 + t * 4,
+          sw = metallic ? 34 : 13 + t * 3,
+          drift = Math.round((1 - t) * 8);
+        for (let xx = minX - sw * 2; xx < maxX + sw * 2; xx += sw) {
+          const px = xx + ((row % 2) * sw) / 2 + drift,
+            value = r() * 13 - 6 + (1 - t) * 16 - t * 14,
+            face = color(tone, value),
+            skew = metallic ? 2 : 1;
+          poly(
+            c,
+            [
+              [px, yy],
+              [px + sw - 1, yy - skew],
+              [px + sw - 2, yy + sh - 1],
+              [px + 1, yy + sh],
+            ],
+            face,
+          );
+          shallowStroke(px + 1, yy, px + sw - 2, yy - skew, color(face, metallic ? 21 : 29));
+          shallowStroke(px + 2, yy + sh, px + sw - 2, yy + sh - 1, color(face, -27));
           if (metallic) {
-            rect(c, px + 3, yy + 3, 2, 2, color(t, 28));
-            rect(c, px + sw - 6, yy + sh - 5, 2, 2, color(t, -25));
-          } else if (r() > 0.68) {
-            rect(c, px + 3, yy + 3, 4 + r() * 5, 1, color(t, 13));
-          }
+            rect(c, px + 3, yy + 3, 1, 1, color(face, 32));
+            rect(c, px + sw - 5, yy + sh - 4, 1, 1, color(face, 28));
+          } else if (r() > 0.64) rect(c, px + 3, yy + 2, 5, 1, color(face, 13));
         }
+        yy += sh;
+        row++;
+      }
+      // Broad weathered patches live within the material instead of a uniform noise wash.
+      for (let n = 0; n < (maxX - minX) / 31; n++) {
+        const px = minX + r() * (maxX - minX),
+          py = minY + r() * depth;
+        for (let k = 0; k < 3; k++)
+          rect(c, px + k * 4, py + k * 3, 12 - k * 2, 2, n % 2 ? '#abc4c513' : '#07142219');
       }
       if (frost)
-        for (let i = 0; i < (maxX - minX) / 15; i++) {
-          const xx = minX + r() * (maxX - minX),
-            yy = minY + r() * (maxY - minY);
-          rect(c, xx, yy, 9 + r() * 15, 3, '#b5c9d3');
-          rect(c, xx + 2, yy - 1, 8 + r() * 9, 2, '#dce8e7');
+        for (let n = 0; n < (maxX - minX) / 17; n++) {
+          const px = minX + r() * (maxX - minX),
+            py = minY + r() * depth;
+          rect(c, px, py, 9 + r() * 15, 3, '#b5c9d3');
+          rect(c, px + 2, py - 1, 8 + r() * 9, 2, '#e0eae5');
         }
     });
   };
@@ -235,10 +281,22 @@ export function makeRegionalBuilding(
     arched = culture.window === 'arch',
   ) => {
     // Thick lintel, dark inset and projecting sill keep openings readable at game scale.
-    rect(c, cx - ww / 2 - 5, foot - hh - 5, ww + 10, hh + 10, color(wall, -37));
+    poly(
+      c,
+      [
+        [cx - ww / 2 - 5, foot - hh - 5],
+        [cx + ww / 2 + 6, foot - hh - 5],
+        [cx + ww / 2 + 12, foot + 9],
+        [cx - ww / 2 - 1, foot + 9],
+      ],
+      '#09172649',
+    );
+    rect(c, cx - ww / 2 - 5, foot - hh - 5, ww + 10, hh + 10, '#1b2930');
     rect(c, cx - ww / 2 - 5, foot - hh - 5, ww + 9, 3, color(wall, 29));
     rect(c, cx - ww / 2 - 5, foot - hh - 3, 3, hh + 6, color(wall, 19));
     pane(cx, foot, ww, hh, arched);
+    rect(c, cx - ww / 2, foot - hh + 1, ww, 3, '#111c286b');
+    rect(c, cx - ww / 2 + 1, foot - hh + 2, 3, hh - 2, '#1521285c');
     rect(c, cx - ww / 2 - 7, foot + 3, ww + 14, 4, color(wall, -23));
     rect(c, cx - ww / 2 - 7, foot + 2, ww + 14, 2, color(wall, 34));
     rect(c, cx - 2, foot - hh + 6, 3, Math.max(4, hh / 2 - 7), glow);
@@ -304,10 +362,56 @@ export function makeRegionalBuilding(
     rect(c, xx + 3, foot - 25, 15, 4, color(wood, 27));
     rect(c, xx + 6, foot - 24, 9, 2, color(wood, -21));
   };
-  const serviceModule = (xx: number, yy: number, ww: number, hh: number) => {
-    // Housing, top plane and east return are separate faces, not a flat decal.
-    rect(c, xx + 5, yy + hh - 2, ww + 4, 7, '#0b1d2945');
-    rect(c, xx, yy, ww - 6, hh, color(wall, -8));
+  type ServiceKind = 'vent' | 'tank' | 'fan' | 'terminal' | 'battery';
+  const serviceModule = (
+    xx: number,
+    yy: number,
+    ww: number,
+    hh: number,
+    use: ServiceKind = 'vent',
+  ) => {
+    const face = color(wall, -9),
+      lit = color(wall, 29),
+      shade = color(wall, -53);
+    poly(
+      c,
+      [
+        [xx + 3, yy + hh],
+        [xx + ww - 4, yy + hh],
+        [xx + ww + 12, yy + hh + 9],
+        [xx + 11, yy + hh + 9],
+      ],
+      '#0816225c',
+    );
+    if (use === 'tank') {
+      poly(
+        c,
+        [
+          [xx + 5, yy - 5],
+          [xx + ww - 9, yy - 5],
+          [xx + ww - 3, yy + 1],
+          [xx + ww - 3, yy + hh - 4],
+          [xx + ww - 9, yy + hh],
+          [xx + 5, yy + hh],
+          [xx, yy + hh - 5],
+          [xx, yy + 1],
+        ],
+        shade,
+      );
+      rect(c, xx + 3, yy, ww - 11, hh - 2, face);
+      rect(c, xx + 4, yy + 2, 4, hh - 5, lit);
+      rect(c, xx + ww - 13, yy + 2, 5, hh - 4, shade);
+      rect(c, xx + 4, yy - 5, ww - 13, 5, lit);
+      for (const by of [yy + 6, yy + hh - 10]) {
+        rect(c, xx, by, ww - 3, 3, '#243641');
+        rect(c, xx + 2, by, ww - 8, 1, color(wall, 22));
+      }
+      line(c, xx + ww - 3, yy + hh - 7, xx + ww + 8, yy + hh - 7, shade, 5);
+      line(c, xx + ww + 8, yy + hh - 7, xx + ww + 8, yy + hh + 5, shade, 5);
+      rect(c, xx + 9, yy - 9, 8, 4, color(trim, 10));
+      return;
+    }
+    rect(c, xx, yy, ww - 6, hh, face);
     poly(
       c,
       [
@@ -316,7 +420,7 @@ export function makeRegionalBuilding(
         [xx + ww, yy - 6],
         [xx + ww - 6, yy],
       ],
-      color(wall, 23),
+      lit,
     );
     poly(
       c,
@@ -326,13 +430,169 @@ export function makeRegionalBuilding(
         [xx + ww, yy + hh - 6],
         [xx + ww - 6, yy + hh],
       ],
-      color(wall, -37),
+      shade,
     );
-    for (let j = 5; j < hh - 3; j += 4) {
-      rect(c, xx + 4, yy + j, ww - 14, 2, '#172630');
-      rect(c, xx + 4, yy + j + 2, ww - 14, 1, color(wall, 18));
-    }
+    rect(c, xx + 1, yy + 1, 2, hh - 2, color(wall, 20));
+    if (use === 'fan') {
+      const cx = xx + (ww - 6) / 2,
+        cy = yy + hh / 2,
+        rad = Math.min(ww - 13, hh - 5) / 2;
+      poly(
+        c,
+        [
+          [cx - rad, cy - rad / 2],
+          [cx - rad / 2, cy - rad],
+          [cx + rad / 2, cy - rad],
+          [cx + rad, cy - rad / 2],
+          [cx + rad, cy + rad / 2],
+          [cx + rad / 2, cy + rad],
+          [cx - rad / 2, cy + rad],
+          [cx - rad, cy + rad / 2],
+        ],
+        '#17232c',
+      );
+      for (let n = 0; n < 4; n++) {
+        const a = (n * Math.PI) / 2;
+        poly(
+          c,
+          [
+            [cx, cy],
+            [cx + Math.cos(a) * rad, cy + Math.sin(a) * rad],
+            [cx + Math.cos(a + 0.8) * rad * 0.8, cy + Math.sin(a + 0.8) * rad * 0.8],
+          ],
+          color(wall, -17),
+        );
+      }
+      rect(c, cx - 2, cy - 2, 4, 4, color(wall, 27));
+    } else if (use === 'terminal') {
+      rect(c, xx + 4, yy + 4, ww - 14, hh * 0.54, '#10232b');
+      rect(c, xx + 6, yy + 6, ww - 19, 2, glow);
+      for (let n = 0; n < 3; n++)
+        rect(c, xx + 6, yy + 11 + n * 3, Math.max(3, ww - 20 - n * 3), 1, color(trim, 31));
+      rect(c, xx + 5, yy + hh - 8, ww - 17, 3, '#26363c');
+    } else if (use === 'battery') {
+      for (let bx = xx + 4; bx < xx + ww - 10; bx += 7) {
+        rect(c, bx, yy + 4, 5, hh - 9, '#21333c');
+        rect(c, bx, yy + 5, 2, hh - 11, color(trim, 21));
+        rect(c, bx, yy + hh - 9, 5, 2, color(wall, 29));
+      }
+    } else
+      for (let j = 5; j < hh - 3; j += 4) {
+        rect(c, xx + 4, yy + j, ww - 14, 2, '#13222c');
+        rect(c, xx + 4, yy + j + 2, ww - 14, 1, color(wall, 23));
+      }
     rect(c, xx + 2, yy + 2, 2, 2, glow);
+  };
+  const skylight = (xx: number, yy: number, ww: number, hh: number) => {
+    poly(
+      c,
+      [
+        [xx + 2, yy + hh],
+        [xx + ww, yy + hh - 7],
+        [xx + ww + 10, yy + hh + 1],
+        [xx + 10, yy + hh + 9],
+      ],
+      '#0716225c',
+    );
+    poly(
+      c,
+      [
+        [xx, yy],
+        [xx + ww, yy - 7],
+        [xx + ww, yy + hh - 7],
+        [xx, yy + hh],
+      ],
+      '#213c49',
+    );
+    for (let j = 3; j < hh - 3; j += 10)
+      line(c, xx + 3, yy + j, xx + ww - 3, yy + j - 7, '#71a9b2', 2);
+    for (let i = 4; i < ww - 2; i += 12) {
+      const sy = yy - (i / ww) * 7;
+      line(c, xx + i, sy + 3, xx + i, sy + hh - 3, '#b3cbd0');
+    }
+    line(c, xx - 2, yy + hh, xx + ww + 2, yy + hh - 7, color(wall, -35), 5);
+    line(c, xx - 2, yy, xx + ww + 2, yy - 7, color(wall, 38), 3);
+    line(c, xx, yy, xx, yy + hh, color(wall, 19), 2);
+  };
+  const awning = (xx: number, yy: number, ww: number, fabric = !advanced) => {
+    const dy = fabric ? 19 : 13,
+      top = [
+        [xx + 5, yy],
+        [xx + ww - 7, yy - 4],
+        [xx + ww + 1, yy + dy - 3],
+        [xx - 3, yy + dy],
+      ];
+    poly(
+      c,
+      [
+        [xx - 1, yy + dy + 3],
+        [xx + ww + 4, yy + dy],
+        [xx + ww + 15, yy + dy + 13],
+        [xx + 10, yy + dy + 16],
+      ],
+      '#0a162945',
+    );
+    poly(c, top, fabric ? color(trim, -17) : color(roof, 9));
+    clip(top, () => {
+      if (fabric)
+        for (let px = xx - 1; px < xx + ww; px += 16) {
+          poly(
+            c,
+            [
+              [px + 4, yy - 3],
+              [px + 12, yy - 3],
+              [px + 9, yy + dy + 2],
+              [px, yy + dy + 2],
+            ],
+            mix(wall, '#e4d6b0', 0.64),
+          );
+        }
+      else
+        for (let py = yy; py < yy + dy; py += 5) line(c, xx, py, xx + ww, py - 3, color(roof, 29));
+    });
+    poly(
+      c,
+      [
+        [xx - 3, yy + dy],
+        [xx + ww + 1, yy + dy - 3],
+        [xx + ww + 1, yy + dy + 3],
+        [xx - 3, yy + dy + 6],
+      ],
+      fabric ? color(trim, -40) : color(roof, -29),
+    );
+    line(
+      c,
+      xx - 3,
+      yy + dy,
+      xx + ww + 1,
+      yy + dy - 3,
+      fabric ? color(trim, 22) : color(wall, 30),
+      2,
+    );
+    for (const px of [xx + 1, xx + ww - 4]) {
+      line(c, px, yy + dy + 5, px, yy + dy + 21, color(wood, -34), 3);
+      line(c, px + 1, yy + dy + 5, px + 9, yy + 8, color(wood, -15), 3);
+    }
+  };
+  const seating = (xx: number, foot: number, ww: number) => {
+    const materialTone = advanced ? wall : wood;
+    rect(c, xx + 3, foot - 3, ww + 8, 7, '#0b192a4f');
+    rect(c, xx, foot - 18, ww, 4, color(materialTone, 16));
+    rect(c, xx, foot - 13, ww, 3, color(materialTone, -8));
+    poly(
+      c,
+      [
+        [xx - 2, foot - 7],
+        [xx + ww, foot - 9],
+        [xx + ww + 4, foot - 4],
+        [xx, foot - 2],
+      ],
+      color(materialTone, 25),
+    );
+    for (const px of [xx + 3, xx + ww - 5]) {
+      rect(c, px, foot - 18, 3, 20, color(materialTone, -32));
+      rect(c, px + 1, foot - 18, 1, 17, color(materialTone, 28));
+    }
   };
   type Volume = {
     left: number;
@@ -351,12 +611,23 @@ export function makeRegionalBuilding(
     const bx = Math.round(v.left),
       bw = Math.round(v.width),
       foot = v.foot,
-      east = Math.min(14, bw * 0.09),
+      east = Math.min(21, bw * 0.12),
       faceRight = bx + bw - east,
       fy = foot - v.height,
       top = Math.min(v.top, fy - 27),
       ridgeY = top + Math.max(16, (fy - top) * 0.32),
       peak = fy - v.rise;
+    if (v.central)
+      poly(
+        c,
+        [
+          [bx + bw - 5, top + 8],
+          [bx + bw + 17, top + 23],
+          [bx + bw + 24, foot + 1],
+          [bx + bw - 3, foot - 3],
+        ],
+        '#08162955',
+      );
     // The east return has its own full-height plane and sits inside the collision footprint.
     const eastFace = [
       [faceRight, fy],
@@ -367,17 +638,17 @@ export function makeRegionalBuilding(
     material(bx, fy, bw - east, v.height);
     clip(eastFace, () => {
       material(faceRight, fy - 14, east + 2, v.height + 15);
-      rect(c, faceRight, fy - 14, east + 2, v.height + 15, '#07152266');
+      rect(c, faceRight, fy - 14, east + 2, v.height + 15, '#07132299');
     });
     poly(
       c,
       [
         [bx, fy],
         [faceRight, fy],
-        [faceRight, fy + 12],
-        [bx + 4, fy + 7],
+        [faceRight, fy + 20],
+        [bx + 4, fy + 13],
       ],
-      '#08182766',
+      '#0713228c',
     );
     rect(c, bx, fy + 2, 3, v.height - 2, color(wall, 27));
     rect(c, faceRight - 3, fy + 2, 3, v.height - 2, color(wall, -35));
@@ -441,18 +712,83 @@ export function makeRegionalBuilding(
         [bx - 5, fy + 1],
       ];
       roofPlane(points, color(roof, 9), advanced);
-      // Set-back plant rooms, service courts and linked conduits make a roof a place.
-      for (let n = 0; n < Math.max(1, Math.floor(bw / 92)); n++) {
-        const sx = bx + 14 + n * 83,
-          sy = top + 28 + (n % 2) * 14;
-        serviceModule(sx, sy, Math.min(43, bw - 25), 17 + r() * 9);
-        if (advanced) {
-          line(c, sx + 24, sy + 18, sx + 24, fy - 17, color(wood, -38), 5);
-          line(c, sx + 24, sy + 18, sx + 24, fy - 17, color(trim, 21), 2);
+      // Premises determine a service assembly; shared culture determines its construction.
+      const roofDepth = fy - top,
+        sx = bx + 14,
+        sy = top + Math.min(34, roofDepth * 0.27),
+        equipmentWidth = Math.min(44, bw - 29);
+      if (advanced) {
+        const usage: ServiceKind =
+          kind === 'workshop'
+            ? 'fan'
+            : kind === 'greenhouse'
+              ? 'tank'
+              : kind === 'church' || kind === 'hall'
+                ? 'battery'
+                : kind === 'inn'
+                  ? 'tank'
+                  : 'vent';
+        if ((kind === 'house' || kind === 'inn' || kind === 'hall') && bw > 88) {
+          skylight(sx, sy + 4, Math.min(75, bw - 32), Math.min(42, roofDepth * 0.28));
+          if (bw > 168)
+            serviceModule(bx + bw - 62, sy + 19, 36, 28, kind === 'house' ? 'battery' : usage);
+        } else {
+          serviceModule(sx, sy, equipmentWidth, Math.min(35, roofDepth * 0.3), usage);
+          if (bw > 135)
+            serviceModule(bx + bw - 54, sy + 22, 33, 27, kind === 'workshop' ? 'tank' : 'battery');
+        }
+        if (kind === 'workshop' || kind === 'storehouse') {
+          const pipeY = fy - 29;
+          line(c, bx + 17, pipeY, faceRight - 10, pipeY, '#17252e', 8);
+          line(c, bx + 17, pipeY, faceRight - 10, pipeY, color(wall, 28), 3);
+          line(c, sx + 17, sy + 23, sx + 17, pipeY, '#26333b', 7);
+          line(c, sx + 17, sy + 23, sx + 17, pipeY, color(wall, 23), 2);
+          for (let px = bx + 25; px < faceRight - 15; px += 30)
+            rect(c, px, pipeY - 2, 4, 10, color(wall, -24));
+        }
+        if (kind === 'church' || kind === 'hall') {
+          const ax = bx + bw * 0.68,
+            ay = top + Math.min(48, roofDepth * 0.4);
+          line(c, ax, ay + 10, ax, ay - 32, color(wall, -46), 4);
+          poly(
+            c,
+            [
+              [ax - 19, ay - 24],
+              [ax + 10, ay - 30],
+              [ax + 17, ay - 15],
+              [ax - 8, ay - 11],
+            ],
+            color(wall, 29),
+          );
+          line(c, ax - 16, ay - 23, ax + 14, ay - 16, color(trim, 34), 2);
+          rect(c, ax - 3, ay + 9, 10, 5, color(wall, 21));
+        }
+      } else {
+        // Flat earthen roofs have parapets, a shaded stair head, jars and drying beds.
+        material(sx, sy - 3, Math.min(47, bw - 28), 25);
+        rect(c, sx - 3, sy - 6, Math.min(53, bw - 22), 5, color(wall, 29));
+        pane(sx + Math.min(23, (bw - 28) / 2), sy + 18, 15, 17, false);
+        if (bw > 130) {
+          barrel(bx + bw - 51, sy + 23);
+          barrel(bx + bw - 31, sy + 29);
         }
       }
-      if (organic > 0.68)
-        for (let px = bx + 9; px < faceRight - 24; px += 38) planter(px, fy - 23, 27);
+      if (organic > 0.68 && (kind === 'house' || kind === 'inn' || kind === 'greenhouse')) {
+        const count = Math.min(3, Math.floor((bw - 15) / 38));
+        for (let n = 0; n < count; n++) planter(bx + 10 + n * 34, fy - 24 - (n % 2) * 5, 27);
+      }
+      // Thick parapet returns reveal the horizontal roof tray and cast shadows into it.
+      poly(
+        c,
+        [
+          [bx - 3, top],
+          [bx + 10, top + 8],
+          [bx + 10, fy - 13],
+          [bx - 3, fy - 6],
+        ],
+        '#09182b55',
+      );
+      rect(c, bx + 4, top + 1, bw - 10, 7, '#0a172944');
       rect(c, bx - 5, fy - 8, bw - east + 10, 11, color(wall, -14));
       rect(c, bx - 7, fy - 10, bw - east + 14, 4, color(wall, 32));
       for (const xx of [bx - 5, bx + bw - 4]) {
@@ -478,8 +814,10 @@ export function makeRegionalBuilding(
           [bx + bw + 6, fy - 11],
           [ridge, peak],
         ],
-        color(roof, -21),
+        color(roof, -35),
       );
+      line(c, ridge, top - v.rise * 0.5, ridge, peak - 2, color(roof, 32), 4);
+      line(c, ridge + 4, top - v.rise * 0.5 + 2, ridge + 4, peak - 1, color(roof, -39), 3);
       const gable = [
         [bx - 6, fy],
         [ridge, peak],
@@ -519,18 +857,53 @@ export function makeRegionalBuilding(
         ],
         color(roof, 5),
       );
-      line(c, bx - 9, ridgeY + 6, bx + bw + 8, ridgeY - 1, color(roof, 37), 3);
+      // Hipped return facets and a raised cap make the ridge visibly recede in space.
+      roofPlane(
+        [
+          [bx - 8, ridgeY + 7],
+          [bx + 12, ridgeY + 1],
+          [bx + 3, fy],
+          [bx - 8, fy],
+        ],
+        color(roof, 26),
+      );
+      roofPlane(
+        [
+          [bx + bw - 16, ridgeY + 2],
+          [bx + bw + 7, ridgeY],
+          [bx + bw + 8, fy - 10],
+          [faceRight + 8, fy],
+        ],
+        color(roof, -32),
+      );
+      poly(
+        c,
+        [
+          [bx - 10, ridgeY + 6],
+          [bx + bw + 9, ridgeY - 1],
+          [bx + bw + 9, ridgeY + 5],
+          [bx - 10, ridgeY + 12],
+        ],
+        color(roof, -30),
+      );
+      line(c, bx - 10, ridgeY + 5, bx + bw + 9, ridgeY - 2, color(roof, 44), 3);
+      for (let px = bx + 3; px < bx + bw; px += 18)
+        rect(c, px, ridgeY + 4 - ((px - bx) / bw) * 7, 2, 6, color(roof, -11));
       poly(
         c,
         [
           [bx - 9, fy],
           [faceRight + 9, fy],
-          [faceRight + 9, fy + 7],
-          [bx - 9, fy + 7],
+          [faceRight + 9, fy + 10],
+          [bx - 9, fy + 10],
         ],
         color(wood, -40),
       );
-      line(c, bx - 9, fy, faceRight + 9, fy, color(wood, 22), 2);
+      line(c, bx - 9, fy, faceRight + 9, fy, color(wood, 31), 2);
+      for (let px = bx + 5; px < faceRight - 1; px += 24) {
+        rect(c, px, fy + 4, 5, 11, color(wood, -37));
+        rect(c, px, fy + 4, 1, 8, color(wood, 17));
+      }
       if (kind !== 'storehouse' && kind !== 'workshop' && fy - ridgeY > 32) {
         for (let dx = bx + 32; dx < faceRight - 18; dx += 79) {
           if (Math.abs(dx - mid) < 38 && bw > 155) continue;
@@ -889,8 +1262,34 @@ export function makeRegionalBuilding(
   const sideX = x + 10,
     farX = x + w - 43;
   if (advanced) {
-    serviceModule(sideX, buildingFoot - 34, 31, 29);
-    if (kind !== 'house') serviceModule(farX, buildingFoot - 42, 34, 37);
+    if (kind === 'house') {
+      serviceModule(sideX + 2, buildingFoot - 32, 26, 29, 'terminal');
+      if (organic > 0.4) planter(farX + 4, buildingFoot - 1, 27);
+      else serviceModule(farX + 10, buildingFoot - 27, 25, 24, 'battery');
+    } else if (kind === 'inn') {
+      awning(sideX, buildingFoot - 69, Math.min(69, w * 0.26), false);
+      seating(sideX + 5, buildingFoot - 1, Math.min(48, w * 0.2));
+      serviceModule(farX + 6, buildingFoot - 47, 29, 43, 'terminal');
+    } else if (kind === 'workshop') {
+      serviceModule(sideX, buildingFoot - 39, 38, 35, 'fan');
+      serviceModule(farX + 8, buildingFoot - 47, 29, 43, 'tank');
+      line(c, sideX + 35, buildingFoot - 9, sideX + 52, buildingFoot - 9, color(wall, -37), 5);
+      awning(sideX - 1, buildingFoot - 63, Math.min(62, w * 0.25), false);
+    } else if (kind === 'storehouse') {
+      const dockWidth = Math.min(66, w * 0.28);
+      rect(c, sideX - 3, buildingFoot - 5, dockWidth + 4, 9, color(wall, -32));
+      rect(c, sideX - 3, buildingFoot - 7, dockWidth + 4, 3, color(wall, 27));
+      crate(sideX + 3, buildingFoot - 7, 24);
+      crate(sideX + 24, buildingFoot - 9, 22);
+      awning(sideX - 3, buildingFoot - 65, dockWidth + 1, false);
+      serviceModule(farX + 10, buildingFoot - 39, 24, 34, 'terminal');
+    } else if (kind === 'greenhouse') {
+      serviceModule(sideX, buildingFoot - 42, 28, 38, 'tank');
+      planter(farX + 3, buildingFoot, 31);
+    } else {
+      serviceModule(sideX, buildingFoot - 35, 27, 30, 'terminal');
+      seating(farX - 2, buildingFoot - 1, 39);
+    }
     for (const xx of [x + 5, x + w - 7]) {
       line(c, xx, eave + 21, xx, buildingFoot - 7, color(wall, -43), 5);
       line(c, xx, eave + 21, xx, buildingFoot - 7, color(trim, 10), 2);
@@ -910,13 +1309,52 @@ export function makeRegionalBuilding(
       rect(c, sx + 5, sy + 13 + row * 10, 8, 1, color(trim, 30));
     }
   } else {
-    if (kind === 'storehouse' || kind === 'workshop') {
+    if (kind === 'storehouse') {
       crate(sideX, buildingFoot + 1, 29);
       crate(sideX + 21, buildingFoot - 2, 21);
       crate(sideX + 9, buildingFoot - 21, 21);
       barrel(farX + 9, buildingFoot);
+      awning(sideX - 4, buildingFoot - 62, Math.min(68, w * 0.29));
+    } else if (kind === 'workshop') {
+      const fx = sideX + 5,
+        fy = buildingFoot - 3;
+      masonry(fx - 3, fy - 38, 36, 39, color(wall, -12));
+      poly(
+        c,
+        [
+          [fx + 2, fy - 4],
+          [fx + 2, fy - 25],
+          [fx + 9, fy - 32],
+          [fx + 21, fy - 32],
+          [fx + 28, fy - 25],
+          [fx + 28, fy - 4],
+        ],
+        '#19242a',
+      );
+      rect(c, fx + 6, fy - 8, 20, 4, '#a95735');
+      for (let n = 0; n < 4; n++) {
+        const px = fx + 7 + n * 5;
+        poly(
+          c,
+          [
+            [px, fy - 7],
+            [px + 1, fy - 14 - r() * 6],
+            [px + 5, fy - 7],
+          ],
+          n % 2 ? '#efbd65' : '#d58942',
+        );
+      }
+      rect(c, fx - 6, fy - 4, 42, 5, color(wall, -31));
+      rect(c, fx - 6, fy - 5, 42, 2, color(wall, 32));
+      boards(farX - 5, buildingFoot - 20, 39, 5);
+      for (const px of [farX, farX + 25]) rect(c, px, buildingFoot - 16, 4, 17, color(wood, -28));
+      line(c, farX + 7, buildingFoot - 24, farX + 17, buildingFoot - 19, '#26343b', 3);
+      rect(c, farX + 5, buildingFoot - 28, 12, 5, '#a4a695');
     } else if (kind === 'inn' || kind === 'house') {
-      barrel(sideX + 3, buildingFoot);
+      if (kind === 'inn') {
+        awning(sideX - 2, buildingFoot - 66, Math.min(69, w * 0.26));
+        seating(sideX + 3, buildingFoot, Math.min(47, w * 0.19));
+      } else barrel(sideX + 3, buildingFoot);
       if (organic > 0.35) planter(farX, buildingFoot - 1, 31);
       else crate(farX + 3, buildingFoot, 26);
     } else if (kind === 'greenhouse') {
