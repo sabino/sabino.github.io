@@ -1,6 +1,45 @@
 # Release verification · 2026-09-11
 
-## Current published source
+## Current generation-four release evidence
+
+Verso’s primary start is a generated resident in a generated civilization. Geography, climate, practical technology, personal history, relationships and body-owned equipment reconstruct from their recorded seeds and generator version. Stíchos is one optional civilization; Theo’s authored story remains the explicit generation-three legacy entry. The current behavior is described in [generated worlds and lives](GENERATED-LIVES.md), [ordinary equipment](ORDINARY-EQUIPMENT.md) and [the life/universe contract](UNIVERSE.md).
+
+**Final full-suite/build verification is pending.** The most recent full run completed 380 tests with 379 passing and one stale assertion expecting the generic `merchant` label instead of the resident’s generated cultural profession. That expectation has been corrected; the eight focused ordinary-equipment tests passed afterward. This does not yet establish a passing rerun of the entire suite or identify the final deployable build. [PAGES.md](PAGES.md) records the separately verified public deployment.
+
+### Generated lives and equipment through ordinary UI
+
+A three-browser local run created **three distinct generation-four lives** and joined the same electronic world through native room/invitation controls. The host, URL visitor and code visitor each retained their chosen body and saw the other two residents, including their actual clothing tier and carried equipment. The room exposed a share URL and QR. The completed checkpoint at **17:33:48 UTC** had **zero browser errors**. Evidence: [native cooperative lives](../../.dream-loop/g4-native-coop/results.json). It proves that bounded local-browser flow; it is not a replay of every later UI change or a test of three separate Internet connections.
+
+A later ordinary arrival on warm world seed **11**, generation four, created **Wimi Chechechi**, a guard in **Leishei Hold**. Actual northward movement retained the body’s generated obsidian blade, with approximately **60 foreground FPS** and **zero browser errors**. Evidence: [warm-world arrival](../../.dream-loop/woodland-round3/result.json). This is a recorded browser sample, not a controlled hardware benchmark or proof of all procedural climates.
+
+### Screen review and repairs
+
+The initial independent design audit covered **197 normal-flow captures** and **98 separately staged presentation captures**. Its findings and scope remain in [SCREEN-DESIGN-AUDIT.md](SCREEN-DESIGN-AUDIT.md).
+
+Completed repair passes recorded:
+
+- **207 normal-flow captures** across desktop, mobile and compact laptop, including 197 main-flow states, all 18 legacy journal entries, four botanical studies, all nine Life disciplines, creation, rooms and inventory.
+- **126 explicitly staged presentation captures** for gated conversations, trade, campaign encounters/endings, homes, recovery, production and Compact outcomes. These review fixtures show presentation; their states were not earned during that pass.
+- **72 generated-life captures** creating two distinct people through ordinary UI, checking their arrival, nine Life disciplines, mobile creation, inventory/equipment, phrases, atlas and personal notebook. Assertions verify the resident’s identity, viewport bounds, visible close controls, item detail and absence of Theo’s legacy lore in the generation-four HUD.
+- **Five final geometry captures** at 1440×960, 1366×768 and mobile, checking portrait/status separation, sidebar/footer fit and visible notebook controls, including plain-type switching and physical cover closure.
+
+All four completed repair runs reported **zero browser errors**. An initial source-HMR interruption was rerun against frozen preview before the normal-flow pass completed. The final smoke used ordinary generated-life actions in the separate review source with fixture controls inactive. TypeScript compilation passed after those repairs. [SCREEN-DESIGN-FIXES.md](SCREEN-DESIGN-FIXES.md) identifies the complete evidence files and exclusions.
+
+### Shared equipment, authority and native persistence
+
+**43 automated network tests passed** with actual WebSocket clients. They verify exact generation-four equipment addresses up to `0x4ffffffff`, clothing technology, generated damage, separate profile caches, released projectiles, authenticated identity restoration and wounded enemy persistence after signed checkpoint restart.
+
+**Eight actual PeerJS/WebRTC clients passed seven generation-four browser checks** in 7.55 seconds. They retained exact equipment/clothing context, reassembled matching 22,030-byte combat frames and verified 21,853-byte signed public checkpoints. Fresh nonce proofs were bound to the actual host DTLS fingerprints; signaling interruption recovered without replacing live sessions or issuing duplicate welcomes. The established generation-three eight-client fixture separately passed six checks. All fixture transports and temporary contexts were closed afterward.
+
+**Five native Pear integration tests passed.** Two actual Corestore/Hypercore and Hyperswarm nodes replicated a wounded electronic hostile’s equipment and clothing over a local test DHT, restarted from disk and continued the original signed feed. Signature, authorization, public-schema, rollback and capacity checks also passed. These are local-DHT interoperability and persistence results; they do not establish Internet NAT reachability, permanent public hosting or automatic host migration. [GENERATION4-NETWORK-QA.md](GENERATION4-NETWORK-QA.md) contains detailed results and reproduction commands.
+
+### Current boundaries
+
+Normal life storage is automatic and browser-local. The main UI has no routine Download save or Restore a save controls. The file-import/export results below belong to their named historical builds. Host departure ends the shared session; personal inventory, story and bodily needs remain local. Household worker orders currently operate in solo worlds. Signed checkpoints and optional native public replication retain the existing host authority model.
+
+Native OS installation sheets and a complete installed-PWA lifecycle remain unverified. The optional AI companion reports setup/authentication capability but provides no NPC model inference. Billing remains disabled without a separately operated payment service; no real payment was made. Older offline, campaign-duration and public-site results below retain their own checkpoint scope and do not automatically accept the current build.
+
+## Archived published source · 347-test checkpoint
 
 The source at `0a4e2ed` passed **347/347 automated tests in 81.66 seconds**, formatting and production build. Its output is `app-4jvai5g6.js`, CSS `app-BbuTIZnE.css`, service worker `347aaea8a71453ab0c63`. Pages commit `148fe34` and deployment `34617829015` publish that exact build; all 30 non-HTML files match local hashes. [Deployment details](PAGES.md).
 
@@ -10,11 +49,11 @@ The local and deployed nested path each passed four continuing-life/offline chec
 
 The previous local checkpoint `app-tZDgoFWJ.js` / `app-B_fqJ_rx.css` passed **10 universe/creation/invitation checks** and **9 constructed-production checks**, with zero runtime errors in both runs. The first uses real mobile/desktop controls, a native color picker, chosen-resident arrival, reload, cancellation, galaxy navigation, QR/link invitations and code-only joining. The second gathers real timber/ore with tools, constructs a bed for exact costs, advances an 80-second batch through active walking, prevents remote collection, awards three portions once and reloads the same life. [Universe proof](UNIVERSE-QA.md), [production proof](PRODUCTION.md).
 
-The current-source eight-participant PeerJS/RTC fixture passed **6/6 checks at 15:36 UTC**: eight fresh nonce signatures, seven remote proofs tied to the actual host DTLS fingerprints, eight verified 22,592-byte signed public checkpoints after chunked transport, combat frames up to 23,194 bytes, and signalling reconnection without losing sessions or repeating welcome. Evidence: `.dream-loop/stichos-peer-transport/fixture.json` and `fixture.png`. It used actual RTC connections in a disposable context; it is a transport proof, not eight humans or another full gameplay route.
+That checkpoint’s eight-participant PeerJS/RTC fixture passed **6/6 checks at 15:36 UTC**: eight fresh nonce signatures, seven remote proofs tied to the actual host DTLS fingerprints, eight verified 22,592-byte signed public checkpoints after chunked transport, combat frames up to 23,194 bytes, and signalling reconnection without losing sessions or repeating welcome. Evidence: `.dream-loop/stichos-peer-transport/fixture.json` and `fixture.png`. It used actual RTC connections in a disposable context; it is a transport proof, not eight humans or another full gameplay route.
 
-The optional native Pear package passed **4/4 integration tests in 2.027 seconds** at `fde8d7b`. Two actual Hyperswarm instances discover over an isolated local DHT, replicate signed public checkpoints, restart from disk and continue with the original writer key. Tests also reject private fields, bad signatures, conflicting revisions and malicious transport-valid blocks, and check authentication, origins and quotas. This is not an Internet reachability or packaged Pear desktop proof. [Native package](../../pear-node/README.md).
+The earlier optional native Pear package passed **4/4 integration tests in 2.027 seconds** at `fde8d7b`. Two actual Hyperswarm instances discover over an isolated local DHT, replicate signed public checkpoints, restart from disk and continue with the original writer key. Tests also reject private fields, bad signatures, conflicting revisions and malicious transport-valid blocks, and check authentication, origins and quotas. This is not an Internet reachability or packaged Pear desktop proof. [Native package](../../pear-node/README.md).
 
-Current user flows are described in [UNIVERSE.md](UNIVERSE.md). Normal life storage is automatic and browser-local. **The main UI no longer provides routine Download save or Restore a save controls.** All file-import/export browser results and scripts below are historical checks of explicitly named older builds; they are retained for provenance, not presented as current UI instructions. The unique-life preview uses actual reload/Continue for persistence. Native PWA installation and model inference have not been verified; the optional AI companion explicitly does not generate NPC dialogue.
+The earlier unique-life preview used actual reload/Continue for persistence. Its offline checks above did not establish native PWA installation or model inference. Current main-UI storage and capability boundaries are stated at the top of this document.
 
 ## Archived public deployment · earlier UI
 
@@ -34,11 +73,13 @@ Fifteen session integration checks cover shared combat receipt replay across rec
 
 The earlier action-earned main campaign completed all 24 leads over 12,113.9 tiles, 74 harvested resources and 4,087.68 simulated seconds (68.1 minutes). A fresh continuous public-action run has now completed all 24 main leads and all 24 Compact projects, including 48 witness accounts, 24 funded policies and 24 physical deliveries. It recorded **12,771.776 active simulated seconds (3.548 hours)**, excluding 870 seconds of rest jumps, with 926 tool strokes, 89 preparations, 25 save checkpoints and no deaths. This is below four active hours; no extra grind was added to inflate it. Evidence: [route results](../../.dream-loop/stichos-compact-proof/main-compact-v2/results.json). The old four-hour continuing-life endurance run remains a separate stability test that predates timed tools and the Compact. **Four hours of human story play remains unverified.** Automated travel and reading speed do not establish that experience.
 
-Current limits: household orders remain solo; the room host owns hostile combat and finite shared claims, while personal inventory, tool condition, story, and bodily needs remain local. Host departure ends that shared session; there is no host migration. Inactive hostile bodies retain artifact visuals but use conventional weapon AI. Audio listening quality and prolonged human combat balance remain unmeasured. Real-money integration is prepared and mock-tested, with live billing disabled and no real charge made. A wrapping globe, large-scale warfare and public account service remain outside this release.
+Limits at that checkpoint: household orders remained solo; the room host owns hostile combat and finite shared claims, while personal inventory, tool condition, story, and bodily needs remain local. Host departure ends that shared session; there is no host migration. Inactive hostile bodies retain artifact visuals but use conventional weapon AI. Audio listening quality and prolonged human combat balance remain unmeasured. Real-money integration is prepared and mock-tested, with live billing disabled and no real charge made. A wrapping globe, large-scale warfare and public account service remain outside this release.
 
 ---
 
-# Stíchos browser QA
+# Archived Stíchos browser QA
+
+These sections preserve earlier builds and legacy routes. Their file-import controls, geography and presentation are historical evidence, not current generation-four acceptance instructions.
 
 **PASS** — a generation-3 atlas and village journey, the earlier opening campaign and body-specific mind transfer, and a generation-2 vault/dispatch expedition completed through real browser input. The latest atlas check used `app-DHCdk53y.js` / service worker `f58d84fdadaa2ae9f891`. The opening and possession checks used `app-C7Uk0xX8.js` / service worker `fb8fa2a70d25b402a3ce`; the expedition used `app-BQLDpW6p.js` / `3cdc9cff1bf20984bc80`, at `http://localhost:4174/`.
 
@@ -152,7 +193,7 @@ The full-route sample was 53.9 foreground RAF FPS. Round05 measured 55.6 FPS at 
 
 ## Historical harness reproduction
 
-These commands document the older UI checkpoints below. Several require removed title or file-import controls and are not the current main-UI acceptance route. Use `browser-universe.mjs`, `browser-production.mjs` and `browser-peer-rooms.mjs` against a verified workspace endpoint for the current flows. Reproduce an archived run only against its corresponding checkout/build:
+These commands document the older UI checkpoints in this archive. Several require removed title or file-import controls and are not the current main-UI acceptance route. Use `browser-universe.mjs`, `browser-production.mjs` and `browser-peer-rooms.mjs` against a verified workspace endpoint for the current flows. Reproduce an archived run only against its corresponding checkout/build:
 
 ```sh
 node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/' --atlas
