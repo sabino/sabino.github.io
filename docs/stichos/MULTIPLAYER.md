@@ -29,4 +29,6 @@ The service bounds room count (64), players per room (8), reconnect records, rem
 
 ## Verification
 
-`node --experimental-strip-types --test tests/stichos-multiplayer.test.ts` opens real WebSocket clients against an ephemeral server. It covers peer movement and gestures, simultaneous claims, generated-object/tool/distance checks, loot and door state, private reconnect, world mismatch and capacity limits, malformed and oversized traffic, origin rejection, and raw HTTP body handoff. Browser interaction evidence is recorded separately in `QA.md` when the frontend integration is exercised.
+`node --experimental-strip-types --test tests/stichos-multiplayer.test.ts` opens real WebSocket clients against an ephemeral server. It covers peer movement and gestures, simultaneous claims, generated-object/tool/distance checks, loot and door state, private reconnect, world mismatch and capacity limits, malformed and oversized traffic, origin rejection, and raw HTTP body handoff. It also runs the actual browser client against that server with complete generated props to catch action-packet field collisions.
+
+The real-input browser harness is `scripts/browser-multiplayer-check.mjs`. It uses a verified isolated workspace browser, starts a test-owned instance of the production server on an ephemeral loopback port, and creates independent browser contexts. Its controlled socket interruption tests the real Reconnect button without changing game state directly. The completed eight-check pass, screenshots, and precise scope are recorded in [QA.md](QA.md#cooperative-rooms).

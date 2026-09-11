@@ -86,6 +86,20 @@ Evidence: [structured results](../../.dream-loop/stichos-notebook/results.json),
 
 The pass verified fixes for the two-pixel mobile cover overflow, stale transition callbacks, conversation visibility, and an inherited pseudo-element background that had hidden the pages. No game state or browser storage was injected or cleared; the harness disposed its own context afterward.
 
+## Cooperative rooms
+
+The final cooperative browser pass ran from 04:34:21 to 04:34:42 UTC on 11 September 2026 against frozen `app-CYu5WpWe.js` and `app-B_ckCyAZ.css`. Eight checks passed with zero console or runtime errors. Two fresh, independent browser contexts created and joined a room through the actual Together form; a third used a different seed to verify rejection.
+
+Actual ground clicks moved a named remote humanoid across the other player's scene, and the Wave button displayed its greeting. Both players then clicked the same cequin plant: one body gained three portions and the other gained none, both worlds removed the same stable plant ID, and clicking the emptied place again produced no additional harvest. Recorded WebSocket frames confirm correct `gather` actions with only the six intended fields, one successful receipt, and one rejected competing claim. Opening and closing the actual southern cathedral door synchronized in both clients.
+
+Terminating one connection at the test-owned server removed the remote body immediately. Clicking Reconnect restored the same private identity and shared plant removal, with exactly one remote body. Leave room returned to solo play and removed that peer. Entering the original room code from seed 3887 was rejected without changing either world; the two successful travelers used seed 3886, generation 3.
+
+The initial production-server run on port 4175 independently passed presence, gestures, harvest, and doors. Chromium's offline emulation left an existing WebSocket open, so the final harness launches the unchanged production `createCoopServer` on an ephemeral loopback port and terminates only its own test peer's real socket. This makes the transport interruption deterministic without injecting game state, browser storage, or application methods. The harness closes its server and all browser contexts afterward. Server wire tests additionally cover loot, action idempotency, eight-player capacity, private reconnect credentials, tool/distance validation, malformed/rate-limited traffic, origin policy, and raw payment-body handoff.
+
+The browser pass found a real client serialization bug: spreading a complete plant object over the action packet replaced `kind: 'gather'` with `kind: 'cequin'`. The client now copies only target coordinates. An additional test runs the actual client against the real server with full generated plant and chest objects, proving both gather and loot actions remain correct.
+
+Evidence: [structured results and action frames](../../.dream-loop/stichos-multiplayer/results.json), [two visible travelers](../../.dream-loop/stichos-multiplayer/01-two-travelers.png), [peer greeting](../../.dream-loop/stichos-multiplayer/02-peer-wave.png), [shared harvest](../../.dream-loop/stichos-multiplayer/03-shared-harvest.png), and [reconnected room](../../.dream-loop/stichos-multiplayer/04-reconnected-room.png). Screenshots were inspected for visible humanoids, labels, greeting and readable room controls. This is cooperative presence and shared resource/door state; combat, inventory and story simulation remain local as described in [MULTIPLAYER.md](MULTIPLAYER.md).
+
 ## Findings
 
 The previously reported sidebar tracking issue is fixed and browser-verified. No consequential gameplay findings remain from this bounded route. An initial performance detour clicked a nearby village interaction instead of walking; the harness now uses actual cardinal keys there, and the complete repeat passed.
@@ -106,6 +120,7 @@ node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4
 node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/' --possession
 node scripts/browser-stichos-storage.mjs http://127.0.0.1:PORT 'http://localhost:4174/'
 node scripts/browser-notebook-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/'
+node scripts/browser-multiplayer-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/'
 node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/' --visual --visual-name=round-05 --mobile --profile
 ```
 
