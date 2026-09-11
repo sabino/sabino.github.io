@@ -225,12 +225,20 @@ test('chunk seams and content are independent of load order including negative a
   assert.deepEqual(a.npcsAround(-4, 3, 24), b.npcsAround(-4, 3, 24));
 });
 
-test('a continuous road can be walked thousands of tiles through towns and wilderness in each direction', () => {
+test('continuous roads traverse thousands of tiles through towns after opening their doors', () => {
   for (const seed of [0, 17, 703]) {
     const world = new InfiniteWorld(seed, 2);
     for (let p = -1600; p <= 1600; p++) {
-      assert.equal(world.blocked(p, 0), false, `seed ${seed}: east/west route blocked at ${p}`);
-      assert.equal(world.blocked(0, p), false, `seed ${seed}: north/south route blocked at ${p}`);
+      assert.equal(
+        world.blocked(p, 0, undefined, true),
+        false,
+        `seed ${seed}: east/west route blocked at ${p}`,
+      );
+      assert.equal(
+        world.blocked(0, p, undefined, true),
+        false,
+        `seed ${seed}: north/south route blocked at ${p}`,
+      );
       assert.ok(['road', 'bridge', 'floor'].includes(world.tile(p, 0).terrain));
     }
     assert.ok(world.tile(1_000_000, 0));
@@ -248,6 +256,7 @@ test('chunk LRU stays bounded and evicted terrain, residents and resources regen
   assert.equal(world.cacheSize, 160);
 });
 
+/** Potential routes through interactable doors; structural walls and solid props still block. */
 function reachable(world: InfiniteWorld, start: Point, radius: number): Set<string> {
   const queue = [start],
     seen = new Set([`${start.x},${start.y}`]);
@@ -264,7 +273,7 @@ function reachable(world: InfiniteWorld, start: Point, radius: number): Set<stri
         Math.abs(p.x - start.x) > radius ||
         Math.abs(p.y - start.y) > radius ||
         seen.has(key) ||
-        world.blocked(p.x, p.y)
+        world.blocked(p.x, p.y, undefined, true)
       )
         continue;
       seen.add(key);
@@ -533,19 +542,27 @@ test('generation three building archetypes, residents and useful fixtures connec
   assert.ok(buildingCounts.size >= 3);
 });
 
-test('rounded generation-three roads remain unbroken across distant cities, negative coordinates and chunk eviction', () => {
+test('rounded generation-three roads remain traversable after opening doors across distant cities and chunk eviction', () => {
   for (const seed of [0, 703]) {
     const world = new InfiniteWorld(seed, 3),
       original = structuredClone(world.chunk(-41, 0));
     for (let p = -1920; p <= 1920; p++) {
-      assert.equal(world.blocked(p, 0), false, `${seed}: east/west ${p}`);
-      assert.equal(world.blocked(0, p), false, `${seed}: north/south ${p}`);
+      assert.equal(world.blocked(p, 0, undefined, true), false, `${seed}: east/west ${p}`);
+      assert.equal(world.blocked(0, p, undefined, true), false, `${seed}: north/south ${p}`);
     }
     for (const index of [-7, -2, 1, 5]) {
       const line = Math.round(index * STOP_SPACING);
       for (let p = -220; p <= 220; p++) {
-        assert.equal(world.blocked(line, p), false, `${seed}: rounded vertical ${line},${p}`);
-        assert.equal(world.blocked(p, line), false, `${seed}: rounded horizontal ${p},${line}`);
+        assert.equal(
+          world.blocked(line, p, undefined, true),
+          false,
+          `${seed}: rounded vertical ${line},${p}`,
+        );
+        assert.equal(
+          world.blocked(p, line, undefined, true),
+          false,
+          `${seed}: rounded horizontal ${p},${line}`,
+        );
       }
     }
     assert.equal(world.cacheSize, 160);

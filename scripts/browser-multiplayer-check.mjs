@@ -350,6 +350,65 @@ try {
     'door closed remotely',
   );
   pass('Actual cathedral door open and close synchronize', door.id);
+  // Keyboard movement must stop at the same closed collision cell on both clients.
+  // A floor click then plans through the door, waits for the server to open it,
+  // and continues the existing route without another click.
+  for (const client of [a, b]) {
+    await client.move({ x: 0, y: 0 });
+    await client.key('w', 'KeyW', 87, 800);
+    const stopped = await client.state();
+    assert.ok(stopped.player.y > door.y + 0.5, `${client.name}: closed door must stop the body`);
+    assert.ok(!stopped.opened.includes(door.id));
+  }
+  const beforeRouteFrames = a.wire.length;
+  await a.move({ x: 0, y: -3 });
+  await b.wait(
+    `window.stichos.state.opened.includes(${JSON.stringify(door.id)}) && window.stichos.state.multiplayer.peers[0].y < -2.7`,
+    'remote doorway and the arriving indoor body agree',
+  );
+  const routeOpen = a.wire
+    .slice(beforeRouteFrames)
+    .find((w) => w.direction === 'sent' && w.message.type === 'door' && w.message.open);
+  assert.ok(routeOpen, 'The routed door must be opened through the shared server action.');
+  assert.ok(
+    a.wire.some(
+      (w) =>
+        w.direction === 'received' &&
+        w.message.type === 'claimResult' &&
+        w.message.requestId === routeOpen.message.requestId &&
+        w.message.ok,
+    ),
+    'The route must receive a successful server acknowledgement.',
+  );
+  await b.move({ x: 0, y: -2 });
+  await a.wait(
+    'window.stichos.state.multiplayer.peers[0].y < -1.7',
+    'second body crosses shared open door',
+  );
+  await a.shot('05-shared-door-route');
+  // Close from indoors after both people have cleared the threshold, then ask
+  // the second client to leave with one floor click through that closed door.
+  await b.worldClick(door);
+  await a.wait(
+    `!window.stichos.state.opened.includes(${JSON.stringify(door.id)})`,
+    'indoor close mirrors',
+  );
+  await b.move({ x: 0, y: 1 });
+  await a.wait(
+    `window.stichos.state.opened.includes(${JSON.stringify(door.id)}) && window.stichos.state.multiplayer.peers[0].y > .7`,
+    'second route opens and exits through shared collision',
+  );
+  assert.equal((await a.state()).multiplayer.pending, false);
+  assert.equal((await b.state()).multiplayer.pending, false);
+  assert.ok(
+    ![...a.wire, ...b.wire].some(
+      (w) => w.message.type === 'error' && w.message.code === 'blocked_pose',
+    ),
+  );
+  pass(
+    'Both bodies respect closed doors and one floor click continues through a server-approved opening',
+    'Keyboard blocks on both clients; indoor and outdoor routes resume after acknowledgement; the other browser sees the same open collision and arriving body.',
+  );
   // Cut only the test-owned production server's actual socket. Browser offline emulation
   // leaves already-open WebSockets untouched; no browser game state is injected here.
   const peerId = (await b.state()).multiplayer.peerId;

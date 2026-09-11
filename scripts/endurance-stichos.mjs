@@ -150,16 +150,10 @@ function walk(game, target, tolerance = 1.25) {
   const queue = [start],
     seen = new Set([key(start)]),
     prev = new Map();
-  const doors = new Map(
-    game.world
-      .propsAround(start.x, start.y, 45)
-      .filter((p) => p.kind === 'door')
-      .map((p) => [key(p), p]),
-  );
   let end;
   for (let i = 0; i < queue.length && i < 25000; i++) {
     const p = queue[i];
-    if (distance(p, target) <= tolerance && !game.world.blocked(p.x, p.y, game.removed)) {
+    if (distance(p, target) <= tolerance && !game.world.blocked(p.x, p.y, game.removed, true)) {
       end = p;
       break;
     }
@@ -174,7 +168,7 @@ function walk(game, target, tolerance = 1.25) {
         seen.has(key(n)) ||
         Math.abs(n.x - start.x) > 60 ||
         Math.abs(n.y - start.y) > 60 ||
-        (game.world.blocked(n.x, n.y, game.removed) && !doors.has(key(n)))
+        game.world.blocked(n.x, n.y, game.removed, true)
       )
         continue;
       seen.add(key(n));
@@ -186,10 +180,17 @@ function walk(game, target, tolerance = 1.25) {
   const path = [];
   for (let p = end; key(p) !== key(start); p = prev.get(key(p))) path.unshift(p);
   for (const point of [start, ...path]) {
-    const door = doors.get(key(point));
-    if (door && !game.removed.has(door.id) && distance(game.player, door) < 1.8) {
+    const door = game.world
+      .propsAround(point.x, point.y, 0.1)
+      .find((p) => p.kind === 'door' && !game.removed.has(p.id));
+    if (door) {
+      assert.ok(
+        distance(game.player, door) <= 1.65,
+        `Door is outside interaction range: ${door.id}`,
+      );
       game.interact(door.id);
       game.choose('close');
+      assert.equal(game.world.blocked(point.x, point.y, game.removed), false, door.id);
     }
     for (let i = 0; distance(game.player, point) > 0.025 && i < 40; i++) {
       sustain(game);

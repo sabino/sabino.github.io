@@ -18,7 +18,7 @@ function walkTo(game: Stichos, target: Point) {
   let end: Point | undefined;
   for (let i = 0; i < queue.length && i < 12000; i++) {
     const p = queue[i];
-    if (dist(p, target) <= 1.3 && !game.world.blocked(p.x, p.y, game.removed)) {
+    if (dist(p, target) <= 1.3 && !game.world.blocked(p.x, p.y, game.removed, true)) {
       end = p;
       break;
     }
@@ -33,7 +33,7 @@ function walkTo(game: Stichos, target: Point) {
         seen.has(key(next)) ||
         Math.abs(next.x - start.x) > 35 ||
         Math.abs(next.y - start.y) > 35 ||
-        game.world.blocked(next.x, next.y, game.removed)
+        game.world.blocked(next.x, next.y, game.removed, true)
       )
         continue;
       seen.add(key(next));
@@ -45,6 +45,15 @@ function walkTo(game: Stichos, target: Point) {
   const route: Point[] = [];
   for (let p = end; key(p) !== key(start); p = previous.get(key(p))!) route.unshift(p);
   for (const point of [start, ...route]) {
+    const door = game.world
+      .propsAround(point.x, point.y, 0.1)
+      .find((p) => p.kind === 'door' && !game.removed.has(p.id));
+    if (door) {
+      assert.ok(dist(game.player, door) <= 1.65, `Door is outside interaction range: ${door.id}`);
+      game.interact(door.id);
+      game.choose('close');
+      assert.equal(game.world.blocked(point.x, point.y, game.removed), false, door.id);
+    }
     for (let i = 0; dist(game.player, point) > 0.025 && i < 100; i++) {
       const dx = point.x - game.player.x,
         dy = point.y - game.player.y;

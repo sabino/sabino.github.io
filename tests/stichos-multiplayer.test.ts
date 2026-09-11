@@ -211,6 +211,8 @@ test('generated loot is opened once and door state cannot close over another con
   const beside = adjacent(world, door);
   alice.send({ type: 'pose', ...beside, heading: 0, phase: 0, appearance: look() });
   await bob.next('pose');
+  bob.send({ type: 'pose', x: door.x, y: door.y, heading: 0, phase: 0, appearance: look() });
+  assert.equal((await bob.next('error')).code, 'blocked_pose');
   alice.send({ type: 'door', requestId: 'open-door', propId: door.id, open: true });
   assert.equal((await alice.next('claimResult')).ok, true);
   assert.deepEqual((await bob.next('world')).opened, [door.id]);
@@ -227,9 +229,31 @@ test('generated loot is opened once and door state cannot close over another con
   assert.ok(!room.removed.has(door.id) && !room.opened.has(door.id));
   assert.equal(
     room.world.blocked(door.x, door.y, room.removed),
-    world.blocked(door.x, door.y),
-    'Closing preserves the generated doorway collision rule.',
+    true,
+    'Closing restores actual collision after the peer has left the doorway.',
   );
+});
+
+test('new rooms reject closed doorway positions while an already-open shared doorway permits joining', async (t) => {
+  const { server, url } = await serverFixture(t);
+  const world = new InfiniteWorld(3886, 3);
+  const door = world.propsAround(0, 0, 24).find((p) => p.kind === 'door')!;
+  assert.ok(door);
+  const candidate = await wire(url);
+  candidate.send(identity({ position: { x: door.x, y: door.y } }));
+  const rejected = await candidate.next('error');
+  assert.equal(rejected.code, 'blocked_pose');
+  assert.match(rejected.reason, /clear ground/i);
+  assert.equal(server.hub.rooms.size, 0, 'A failed doorway start must not allocate a room.');
+
+  const host = await join(url, { position: adjacent(world, door) });
+  host.send({ type: 'door', requestId: 'open-for-arrival', propId: door.id, open: true });
+  assert.equal((await host.next('claimResult')).ok, true);
+  candidate.send(identity({ room: host.welcome.room, position: { x: door.x, y: door.y } }));
+  const welcome = await candidate.next('welcome');
+  assert.deepEqual(welcome.opened, [door.id]);
+  assert.ok(welcome.removed.includes(door.id));
+  assert.ok(welcome.peers.some((p) => p.id === welcome.peerId && p.x === door.x && p.y === door.y));
 });
 
 test('disconnect broadcasts departure and a private valid token restores identity and shared claims without duplication', async (t) => {
