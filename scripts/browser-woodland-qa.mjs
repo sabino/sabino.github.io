@@ -16,7 +16,7 @@ if (
 )
   throw Error('Use the verified workspace endpoint and the local or published Verso frontend.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, '.dream-loop/woodland-round3');
+const out = path.join(root, '.dream-loop', process.env.VERSO_CAPTURE_NAME || 'woodland-round3');
 fs.mkdirSync(out, { recursive: true });
 const started = new Date(),
   results = [],
@@ -258,6 +258,8 @@ try {
   await c.wait('window.stichos.state.transfer', 'arrival');
   await c.click('#s-skip');
   await c.wait("window.stichos.state.modal===''&&!window.stichos.state.transfer", 'arrived');
+  if (process.env.VERSO_WALK_SOUTH_MS)
+    await c.key('s', 'KeyS', 83, Math.min(4000, Number(process.env.VERSO_WALK_SOUTH_MS)));
   await delay(7600);
   await c.shot('world');
   const fps = await c.read('window.stichos.fps');
@@ -268,6 +270,27 @@ try {
     path.join(out, 'result.json'),
     JSON.stringify({ state: await c.state(), fps, errors }, null, 2),
   );
+  const home = (await c.state()).lifeOrigin.home;
+  const entrance = await c.read(
+    `(()=>{const p=window.stichos.worldToScreen({x:${home.x},y:${home.y - 1}});const r=document.querySelector('#s-world').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top};})()`,
+  );
+  assert(
+    entrance.x > 0 && entrance.x < 1080 && entrance.y > 45 && entrance.y < 760,
+    'Owned entrance fits the actual camera',
+  );
+  await c.point(entrance.x, entrance.y);
+  await c.wait(
+    `window.stichos.tile(Math.round(window.stichos.state.player.x),Math.round(window.stichos.state.player.y)).building===${JSON.stringify(home.buildingId)} && window.stichos.tile(Math.round(window.stichos.state.player.x),Math.round(window.stichos.state.player.y)).terrain==='floor'`,
+    'Native path opens the real door and enters the owned home',
+    18000,
+  );
+  await delay(1500);
+  await c.shot('home-interior');
+  fs.writeFileSync(
+    path.join(out, 'interior.json'),
+    JSON.stringify({ state: await c.state(), errors }, null, 2),
+  );
+  console.log('PASS actual path through the owned doorway into the generated interior.');
   assert.equal(errors.length, 0);
   console.log(
     'PASS native woodland arrival, actual equipped blade, north-facing held-item layering capture.',

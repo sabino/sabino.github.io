@@ -543,7 +543,8 @@ export class StichosRenderer {
     const formal = bed.kind === 'planter';
     const cold = tile.temperature < 0;
     const dry = (tile.ecology?.moisture ?? 0.5) < 0.36;
-    const soil = cold ? '#5d665e' : dry ? '#8f7d55' : '#586346';
+    const rawSoil = cold ? '#5d665e' : dry ? '#8f7d55' : '#586346';
+    const soil = formal ? rawSoil : blendColor(regionalGroundColor(tile), rawSoil, 0.58);
     const leaf = cold ? '#506f60' : dry ? '#78814b' : '#547541';
     const edge = formal
       ? color(tile.architecture?.wallColor ?? '#74818a', -24)
@@ -565,14 +566,14 @@ export class StichosRenderer {
         const span = i * 4;
         const x = p.x - 16 + (dx ? (dx > 0 ? 29 : 0) : span);
         const y = p.y - 16 + (dy ? (dy > 0 ? 29 : 0) : span);
-        if (formal || rng() > 0.16) {
+        if (formal || (bed.kind === 'garden' && rng() > 0.77)) {
           rect(ctx, x + 1, y + 2, dx ? 3 : 4, dy ? 3 : 4, '#34453b');
           rect(ctx, x, y, dx ? 3 : 4, dy ? 3 : 4, color(edge, rng() * 12));
           rect(ctx, x, y, dx ? 2 : 4, 1, color(edge, 29));
         }
       }
     }
-    const plantCount = Math.round(2 + Math.max(0.15, bed.density) * 7);
+    const plantCount = Math.round(3 + Math.max(0.15, bed.density) * 7);
     for (let n = 0; n < plantCount; n++) {
       const x = p.x - 12 + west + rng() * (24 - west - east);
       const y = p.y - 10 + north + rng() * (23 - north - south);
@@ -580,8 +581,8 @@ export class StichosRenderer {
       rect(ctx, x - span, y + 1, span * 2, 3, color(soil, -20));
       for (let layer = 0; layer < 3; layer++) {
         const w = span * (1 - layer * 0.18);
-        rect(ctx, x - w, y - layer * 2, w * 2, 3, color(leaf, layer * 13 - 18));
-        rect(ctx, x - w + 1, y - layer * 2 - 1, w, 2, color(leaf, layer * 13 - 6));
+        rect(ctx, x - w, y - layer * 2, w * 2, 3, color(leaf, layer * 17 - 25));
+        rect(ctx, x - w + 1, y - layer * 2 - 1, w, 2, color(leaf, layer * 16 - 9));
       }
       if (!cold && !dry && rng() > 0.48) {
         const flower = rng() > 0.45 ? '#d3c492' : '#c09ab0';
@@ -619,7 +620,7 @@ export class StichosRenderer {
           !['road', 'floor', 'wall'].includes(neighbor.terrain)
         ) {
           for (let segment = 0; segment < 4; segment++) {
-            const depth = (4 + rng() * 5) * edgeScale,
+            const depth = (type === 'road' ? 12 + rng() * 7 : 4 + rng() * 5) * edgeScale,
               along = -u / 2 + (segment * u) / 4;
             const xx = p.x + (dx ? (dx > 0 ? u / 2 - depth : -u / 2) : along),
               yy = p.y + (dy ? (dy > 0 ? u / 2 - depth : -u / 2) : along);

@@ -1264,11 +1264,19 @@ button[aria-selected='true'] {
 }
 
 /* No resident has been accepted at entry: show the landscape, not a legacy identity behind the chooser. */
-.s-shell:has(> .s-modal.is-title:not([hidden])) .s-sidebar,
-.s-shell:has(> .s-modal.is-title:not([hidden])) .s-hotbar,
-.s-shell:has(> .s-modal.is-title:not([hidden])) .s-weather,
-.s-shell:has(> .s-modal.is-title:not([hidden])) .s-world-caption,
-.s-shell:has(> .s-modal.is-title:not([hidden])) .s-place,
-.s-shell:has(> .s-modal.is-title:not([hidden])) .s-brand small {
+.s-shell:has(> .s-modal.is-title:not([hidden]), > .s-modal:not([hidden]) #v-accept-life) .s-sidebar,
+.s-shell:has(> .s-modal.is-title:not([hidden]), > .s-modal:not([hidden]) #v-accept-life) .s-hotbar,
+.s-shell:has(> .s-modal.is-title:not([hidden]), > .s-modal:not([hidden]) #v-accept-life) .s-weather,
+.s-shell:has(> .s-modal.is-title:not([hidden]), > .s-modal:not([hidden]) #v-accept-life)
+  .s-world-caption,
+.s-shell:has(> .s-modal.is-title:not([hidden]), > .s-modal:not([hidden]) #v-accept-life) .s-place,
+.s-shell:has(> .s-modal.is-title:not([hidden]), > .s-modal:not([hidden]) #v-accept-life)
+  .s-brand
+  small {
   visibility: hidden;
+}
+
+/* Daylight grade restores material separation while leaving interface text untouched. */
+#s-world {
+  filter: contrast(1.14) saturate(1.16);
 }
