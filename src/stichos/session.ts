@@ -715,6 +715,9 @@ export class Stichos {
       };
     });
   }
+  get nextProductionId() {
+    return `production:${this.production.serial + 1}`;
+  }
   get productionRecipes() {
     return clone(PRODUCTION_RECIPES);
   }

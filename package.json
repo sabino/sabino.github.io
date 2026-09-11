@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "peerjs": "^1.5.5",
+    "qrcode-generator": "^2.0.4",
     "ws": "^8.21.3"
   }
 }

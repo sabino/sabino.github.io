@@ -1,4 +1,7 @@
 import type { Peer } from './multiplayer-protocol';
+import type { ProductionMachine } from './multiplayer-protocol';
+import type { ProductionKind } from './production';
+import { drawProduction } from './production-art';
 import type { Stichos } from './session.ts';
 import type { Effect, Npc, Point, Prop, Tile } from './types.ts';
 import { random, deriveSeed } from '../procedural/random.ts';
@@ -95,13 +98,13 @@ export class StichosRenderer {
   worldToScreen(p: Point): Point {
     return {
       x: this.width / 2 + (p.x - this.camera.x) * this.unit,
-      y: this.height * 0.53 + (p.y - this.camera.y) * this.unit,
+      y: this.height * 0.58 + (p.y - this.camera.y) * this.unit,
     };
   }
   screenToWorld(p: Point): Point {
     return {
       x: (p.x - this.width / 2) / this.unit + this.camera.x,
-      y: (p.y - this.height * 0.53) / this.unit + this.camera.y,
+      y: (p.y - this.height * 0.58) / this.unit + this.camera.y,
     };
   }
 
@@ -113,6 +116,8 @@ export class StichosRenderer {
       transfer?: number;
       pointer?: Point | null;
       peers?: readonly Peer[];
+      machines?: readonly ProductionMachine[];
+      placement?: { kind: ProductionKind; point: Point; valid: boolean };
       playerAppearance?: Stichos['player']['appearance'];
       emotes?: ReadonlyMap<string, { text: string; until: number }>;
     } = {},
@@ -198,8 +203,8 @@ export class StichosRenderer {
     ctx.fillRect(0, 0, this.width, this.height);
     const left = Math.floor(this.camera.x - this.width / unit / 2) - 2,
       right = Math.ceil(this.camera.x + this.width / unit / 2) + 2;
-    const top = Math.floor(this.camera.y - (this.height * 0.53) / unit) - 8,
-      bottom = Math.ceil(this.camera.y + (this.height * 0.47) / unit) + 7;
+    const top = Math.floor(this.camera.y - (this.height * 0.58) / unit) - 8,
+      bottom = Math.ceil(this.camera.y + (this.height * 0.42) / unit) + 7;
     const buildings = new Map<string, Building>(),
       siteWalls: Tile[] = [];
     this.drawGround(game);
@@ -290,6 +295,42 @@ export class StichosRenderer {
       }
     }
     const drawables: { depth: number; draw: () => void }[] = [];
+    const localMachines = game.productionStructures;
+    for (const m of [
+      ...localMachines,
+      ...(options.machines ?? []).filter(
+        (remote) => !localMachines.some((local) => local.x === remote.x && local.y === remote.y),
+      ),
+    ]) {
+      if (Math.hypot(m.x - this.camera.x, m.y - this.camera.y) > radius) continue;
+      const p = this.worldToScreen(m);
+      drawables.push({
+        depth: m.y + 0.1,
+        draw: () =>
+          drawProduction(
+            ctx,
+            m.kind,
+            p.x,
+            p.y,
+            scale,
+            'progress' in m ? m.progress : 0,
+            'phase' in m && m.phase === 'working',
+            game.time,
+          ),
+      });
+    }
+    if (options.placement) {
+      const m = options.placement,
+        p = this.worldToScreen(m.point);
+      ctx.save();
+      ctx.fillStyle = m.valid ? '#9acf9b44' : '#c9767644';
+      ctx.fillRect(p.x - unit * 1.5, p.y - unit * 1.5, unit * 3, unit * 3);
+      ctx.strokeStyle = m.valid ? '#c6eab0' : '#edaaaa';
+      ctx.strokeRect(p.x - unit * 1.5, p.y - unit * 1.5, unit * 3, unit * 3);
+      ctx.globalAlpha = 0.65;
+      drawProduction(ctx, m.kind, p.x, p.y, scale, 0, false, 0);
+      ctx.restore();
+    }
     for (const b of buildings.values())
       drawables.push({ depth: b.maxY + 0.38, draw: () => this.building(game, b) });
     for (const tile of siteWalls) {
@@ -390,8 +431,8 @@ export class StichosRenderer {
     const u = this.unit,
       minX = Math.floor((this.camera.x - this.width / u / 2 - 1) / 16),
       maxX = Math.floor((this.camera.x + this.width / u / 2 + 1) / 16);
-    const minY = Math.floor((this.camera.y - (this.height * 0.53) / u - 1) / 16),
-      maxY = Math.floor((this.camera.y + (this.height * 0.47) / u + 1) / 16);
+    const minY = Math.floor((this.camera.y - (this.height * 0.58) / u - 1) / 16),
+      maxY = Math.floor((this.camera.y + (this.height * 0.42) / u + 1) / 16);
     for (let cy = minY; cy <= maxY; cy++)
       for (let cx = minX; cx <= maxX; cx++) {
         const key = `${cx},${cy}`;
@@ -889,8 +930,8 @@ export class StichosRenderer {
     );
     const near = Math.hypot(person.x - game.player.x, person.y - game.player.y) < 4;
     if (player || near || (person as Npc).hostile) {
-      const label = player ? 'Theo' : person.name.split(' ')[0];
-      ctx.font = `${Math.max(9, Math.round(9 * Math.sqrt(this.viewZoom)))}px Georgia,serif`;
+      const label = person.name.split(' ')[0];
+      ctx.font = `${Math.max(10, Math.round(10 * Math.sqrt(this.viewZoom)))}px "Courier New",monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       const labelY = p.y - 44 * s * person.appearance.height;

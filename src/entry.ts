@@ -1,3 +1,4 @@
+import './install';
 const mode = new URLSearchParams(location.search);
 if (mode.has('study')) {
   void import('./main');

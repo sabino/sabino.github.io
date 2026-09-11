@@ -1,8 +1,29 @@
 import './style.css';
 import './notebook.css';
 import './life.css';
+import './universe-ui.css';
+import { creationHtml, mountCreation } from './creation';
+import { mountGalaxy } from './galaxy';
+import {
+  STICHOS_SEED,
+  planetAt,
+  sectorPlanets,
+  knownWorlds,
+  rememberWorld,
+  stashLife,
+  rememberedLife,
+  readRoomLink,
+  roomLink,
+  validRoomCode,
+  publicRoomCode,
+} from './universe';
+import type { Geography, RoomInvitation, Planet } from './universe';
+import { requestInstall } from '../install';
+import qrcode from 'qrcode-generator';
+import { claimLifeTab, releaseLifeTab } from './life-lease';
 import { mountLife } from './life';
-import { MultiplayerConnection } from './multiplayer';
+import { MultiplayerConnection, getBrowserPlayerId, savedWorlds } from './multiplayer';
+import { PRODUCTION_KINDS, type ProductionKind } from './production';
 import { notebookHtml } from './notebook';
 import type { NotebookSection, NotebookView } from './notebook';
 import { INTRO_BEATS, JOURNAL_ENTRIES, PLANT_NOTES } from './lore';
@@ -43,6 +64,49 @@ const esc = (text: unknown) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
 const canvas = el<HTMLCanvasElement>('s-world');
+document
+  .querySelector('.s-header nav')!
+  .insertAdjacentHTML(
+    'afterbegin',
+    '<button id="v-galaxy" title="Galaxy chart (G)">Galaxy</button><button id="v-work" title="Construct and automate">Work</button>',
+  );
+document
+  .querySelector('.s-shell')!
+  .insertAdjacentHTML(
+    'beforeend',
+    `<section class="v-chat" aria-label="Traveler communication"><nav><button data-chat-channel="say" aria-pressed="true">Local</button><button data-chat-channel="world" aria-pressed="false">Room</button><button id="v-chat-settings" title="Assign phrases to shortcuts">Shortcuts</button><button id="v-chat-toggle" aria-label="Collapse chat">−</button><span id="v-chat-status">Traveling alone</span></nav><div id="v-chat-log" role="log" aria-live="polite"></div><form id="v-chat-form"><input id="v-chat-input" maxlength="280" placeholder="Enter to talk · /help for commands" aria-label="Chat message" autocomplete="off"><button type="submit">Send</button></form></section>`,
+  );
+document
+  .querySelector('.s-person-minor')!
+  .insertAdjacentHTML(
+    'beforebegin',
+    '<div class="s-meter v-energy"><label>Energy <b id="v-energy-label">100%</b></label><div><i id="v-energy-bar"></i></div></div>',
+  );
+document
+  .querySelector('.s-map-block')!
+  .insertAdjacentHTML(
+    'afterbegin',
+    '<div class="v-map-heading"><span>Local chart</span><div><button id="v-map-less" aria-label="Zoom world out">−</button><button id="v-map-more" aria-label="Zoom world in">+</button></div></div>',
+  );
+document
+  .querySelector('.s-side-footer')!
+  .insertAdjacentHTML(
+    'beforebegin',
+    '<section class="v-roster"><header><span id="v-roster-title">Travelers</span><button id="v-roster-page" aria-label="Next travelers">›</button></header><div id="v-roster-list"></div></section>',
+  );
+document
+  .querySelector('.s-walk-help')!
+  .insertAdjacentHTML(
+    'beforebegin',
+    '<div class="v-phrase-bar">' +
+      ['Hello', 'Follow', 'Wait']
+        .map(
+          (p, i) =>
+            `<button data-phrase-send="${i}" title="Send F${i + 7} phrase"><kbd>F${i + 7}</kbd><span>${p}</span></button>`,
+        )
+        .join('') +
+      '</div>',
+  );
 const renderer = new StichosRenderer(canvas);
 const audio = new AudioDirector();
 const storageKey = 'verso.stichos.v1';
@@ -53,7 +117,7 @@ const peerEmotes = new Map<string, { text: string; until: number }>();
 let sharedActionPending = false;
 let multiplayerRoster = '';
 let roomName = 'Theo';
-let roomServer = location.protocol === 'https:' ? 'peer:' : `ws://${location.hostname}:4175/ws`;
+let roomServer = 'peer:';
 try {
   roomName = localStorage.getItem('verso.room.name') || 'Theo';
   roomServer = localStorage.getItem('verso.room.server') || roomServer;
@@ -69,6 +133,19 @@ let mapWaypoint: Point | null = null;
 let chartView: AtlasView | null = null;
 let chartControl: AtlasController | null = null;
 let modalRevision = 0;
+let disposeSpecial: (() => void) | null = null;
+let pendingInvitation: RoomInvitation | null = readRoomLink(location.href);
+let pendingRoomAfterArrival: RoomInvitation | null = null;
+let currentPlanet = planetAt(STICHOS_SEED);
+let chatChannel: 'say' | 'world' = 'say';
+let phraseShortcuts: string[] = ['Hello!', 'Follow me.', 'Wait here.'];
+try {
+  const p = JSON.parse(localStorage.getItem('verso.chat.shortcuts') || 'null');
+  if (Array.isArray(p))
+    phraseShortcuts = [0, 1, 2].map((i) =>
+      typeof p[i] === 'string' ? p[i].slice(0, 280) : phraseShortcuts[i],
+    );
+} catch {}
 const atlasPainter = new AtlasPainter();
 function trackedQuest() {
   if (trackedQuestId === 'map-waypoint' && mapWaypoint)
@@ -111,7 +188,7 @@ let toastUntil = 0,
   dialogueSignature = '',
   lastPhase = game.phase;
 let transferStarted = 0,
-  transferKind: 'opening' | 'return' | 'clinic' = 'opening',
+  transferKind: 'opening' | 'arrival' | 'return' | 'clinic' = 'opening',
   transferStep = -1;
 let pendingTransfer: (() => void) | null = null;
 let ignoreNextTransfer = false;
@@ -163,18 +240,32 @@ function toast(message: string, duration = 4500) {
   toastUntil = performance.now() + duration;
 }
 function save() {
-  if (!started) return;
+  if (!started) return false;
   try {
     stored = JSON.stringify(game.save());
     localStorage.setItem(storageKey, stored);
+    stashLife(game.world.seed, game.world.generation, stored);
+    rememberWorld({
+      seed: game.world.seed,
+      generation: game.world.generation,
+      visitedAt: Date.now(),
+      name: game.player.name,
+    });
+    return true;
   } catch {
-    toast('This browser could not store your progress. Download a save from the pause menu.');
+    toast(
+      'This browser could not store your progress. Free some browser storage before leaving this life.',
+    );
+    return false;
   }
 }
 function activate(next: Stichos) {
   multiplayer.disconnect();
   peerEmotes.clear();
+  el('v-chat-log').replaceChildren();
+  setChatCollapsed(innerWidth < 900);
   game = next;
+  currentPlanet = planetAt(next.world.seed, next.world.generation);
   void import('./store')
     .then(({ restoreStoreEntitlements }) =>
       restoreStoreEntitlements(next, () => {
@@ -203,6 +294,8 @@ function setInert(value: boolean) {
     .forEach((n) => (n.inert = value));
 }
 function openModal(kind: string, html: string) {
+  disposeSpecial?.();
+  disposeSpecial = null;
   modalRevision++;
   chartControl?.dispose();
   chartControl = null;
@@ -226,6 +319,8 @@ function openModal(kind: string, html: string) {
   container.scrollTop = 0;
 }
 function closeModal() {
+  disposeSpecial?.();
+  disposeSpecial = null;
   modalRevision++;
   chartControl?.dispose();
   chartControl = null;
@@ -238,17 +333,29 @@ function closeModal() {
   canvas.focus({ preventScroll: true });
 }
 function title() {
+  const invite = pendingInvitation;
   openModal(
     'title',
-    `<div class="s-title-mark">V E R S O</div><span class="s-chapter">Destino: Stíchos</span><h2>I came from the future.<br>I woke in his past.</h2><p>Planet Stíchos, year 3886. For twenty local years, Theo Bishop has worn a priest’s face. Now a war is beginning—and the family he came to study may be his only way home.</p><form id="s-start"><label>A possible Stíchos<input id="s-seed-input" value="0x53544943" maxlength="64" aria-label="World seed"></label><button class="s-primary" type="submit">Remember how it began</button></form>${stored ? '<button id="s-continue" class="s-continue">Continue this life</button>' : ''}<p class="s-title-foot">A continuous world of botanical medicine, clan loyalties,<br>and a voice on the other side of a broken transmission.</p>`,
+    `<div class="v-window-heading"><div class="s-title-mark">VERSO</div><button id="v-install-title">Install app</button></div><h2>One universe.<br>A life of your own.</h2><p>Work the land. Build a livelihood. Find other minds among the stars. Every world has an address; every life leaves something behind.</p>${invite ? `<div class="v-incoming"><b>Invitation to room ${esc(invite.room)}</b><span>${esc(planetAt(invite.seed).name)} · your friend’s planet is already selected</span><button id="v-join-invite" class="s-primary">Join this world</button></div>` : ''}${stored ? '<button id="s-continue" class="s-primary s-continue">Continue this life</button>' : ''}<div class="v-entry-columns"><form id="s-start"><label>Planet seed <span>Leave blank for a new signal</span><input id="s-seed-input" value="" maxlength="64" aria-label="World seed" placeholder="A name, number, or leave to chance"></label><button class="s-primary" type="submit">Choose a life</button><button id="v-theo-story" type="button">Theo Bishop’s story · Stíchos</button></form><form id="v-title-room"><label>Join friends<input id="v-title-code" maxlength="16" placeholder="Room code" autocapitalize="characters" autocomplete="off"></label><button type="submit">Find room</button><button id="v-title-galaxy" type="button">Browse the galaxy</button></form></div><p class="s-title-foot">Your continuing life is kept in this browser. Share a room link to bring friends to the same world.</p>`,
   );
-  el<HTMLFormElement>('s-start').onsubmit = (event) => {
-    event.preventDefault();
-    activate(new Stichos(parseSeed(el<HTMLInputElement>('s-seed-input').value)));
-    void audio.start(game.world.seed);
-    closeModal();
-    transfer('opening');
+  el('v-install-title').onclick = () => void requestInstall().then(toast);
+  el('v-title-galaxy').onclick = galaxyMenu;
+  el<HTMLFormElement>('s-start').onsubmit = (e) => {
+    e.preventDefault();
+    const text = el<HTMLInputElement>('s-seed-input').value.trim();
+    const seed = text ? parseSeed(text) : crypto.getRandomValues(new Uint32Array(1))[0];
+    choosePlanet(seed, 3);
   };
+  el('v-theo-story').onclick = () => {
+    const seed = el<HTMLInputElement>('s-seed-input').value.trim();
+    choosePlanet(seed ? parseSeed(seed) : STICHOS_SEED, 3, undefined, true);
+  };
+  el<HTMLFormElement>('v-title-room').onsubmit = (e) => {
+    e.preventDefault();
+    void findRoom(el<HTMLInputElement>('v-title-code').value);
+  };
+  if (invite)
+    el('v-join-invite').onclick = () => choosePlanet(invite.seed, invite.generation, invite);
   if (stored)
     el('s-continue').onclick = () => {
       try {
@@ -256,11 +363,220 @@ function title() {
         void audio.start(game.world.seed);
         closeModal();
         if (game.phase === 'lost') lost();
-        else toast('The cold is familiar. The silence, less so.');
+        else if (
+          invite &&
+          invite.seed === game.world.seed &&
+          invite.generation === game.world.generation
+        )
+          void joinInvitation(invite);
+        else toast('Your life continues.');
       } catch {
-        toast('This save could not be read. You can start a new life or restore a saved file.');
+        toast('This life could not be read. Its stored record has been preserved.');
       }
     };
+}
+function choosePlanet(
+  seed: number,
+  generation: Geography = 3,
+  invite?: RoomInvitation,
+  theo = false,
+) {
+  if (started && !save()) return;
+  let prior = rememberedLife(seed, generation);
+  if (!prior && stored)
+    try {
+      const legacy = JSON.parse(stored);
+      if (legacy.seed === seed && (legacy.worldGeneration ?? legacy.generation ?? 1) === generation)
+        prior = stored;
+    } catch {}
+  if (prior) {
+    try {
+      const next = Stichos.restore(JSON.parse(prior));
+      activate(next);
+      void audio.start(seed);
+      closeModal();
+      save();
+      if (invite) void joinInvitation(invite);
+      else transfer('return');
+      return;
+    } catch {
+      toast('This planet’s stored life could not be read. It has been preserved.');
+      return;
+    }
+  }
+  if (theo) {
+    activate(new Stichos(seed, generation));
+    void audio.start(seed);
+    closeModal();
+    transfer('opening');
+    return;
+  }
+  let candidateIndex = crypto.getRandomValues(new Uint32Array(1))[0] % 1000000;
+  openModal('creation', creationHtml(seed, invite?.room));
+  el('v-create-back').onclick = title;
+  disposeSpecial = mountCreation(
+    el('s-modal'),
+    seed,
+    generation,
+    candidateIndex,
+    (index, customization) => {
+      const next = new Stichos(seed, generation);
+      const result = next.acceptLife(index, customization);
+      if (!result.ok) {
+        toast(result.message);
+        return;
+      }
+      activate(next);
+      roomName = next.player.name;
+      pendingRoomAfterArrival = invite ?? null;
+      void audio.start(seed);
+      closeModal();
+      transfer('arrival');
+    },
+  );
+}
+let joiningPublic = false;
+async function joinInvitation(invite: RoomInvitation) {
+  if (joiningPublic) return;
+  const source = game;
+  roomServer = invite.endpoint;
+  roomName = game.player.name;
+  try {
+    if (invite.public) {
+      joiningPublic = true;
+      toast('Listening for this planet’s public frequency…', 16000);
+      const { discoverRoom } = await import('./multiplayer');
+      let found = false;
+      try {
+        const info = await discoverRoom('peer:', invite.room);
+        if (info.seed !== invite.seed || info.generation !== invite.generation)
+          throw Error('This public frequency belongs to a different planet.');
+        found = true;
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('different planet')) throw error;
+      }
+      if (source !== game) return;
+      if (found) await multiplayer.connect('peer:', roomIdentity(), invite.room);
+      else
+        try {
+          await multiplayer.hostPublicWorld(invite.room, roomIdentity());
+        } catch (error) {
+          // Simultaneous first visitors may race for the same rendezvous address.
+          if (error instanceof Error && /taken|unavailable|already.*use/i.test(error.message))
+            await multiplayer.connect('peer:', roomIdentity(), invite.room);
+          else throw error;
+        }
+    } else await multiplayer.connect(roomServer, roomIdentity(), invite.room);
+    pendingInvitation = null;
+    history.replaceState(null, '', roomLink(location.href, invite));
+    toast(
+      `Room ${invite.room} joined. ${innerWidth < 900 ? 'Open chat below to talk.' : 'Press Enter to talk.'}`,
+      3000,
+    );
+  } catch (error) {
+    toast(error instanceof Error ? error.message : 'The room could not be reached.');
+    togetherMenu();
+  } finally {
+    joiningPublic = false;
+  }
+}
+async function findRoom(raw: string) {
+  const code = validRoomCode(raw);
+  if (!code) {
+    toast('Enter the room code your friend shared.');
+    return;
+  }
+  const known = knownWorlds().find((w) => w.room === code);
+  if (known) {
+    choosePlanet(known.seed, known.generation, {
+      seed: known.seed,
+      generation: known.generation,
+      room: code,
+      endpoint: known.endpoint || 'peer:',
+    });
+    return;
+  }
+  toast('Finding the planet behind this room code…');
+  const revision = modalRevision;
+  try {
+    const { discoverRoom } = await import('./multiplayer');
+    const found = await discoverRoom('peer:', code);
+    if (revision !== modalRevision) return;
+    const invite = {
+      room: code,
+      endpoint: 'peer:',
+      seed: found.seed,
+      generation: found.generation,
+    };
+    choosePlanet(invite.seed, invite.generation, invite);
+  } catch (error) {
+    toast(
+      error instanceof Error
+        ? error.message
+        : 'Room not found. Ask your friend to keep the world open, or use their full link.',
+    );
+  }
+}
+function galaxyMenu() {
+  const known = knownWorlds();
+  const seed = started ? game.world.seed : STICHOS_SEED;
+  openModal(
+    'galaxy',
+    `<div class="v-window-heading"><div><small>Verso universe</small><h2>The signal atlas</h2></div><button id="v-galaxy-close" aria-label="Close galaxy">×</button></div><div class="v-galaxy-layout"><div class="v-galaxy-stage"><canvas id="v-galaxy-canvas" aria-label="Galaxy chart. Drag to pan. Select a planet." tabindex="0"></canvas><div class="v-galaxy-controls"><button id="v-sector-prev">Previous sector</button><button id="v-galaxy-out" aria-label="Zoom out">−</button><button id="v-galaxy-in" aria-label="Zoom in">+</button><button id="v-sector-next">Next sector</button></div></div><section class="v-planet-info" id="v-planet-info"></section></div><div class="v-world-list"><h3>Known worlds</h3><div id="v-known-worlds">${
+      known.length
+        ? known
+            .slice(-8)
+            .reverse()
+            .map(
+              (w, i) =>
+                `<button data-known="${i}">${esc(planetAt(w.seed).name)}${w.room ? ` · ${esc(w.room)}` : ''}<small>Remembered here · connection unverified</small></button>`,
+            )
+            .join('')
+        : 'No visited worlds yet. Choose a signal to explore.'
+    }</div></div><p class="v-muted">The chart shares one seed address space. Live rooms require an online host or a world node; unknown signals are unexplored planets, not online player counts.</p>`,
+  );
+  let selected = planetAt(seed);
+  const select = (p: Planet) => {
+    selected = p;
+    const visited = known.some((w) => w.seed === p.seed);
+    el('v-planet-info').innerHTML =
+      `<div class="v-planet-orb" style="--planet-color:${p.color}"></div><h3>${esc(p.name)}</h3><p>${esc(p.climate)}</p><dl><div><dt>Signal</dt><dd>${esc(p.signal)}</dd></div><div><dt>Address</dt><dd>${p.seed}</dd></div><div><dt>Chart</dt><dd>${visited ? 'Visited' : 'Unexplored'}</dd></div></dl><button id="v-planet-travel" class="s-primary">${p.seed === game.world.seed && started ? 'Return to this world' : visited ? 'Resume this planet’s life' : 'Find a life here'}</button><button id="v-planet-public">Open public frequency</button><p>Your possessions stay with their body on this planet.</p>`;
+    el('v-planet-public').onclick = () => {
+      const invite: RoomInvitation = {
+        seed: p.seed,
+        generation: p.generation,
+        room: publicRoomCode(p.seed, p.generation),
+        endpoint: 'peer:',
+        public: true,
+      };
+      if (started && p.seed === game.world.seed) {
+        closeModal();
+        void joinInvitation(invite);
+      } else choosePlanet(p.seed, p.generation, invite);
+    };
+    el('v-planet-travel').onclick = () => {
+      if (started && p.seed === game.world.seed) closeModal();
+      else choosePlanet(p.seed, p.generation);
+    };
+  };
+  const chart = mountGalaxy(el<HTMLCanvasElement>('v-galaxy-canvas'), known, seed, select);
+  disposeSpecial = () => chart.dispose();
+  select(selected);
+  el('v-galaxy-close').onclick = () => (started ? closeModal() : title());
+  el('v-galaxy-in').onclick = () => chart.zoom(1.3);
+  el('v-galaxy-out').onclick = () => chart.zoom(1 / 1.3);
+  el('v-sector-prev').onclick = () => chart.sector(-1);
+  el('v-sector-next').onclick = () => chart.sector(1);
+  const display = known.slice(-8).reverse();
+  document
+    .querySelectorAll<HTMLElement>('[data-known]')
+    .forEach((n) => (n.onclick = () => chart.focus(display[Number(n.dataset.known)].seed)));
+  el<HTMLCanvasElement>('v-galaxy-canvas').onkeydown = (e) => {
+    if (e.key === '+' || e.key === '=') chart.zoom(1.3);
+    else if (e.key === '-') chart.zoom(1 / 1.3);
+    else if (e.key === 'ArrowRight') chart.sector(1);
+    else if (e.key === 'ArrowLeft') chart.sector(-1);
+  };
 }
 const opening = INTRO_BEATS;
 const returning = [
@@ -275,6 +591,23 @@ const returning = [
     'The world has not forgotten what you did.',
   ],
 ];
+const arriving = [
+  [
+    'Carrier lock',
+    'A thought crosses the distance.',
+    'Nothing physical travels. A mind finds an existing nervous system.',
+  ],
+  [
+    'Memory mismatch',
+    'Someone else was here a moment ago.',
+    'A profession. A key to a house. A day already in progress.',
+  ],
+  [
+    'Transfer complete',
+    'Your first breath in this life.',
+    'Their hands are yours now. What you do with them is your choice.',
+  ],
+];
 const recovering = [
   [
     'A voice beyond the cold',
@@ -287,7 +620,7 @@ const recovering = [
     'Your body recovers. The unanswered questions remain.',
   ],
 ];
-function transfer(kind: 'opening' | 'return' | 'clinic', after?: () => void) {
+function transfer(kind: 'opening' | 'arrival' | 'return' | 'clinic', after?: () => void) {
   closeModal();
   paused = true;
   keys.clear();
@@ -324,6 +657,11 @@ function endTransfer() {
     return;
   }
   save();
+  if (pendingRoomAfterArrival) {
+    const invite = pendingRoomAfterArrival;
+    pendingRoomAfterArrival = null;
+    void joinInvitation(invite);
+  }
   if (game.phase === 'lost') {
     lost();
     return;
@@ -331,7 +669,9 @@ function endTransfer() {
   toast(
     transferKind === 'opening'
       ? 'Cequin helps this body breathe. Speak to the botanist beside the garden.'
-      : 'Your mind settles. The investigation continues.',
+      : transferKind === 'arrival'
+        ? `${game.player.name}: a new day begins. Find work, build a home, or share a room with friends.`
+        : 'Your mind settles. This life continues.',
     7000,
   );
 }
@@ -349,7 +689,13 @@ el('s-intro-prev').onclick = () => turnIntro(-1);
 function updateTransfer(now: number) {
   if (!transferStarted) return;
   const lines =
-      transferKind === 'opening' ? opening : transferKind === 'clinic' ? recovering : returning,
+      transferKind === 'opening'
+        ? opening
+        : transferKind === 'arrival'
+          ? arriving
+          : transferKind === 'clinic'
+            ? recovering
+            : returning,
     seconds = (now - transferStarted) / 1000;
   const duration = reducedMotion.matches ? 2.5 : 3.1;
   const step =
@@ -389,36 +735,64 @@ function pauseMenu() {
   save();
   openModal(
     'pause',
-    `<span class="s-chapter">Between thoughts</span><h2>This life can wait.</h2><p>Stíchos · 3886<br>World ${formatSeed(game.world.seed)} · ${Math.floor(game.distanceTraveled)} paces traveled</p><div class="s-menu-buttons"><button id="s-resume" class="s-primary">Return to the world</button><button id="s-save-file">Download save</button><button id="s-load-file">Restore a save</button><button id="s-new">Another possible Stíchos</button><button id="s-pause-life">Skills, homes & clothing</button><button id="s-pause-together">Play together</button><button id="s-pause-help">Controls</button></div><input id="s-save-input" type="file" accept=".json,application/json" hidden>`,
+    `<div class="v-window-heading"><h2>A continuing life</h2><button id="s-resume" aria-label="Resume">×</button></div><p>${esc(game.player.name)} · ${esc(currentPlanet.name)}<br>${Math.floor(game.distanceTraveled)} paces traveled · kept in this browser</p><div class="s-menu-buttons"><button id="v-pause-resume" class="s-primary">Return to the world</button><button id="s-new">Galaxy & other worlds</button><button id="s-pause-life">Home, profession & clothing</button><button id="s-pause-together">Room & friends</button><button id="v-install">Install Verso</button><button id="v-ai">AI companion</button><button id="v-retire">Leave this body</button><button id="s-pause-help">Controls & shortcuts</button></div><p class="v-muted">Leaving a body keeps its belongings and work on this planet. Clearing this browser’s storage loses its local identity and private progress.</p>`,
   );
   el('s-resume').onclick = closeModal;
-  el('s-new').onclick = title;
+  el('v-pause-resume').onclick = closeModal;
+  el('s-new').onclick = galaxyMenu;
   el('s-pause-help').onclick = controls;
   el('s-pause-life').onclick = () => lifeMenu();
   el('s-pause-together').onclick = togetherMenu;
-  el('s-save-file').onclick = () => {
-    const blob = new Blob([JSON.stringify(game.save(), null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `verso-stichos-${formatSeed(game.world.seed)}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  el('v-install').onclick = () => void requestInstall().then(toast);
+  el('v-ai').onclick = aiMenu;
+  el('v-retire').onclick = () => {
+    openModal(
+      'retire',
+      `<h2>Leave ${esc(game.player.bodyName)} behind?</h2><p>Their home, coins, tools and work stay here. Your mind can enter another resident, with that person’s own position and belongings.</p><div class="s-menu-buttons"><button id="v-retire-cancel" class="s-primary">Stay in this life</button><button id="v-retire-confirm">Choose the next body</button></div>`,
+    );
+    el('v-retire-cancel').onclick = closeModal;
+    el('v-retire-confirm').onclick = () => {
+      openModal('creation', creationHtml(game.world.seed));
+      el('v-create-back').onclick = pauseMenu;
+      disposeSpecial = mountCreation(
+        el('s-modal'),
+        game.world.seed,
+        game.world.generation,
+        crypto.getRandomValues(new Uint32Array(1))[0] % 1000000,
+        (index, customization) => {
+          const result = game.retireLife(index, customization);
+          if (!result.ok) {
+            toast(result.message);
+            return;
+          }
+          roomName = game.player.name;
+          updateUI();
+          closeModal();
+          transfer('arrival');
+        },
+        (index, customization) => game.lifeCandidate(index, customization),
+      );
+    };
   };
-  el('s-load-file').onclick = () => el<HTMLInputElement>('s-save-input').click();
-  el<HTMLInputElement>('s-save-input').onchange = async (event) => {
-    const file = (event.target as HTMLInputElement).files?.[0];
-    if (!file) return;
+}
+async function aiMenu() {
+  openModal(
+    'ai',
+    `<div class="v-window-heading"><h2>AI companion</h2><button id="v-ai-close" aria-label="Close">×</button></div><p>Player chat works directly in your room. Optional AI conversations require a trusted companion outside the browser.</p><p>Codex supports ChatGPT subscription login in its native runtime. A supported browser/WASM runtime is not currently available in this build.</p><form id="v-ai-pair"><label>Local companion pairing code<input id="v-ai-code" autocomplete="off" maxlength="100"></label><button>Check companion</button></form><p id="v-ai-status" role="status">Start the optional companion with <code>node server/ai-companion.mjs</code>, then enter its pairing code. No AI requests run automatically.</p>`,
+  );
+  el('v-ai-close').onclick = closeModal;
+  el<HTMLFormElement>('v-ai-pair').onsubmit = async (e) => {
+    e.preventDefault();
     try {
-      if (file.size > 8_000_000) throw Error();
-      const next = Stichos.restore(JSON.parse(await file.text()));
-      activate(next);
-      save();
-      closeModal();
-      if (game.phase === 'lost') lost();
-      else toast('Your life on Stíchos has been restored.');
-    } catch {
-      toast('That file is not a valid Stíchos save. Your current life is intact.');
+      const { AICompanion } = await import('./ai-companion');
+      const companion = new AICompanion();
+      const state = await companion.pair(el<HTMLInputElement>('v-ai-code').value);
+      el('v-ai-status').textContent =
+        `Codex ${state.version ?? ''} · ${state.auth}. ${state.reason}`;
+      el<HTMLInputElement>('v-ai-code').value = '';
+    } catch (error) {
+      el('v-ai-status').textContent =
+        error instanceof Error ? error.message : 'Could not reach the companion.';
     }
   };
 }
@@ -709,8 +1083,8 @@ function updatePack() {
   if (packView === 'pack') {
     const entries = (Object.keys(ITEMS) as ItemId[]).filter((id) => (game.inventory[id] ?? 0) > 0);
     el('s-pack-content').innerHTML =
-      `<div class="s-item-grid">${entries.map((id) => `<button class="s-item ${selectedItem === id ? 'selected' : ''}" data-item="${id}" title="${esc(ITEMS[id].name)}">${itemIcon(id, 34)}<b>${game.inventory[id]}</b></button>`).join('')}${Array.from({ length: Math.max(0, 12 - entries.length) }, () => '<span class="s-empty-slot"></span>').join('')}</div>` +
-      `<div class="s-pack-tools">${game.tools.map((t) => `<button data-pack-tool="${t.kind}" title="${esc(t.profile.name)} · ${t.durability}/${t.profile.maxDurability} condition" aria-pressed="${t.equipped && !game.activeArtifact}"><img src="${toolIcon(t.seed, t.kind, 36)}" alt=""><span>${t.kind}<small>${t.durability}/${t.profile.maxDurability}</small></span></button>`).join('')}</div><div class="s-pack-inventions">${game.artifacts.map((a) => `<button data-pack-invention="${esc(a.design)}" title="${esc(a.genome.name)}"><img src="${artifactIcon(a.design, 52)}" alt=""><span>${esc(a.genome.name)}<small>${a.equipped ? 'Equipped' : esc(a.genome.delivery)}</small></span></button>`).join('')}<button id="s-pack-tools">Working tools and household</button><button id="s-pack-invent">Open invention notebook</button></div>`;
+      `<div class="s-item-grid">${entries.map((id) => `<button class="s-item ${selectedItem === id ? 'selected' : ''}" data-item="${id}" title="${esc(ITEMS[id].name)}">${itemIcon(id, 34)}<b>${game.inventory[id]}</b></button>`).join('')}${Array.from({ length: Math.max(0, Math.ceil(Math.max(10, entries.length) / 5) * 5 - entries.length) }, () => '<span class="s-empty-slot"></span>').join('')}</div>` +
+      `<div class="s-pack-tools">${game.tools.map((t) => `<button data-pack-tool="${t.kind}" title="${esc(t.profile.name)} · ${t.durability}/${t.profile.maxDurability} condition" aria-pressed="${t.equipped && !game.activeArtifact}"><img src="${toolIcon(t.seed, t.kind, 36)}" alt=""><span>${t.kind}<small>${t.durability}/${t.profile.maxDurability}</small></span></button>`).join('')}</div><div class="s-pack-inventions">${game.artifacts.map((a) => `<button data-pack-invention="${esc(a.design)}" title="${esc(a.genome.name)}"><img src="${artifactIcon(a.design, 52)}" alt=""><span>${esc(a.genome.name)}<small>${a.equipped ? 'Equipped' : esc(a.genome.delivery)}</small></span></button>`).join('')}<div class="v-pack-management"><button id="s-pack-tools">Tools & household</button><button id="s-pack-invent">Invent</button></div></div>`;
     el('s-pack-content')
       .querySelectorAll<HTMLButtonElement>('[data-pack-tool]')
       .forEach(
@@ -793,7 +1167,9 @@ function updateUI() {
   el('s-mobile-hp-bar').style.width = `${(p.hp / p.maxHp) * 100}%`;
   el('s-mobile-breath-bar').style.width = `${p.breath}%`;
   el('s-warmth').textContent = `Warmth ${Math.round(p.warmth)}%`;
-  el('s-stamina').textContent = `Energy ${Math.round(p.stamina)}%`;
+  el('s-stamina').textContent = `Level ${p.level}`;
+  el('v-energy-label').textContent = `${Math.round(p.stamina)}%`;
+  el('v-energy-bar').style.width = `${p.stamina}%`;
   el('s-xp').style.width = `${Math.min(100, (p.xp / (p.level * 40)) * 100)}%`;
   el('s-coins').textContent = `◈ ${p.coins}`;
   const closest = game.world
@@ -811,7 +1187,8 @@ function updateUI() {
   el('s-map-label').textContent = closest
     ? `${game.world.clans[closest.clan].name} territory`
     : 'Unclaimed wilderness';
-  el('s-coordinates').textContent = `${Math.round(p.x)}, ${Math.round(p.y)} · Stíchos, 3886`;
+  el('s-coordinates').textContent =
+    `${Math.round(p.x)}, ${Math.round(p.y)} · ${currentPlanet.name}, 3886`;
   const romer = (tile.temperature * 21) / 40 + 7.5;
   el('s-weather').textContent =
     `${romer.toFixed(1)}° Rø · ${tile.temperature.toFixed(0)}° C · ${p.cequinTime > 0 ? 'Cequin in your breath' : 'The air bites'}`;
@@ -951,6 +1328,7 @@ function endingMenu() {
 }
 function roomIdentity() {
   return {
+    clientId: getBrowserPlayerId(),
     seed: game.world.seed,
     generation: game.world.generation,
     name: roomName,
@@ -963,101 +1341,583 @@ function roomIdentity() {
 }
 function togetherMenu() {
   if (sharedActionPending) return;
-  const active = multiplayer.status === 'online';
-  const browserRoom = roomServer === 'peer:';
+  const active = multiplayer.status === 'online',
+    browserRoom = roomServer === 'peer:';
+  const invite: RoomInvitation = {
+    seed: game.world.seed,
+    generation: game.world.generation,
+    room: multiplayer.room,
+    endpoint: roomServer,
+  };
+  const link = active ? roomLink(location.href, invite) : '';
+  const owned = savedWorlds().filter(
+    (w) => w.owned && w.seed === game.world.seed && w.generation === game.world.generation,
+  );
   openModal(
     'together',
-    `<span class="s-chapter">Voices on the same frequency</span><h2>Travel together.</h2><p>Share the roads of the same Stíchos with up to eight people. You see each other move, gather from the same plants and chests, open the same doors, and fight the same raiders. The room host resolves enemy attacks, wounds and defeats for everyone. Your story, homes and belongings stay personal.</p><p class="s-room-status" role="status">${active ? `Connected · room <b>${esc(multiplayer.room)}</b> · ${multiplayer.peers.length + 1}/8 travelers` : multiplayer.status === 'disconnected' ? 'Signal interrupted. Reconnect to refresh the shared world.' : 'Create a room, or enter a friend’s room code.'}</p><p>World <b>${formatSeed(game.world.seed)}</b> · geography ${game.world.generation}<br>Friends must start or restore this same world before joining.</p>${active ? `<div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}${p.id === multiplayer.peerId ? ' · you' : ''}</span></p>`).join('')}</div><label>Invitation<input id="s-room-invitation" readonly value="${esc(`Stíchos · seed ${formatSeed(game.world.seed)} · geography ${game.world.generation} · room ${multiplayer.room} · ${roomServer === 'peer:' ? 'browser room (host keeps the game open)' : `server ${roomServer}`}`)}"></label><div class="s-menu-buttons"><button id="s-room-copy">Copy invitation</button><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thank you</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>` : `<form id="s-room-form"><label>Your traveler name<input id="s-room-name" value="${esc(roomName)}" maxlength="32" required></label><label>Connection<select id="s-room-mode"><option value="peer" ${browserRoom ? 'selected' : ''}>Browser-hosted room</option><option value="server" ${!browserRoom ? 'selected' : ''}>Dedicated game server</option></select></label><label id="s-room-server-label" ${browserRoom ? 'hidden' : ''}>Game server<input id="s-room-server" value="${esc(browserRoom ? `wss://${location.host}/ws` : roomServer)}" maxlength="240"></label><p id="s-room-peer-note" ${browserRoom ? '' : 'hidden'}>The host keeps this game open while friends visit. Browsers exchange game data directly; PeerJS provides connection discovery. Some networks need a relay or a dedicated game server.</p><label>Room code · leave empty to create<input id="s-room-code" value="${esc(multiplayer.room)}" maxlength="16" autocapitalize="characters"></label><button class="s-primary" type="submit">${multiplayer.status === 'connecting' ? 'Connecting…' : 'Join this frequency'}</button>${multiplayer.reconnectable ? '<button id="s-room-reconnect" type="button">Reconnect to my room</button><button id="s-room-forget" type="button">Leave this room</button>' : ''}</form>`}<button id="s-room-return">Return to the world</button>`,
+    `<div class="v-window-heading"><div><small>${esc(currentPlanet.name)} · ${active ? 'Connected' : 'Find your people'}</small><h2>${active ? 'Share this room' : 'Play together'}</h2></div><button id="s-room-return" aria-label="Return to the world">×</button></div>${
+      active
+        ? `<div class="v-room-layout"><div><small>Room code</small><div class="v-room-code" id="v-room-code">${esc(multiplayer.room)}</div><p>${multiplayer.peers.length + 1} of 8 travelers<br>Share the code, link, or QR.</p><div class="s-menu-buttons"><button id="v-copy-code">Copy code</button><button id="v-share-room">Share link</button></div></div><div id="v-room-qr" class="v-room-qr" aria-label="QR code to join this room"></div></div><div class="v-room-link"><input id="s-room-invitation" readonly aria-label="Room join URL" value="${esc(link)}"><button id="s-room-copy">Copy link</button></div><div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}${p.id === multiplayer.peerId ? ' · you' : ''}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}</span>${p.id !== multiplayer.peerId ? `<button data-meet-peer="${esc(p.id)}">Track</button>` : ''}</p>`).join('')}</div><p class="v-muted">${browserRoom ? 'The host keeps this room open. Signed checkpoints preserve shared changes for the same host to resume later.' : 'This world runs on a dedicated node; its operator controls availability.'} Press Enter to talk; Local reaches nearby people, Room reaches this whole room.</p><div class="s-menu-buttons"><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thanks</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>`
+        : `<form id="s-room-form"><label>Your traveler name<input id="s-room-name" value="${esc(roomName)}" maxlength="32" required></label><label>Room code<input id="s-room-code" value="${esc(multiplayer.room)}" placeholder="Leave empty to host a new room" maxlength="16" autocapitalize="characters"></label><div class="s-menu-buttons"><button class="s-primary" type="submit">${multiplayer.status === 'connecting' ? 'Connecting…' : 'Join or host'}</button>${multiplayer.reconnectable ? '<button id="s-room-reconnect" type="button">Reconnect</button>' : ''}</div><details class="v-room-mode"><summary>Connection options</summary><label>Connection<select id="s-room-mode"><option value="peer" ${browserRoom ? 'selected' : ''}>Browser room</option><option value="server" ${!browserRoom ? 'selected' : ''}>Dedicated world node</option></select></label><label id="s-room-server-label" ${browserRoom ? 'hidden' : ''}>World node<input id="s-room-server" value="${esc(browserRoom ? `wss://${location.host}/ws` : roomServer)}" maxlength="240"></label></details></form>${
+            owned.length
+              ? `<h3>Resume a world you host</h3><div class="s-menu-buttons">${owned
+                  .slice(0, 4)
+                  .map(
+                    (w) =>
+                      `<button data-resume-world="${esc(w.room)}">${esc(w.room)} · revision ${w.revision}</button>`,
+                  )
+                  .join('')}</div>`
+              : ''
+          }<button id="v-room-public">Meet people on this planet</button><p class="v-muted">A public frequency lets travelers find the same planet without an invitation. A room code finds your friend’s planet automatically. Browser rooms use direct connections and require their host online. Pear-based world nodes can keep replicated history; no public storage node is connected by default.</p>`
+    }`,
   );
   el('s-room-return').onclick = closeModal;
+  const publicButton = document.getElementById('v-room-public');
+  if (publicButton)
+    publicButton.onclick = () => {
+      closeModal();
+      void joinInvitation({
+        seed: game.world.seed,
+        generation: game.world.generation,
+        room: publicRoomCode(game.world.seed, game.world.generation),
+        endpoint: 'peer:',
+        public: true,
+      });
+    };
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Copied.');
+    } catch {
+      const input = el<HTMLInputElement>('s-room-invitation');
+      input?.select();
+      toast('Select and copy the room link.');
+    }
+  };
   if (active) {
+    const qr = qrcode(0, 'M');
+    qr.addData(link);
+    qr.make();
+    el('v-room-qr').innerHTML = qr.createSvgTag({ cellSize: 3, margin: 12, scalable: true });
+    el('v-copy-code').onclick = () => void copy(multiplayer.room);
+    el('s-room-copy').onclick = () => void copy(link);
+    el('v-share-room').onclick = async () => {
+      if (navigator.share)
+        try {
+          await navigator.share({ title: `Verso · room ${multiplayer.room}`, url: link });
+        } catch (error) {
+          if (!(error instanceof DOMException && error.name === 'AbortError')) void copy(link);
+        }
+      else void copy(link);
+    };
     el('s-room-leave').onclick = () => {
       multiplayer.disconnect();
+      history.replaceState(null, '', location.pathname);
       togetherMenu();
-      toast('You are traveling alone again.');
-    };
-    el('s-room-copy').onclick = async () => {
-      const input = el<HTMLInputElement>('s-room-invitation');
-      input.select();
-      try {
-        await navigator.clipboard.writeText(input.value);
-        toast('Invitation copied.');
-      } catch {
-        toast('Select and copy the invitation above.');
-      }
     };
     document.querySelectorAll<HTMLButtonElement>('[data-room-emote]').forEach(
-      (button) =>
-        (button.onclick = () => {
-          multiplayer.emote(button.dataset.roomEmote as 'wave' | 'thanks' | 'help');
+      (n) =>
+        (n.onclick = () => {
+          multiplayer.emote(n.dataset.roomEmote as 'wave' | 'thanks' | 'help');
           closeModal();
         }),
     );
+    document.querySelectorAll<HTMLButtonElement>('[data-meet-peer]').forEach(
+      (n) =>
+        (n.onclick = () => {
+          const p = multiplayer.peers.find((p) => p.id === n.dataset.meetPeer);
+          if (p) {
+            mapWaypoint = { x: p.x, y: p.y };
+            trackedQuestId = 'map-waypoint';
+            closeModal();
+            toast(`Tracking ${p.name}. Open the map to follow the route.`);
+          }
+        }),
+    );
   } else {
-    el<HTMLSelectElement>('s-room-mode').onchange = () => {
-      const peer = el<HTMLSelectElement>('s-room-mode').value === 'peer';
-      el('s-room-server-label').hidden = peer;
-      el('s-room-peer-note').hidden = !peer;
-    };
-    el<HTMLFormElement>('s-room-form').onsubmit = async (event) => {
-      event.preventDefault();
+    el<HTMLSelectElement>('s-room-mode').onchange = () =>
+      (el('s-room-server-label').hidden = el<HTMLSelectElement>('s-room-mode').value === 'peer');
+    el<HTMLFormElement>('s-room-form').onsubmit = async (e) => {
+      e.preventDefault();
       if (multiplayer.status === 'connecting') return;
-      roomName = el<HTMLInputElement>('s-room-name').value.trim() || 'Traveler';
+      roomName = el<HTMLInputElement>('s-room-name').value.trim() || game.player.name;
       roomServer =
         el<HTMLSelectElement>('s-room-mode').value === 'peer'
           ? 'peer:'
           : el<HTMLInputElement>('s-room-server').value.trim();
-      const code = el<HTMLInputElement>('s-room-code').value.trim().toUpperCase();
+      const raw = el<HTMLInputElement>('s-room-code').value.trim(),
+        code = raw ? validRoomCode(raw) : '';
+      if (raw && !code) {
+        toast('Use the room code, or leave it empty to host.');
+        return;
+      }
       try {
         localStorage.setItem('verso.room.name', roomName);
         localStorage.setItem('verso.room.server', roomServer);
-      } catch {}
-      try {
-        await multiplayer.connect(roomServer, roomIdentity(), code);
+        if (code) {
+          const { discoverRoom } = await import('./multiplayer');
+          const info = await discoverRoom(roomServer, code);
+          if (info.seed !== game.world.seed || info.generation !== game.world.generation) {
+            choosePlanet(info.seed, info.generation, {
+              seed: info.seed,
+              generation: info.generation,
+              room: code,
+              endpoint: roomServer,
+            });
+            return;
+          }
+        }
+        await multiplayer.connect(roomServer, roomIdentity(), code || '');
         if (modal === 'together') togetherMenu();
-        toast('The shared frequency is open.');
+        toast('Your room is ready. Share its code or link.');
       } catch (error) {
         if (modal === 'together') togetherMenu();
-        toast(error instanceof Error ? error.message : 'Could not join this room.');
+        toast(error instanceof Error ? error.message : 'Could not reach this room.');
       }
     };
-    const forget = document.getElementById('s-room-forget');
-    if (forget)
-      forget.onclick = () => {
-        multiplayer.disconnect();
-        togetherMenu();
-      };
     const reconnect = document.getElementById('s-room-reconnect');
     if (reconnect)
       reconnect.onclick = async () => {
         try {
           await multiplayer.reconnect(roomIdentity());
-          if (modal === 'together') togetherMenu();
+          togetherMenu();
         } catch (error) {
           toast(error instanceof Error ? error.message : 'Could not reconnect.');
         }
       };
+    document.querySelectorAll<HTMLElement>('[data-resume-world]').forEach(
+      (n) =>
+        (n.onclick = async () => {
+          try {
+            roomServer = 'peer:';
+            await multiplayer.hostSavedWorld(n.dataset.resumeWorld!, roomIdentity());
+            togetherMenu();
+            toast('Your saved shared world is open again.');
+          } catch (error) {
+            toast(error instanceof Error ? error.message : 'Could not resume this world.');
+          }
+        }),
+    );
   }
 }
+function appendChat(name: string, text: string, system = false, at = Date.now()) {
+  const log = el('v-chat-log'),
+    line = document.createElement('p');
+  const stamp = document.createElement('time');
+  stamp.textContent = new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  line.append(stamp);
+  if (system) {
+    line.className = 'is-system';
+    line.append(document.createTextNode(text));
+  } else {
+    const who = document.createElement('b');
+    who.textContent = name + ': ';
+    line.append(who, document.createTextNode(text));
+  }
+  const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.append(line);
+  while (log.children.length > 150) log.firstElementChild?.remove();
+  if (bottom) log.scrollTop = log.scrollHeight;
+}
+multiplayer.onChat = (message) => {
+  appendChat(message.name, message.text, false, message.at);
+  if (message.channel === 'say')
+    peerEmotes.set(message.peerId, {
+      text: message.text.slice(0, 80),
+      until: performance.now() + 6500,
+    });
+};
+async function say(text: string) {
+  text = text.trim();
+  if (!text) return;
+  if (text === '/help') {
+    appendChat(
+      '',
+      'Enter speaks. /say text reaches nearby travelers; /room text reaches your room. F7–F9 send your saved phrases. Say hi to greet a nearby resident.',
+      true,
+    );
+    return;
+  }
+  if (/^\/(room|world)\s/i.test(text)) {
+    chatChannel = 'world';
+    text = text.replace(/^\/\w+\s+/, '');
+  } else if (/^\/say\s/i.test(text)) {
+    chatChannel = 'say';
+    text = text.replace(/^\/say\s+/, '');
+  } else if (text.startsWith('/')) {
+    appendChat('', 'Unknown command. Use /say, /room or /help.', true);
+    return;
+  }
+  if (text.length > 280) {
+    appendChat('', 'Keep a message within 280 characters.', true);
+    return;
+  }
+  if (multiplayer.status === 'online') {
+    const result = await multiplayer.sendChat(text, chatChannel);
+    if (!result.ok) appendChat('', result.reason || 'The message was not delivered.', true);
+  } else if (multiplayer.status === 'disconnected') {
+    appendChat('', 'Reconnect to your room before speaking to its travelers.', true);
+    return;
+  } else if (chatChannel === 'world') {
+    appendChat('', 'Join or host a room to speak to other travelers.', true);
+    return;
+  } else appendChat(game.player.name, text);
+  if (chatChannel === 'say' && /^(hi|hello|greetings|trade|job|work)[.!?]?$/i.test(text)) {
+    const npc = game.npcs
+      .filter(
+        (n) =>
+          n.hp > 0 &&
+          !n.hostile &&
+          n.id !== game.occupiedNpcId &&
+          Math.hypot(n.x - game.player.x, n.y - game.player.y) < 2.6,
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - game.player.x, a.y - game.player.y) -
+          Math.hypot(b.x - game.player.x, b.y - game.player.y),
+      )[0];
+    if (npc) {
+      game.interact(npc.id);
+      if (game.dialogue) {
+        appendChat(npc.name, game.dialogue.text);
+        updateDialogue();
+      }
+    }
+  }
+}
+function shortcutsMenu() {
+  openModal(
+    'shortcuts',
+    `<div class="v-window-heading"><h2>Words at your fingertips</h2><button id="v-shortcuts-close" aria-label="Close shortcuts">×</button></div><p>Assign a phrase or chat command to F7, F8 and F9. Shortcuts stay with this browser and send only when you press their key.</p><form id="v-shortcuts-form">${phraseShortcuts.map((p, i) => `<label class="v-shortcut-row"><kbd>F${i + 7}</kbd><input data-phrase="${i}" maxlength="280" value="${esc(p)}"></label>`).join('')}<button class="s-primary">Keep these shortcuts</button></form><p class="v-muted">Examples: /room Meet at the market. · /say Follow me. · hi</p>`,
+  );
+  el('v-shortcuts-close').onclick = closeModal;
+  el<HTMLFormElement>('v-shortcuts-form').onsubmit = (e) => {
+    e.preventDefault();
+    phraseShortcuts = [...document.querySelectorAll<HTMLInputElement>('[data-phrase]')].map((n) =>
+      n.value.trim(),
+    );
+    try {
+      localStorage.setItem('verso.chat.shortcuts', JSON.stringify(phraseShortcuts));
+    } catch {}
+    closeModal();
+    toast('F7, F8 and F9 are ready.');
+  };
+}
+el<HTMLFormElement>('v-chat-form').onsubmit = (e) => {
+  e.preventDefault();
+  const input = el<HTMLInputElement>('v-chat-input');
+  const text = input.value;
+  input.value = '';
+  void say(text);
+};
+el('v-chat-input').onfocus = () => {
+  keys.clear();
+  walk = [];
+};
+el('v-chat-input').onkeydown = (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    canvas.focus();
+  }
+};
+el('v-chat-settings').onclick = shortcutsMenu;
+function setChatCollapsed(collapsed: boolean) {
+  document.querySelector('.s-shell')!.classList.toggle('chat-collapsed', collapsed);
+  el('v-chat-toggle').textContent = collapsed ? '+' : '−';
+  el('v-chat-toggle').setAttribute('aria-label', collapsed ? 'Expand chat' : 'Collapse chat');
+  resize();
+}
+el('v-chat-toggle').onclick = () =>
+  setChatCollapsed(!document.querySelector('.s-shell')!.classList.contains('chat-collapsed'));
+document.querySelectorAll<HTMLElement>('[data-chat-channel]').forEach(
+  (n) =>
+    (n.onclick = () => {
+      chatChannel = n.dataset.chatChannel as 'say' | 'world';
+      document
+        .querySelectorAll<HTMLElement>('[data-chat-channel]')
+        .forEach((b) => b.setAttribute('aria-pressed', String(b === n)));
+    }),
+);
+let placingProduction: ProductionKind | null = null;
+let productionSyncAt = 0,
+  productionSyncBusy = false;
+const registeredProduction = new Set<string>();
+const machineId = (localId: string) => `${getBrowserPlayerId()}:${localId}`;
+async function placeProduction(kind: ProductionKind, point: Point) {
+  const source = game,
+    room = multiplayer.room,
+    bodyId = game.bodyId;
+  const preview = source.productionPreview(kind, point);
+  if (!preview.ok) {
+    toast(preview.message);
+    return;
+  }
+  if (multiplayer.status === 'disconnected' || multiplayer.status === 'connecting') {
+    toast('Reconnect before constructing in this shared world.');
+    return;
+  }
+  const id = machineId(source.nextProductionId);
+  if (multiplayer.status === 'online') {
+    sharedActionPending = true;
+    keys.clear();
+    walk = [];
+    sendCombatPose(true, false);
+    try {
+      const ack = await multiplayer.registerProductionMachine({ id, kind, ...preview.point });
+      if (source !== game || room !== multiplayer.room || bodyId !== source.bodyId) return;
+      if (!ack.ok) {
+        toast(ack.reason || 'The room could not confirm this work site.');
+        return;
+      }
+      registeredProduction.add(id);
+      const result = source.buildProduction(kind, preview.point);
+      toast(result.message);
+      if (result.ok) {
+        placingProduction = null;
+        save();
+      }
+    } finally {
+      sharedActionPending = false;
+    }
+  } else {
+    const result = source.buildProduction(kind, preview.point);
+    toast(result.message);
+    if (result.ok) {
+      placingProduction = null;
+      save();
+    }
+  }
+}
+async function syncProduction(now: number) {
+  if (productionSyncBusy || multiplayer.status !== 'online' || now - productionSyncAt < 1500)
+    return;
+  productionSyncAt = now;
+  productionSyncBusy = true;
+  const source = game,
+    room = multiplayer.room;
+  const bodyId = source.bodyId;
+  try {
+    for (const structure of source.productionStructures) {
+      if (source !== game || room !== multiplayer.room || bodyId !== source.bodyId) break;
+      const id = machineId(structure.id);
+      if (
+        !registeredProduction.has(id) &&
+        Math.hypot(structure.x - source.player.x, structure.y - source.player.y) <= 2
+      ) {
+        const ack = await multiplayer.registerProductionMachine({
+          id,
+          kind: structure.kind,
+          x: structure.x,
+          y: structure.y,
+        });
+        if (source !== game || room !== multiplayer.room || bodyId !== source.bodyId) break;
+        if (ack.ok) registeredProduction.add(id);
+      }
+    }
+    for (const claim of source.pendingProductionClaims) {
+      if (source !== game || room !== multiplayer.room) break;
+      const id = machineId(claim.structureId);
+      if (!registeredProduction.has(id)) continue;
+      const ack = await multiplayer.productionClaim(
+        id,
+        `${claim.structureId}:${claim.jobId}`,
+        claim.sourceId,
+        claim,
+      );
+      if (source !== game || room !== multiplayer.room) break;
+      if (ack.ok) source.commitProductionClaim(claim.structureId, claim.jobId, claim.sourceId);
+      else if (multiplayer.status === 'online')
+        source.rejectProductionClaim(claim.structureId, claim.jobId, claim.sourceId, ack.reason);
+      save();
+    }
+  } finally {
+    productionSyncBusy = false;
+  }
+}
+function workMenu() {
+  if (!started) return;
+  const amounts = (values: Partial<Record<ItemId, number>>) =>
+    Object.entries(values)
+      .map(([k, n]) => `${n} ${k}`)
+      .join(', ') || 'none';
+  const machines = game.productionStructures;
+  openModal(
+    'production',
+    `<div class="v-window-heading"><div><small>Gather · construct · supply · earn</small><h2>Make a working place</h2></div><button id="v-work-close" aria-label="Close work">×</button></div><p>Build on clear ground near your resources. Load real inputs, let the work run while you play, then collect the output at the platform. Merchants buy gathered materials and prepared goods.</p><div class="v-production-grid">${PRODUCTION_KINDS.map((k) => `<article><h3>${esc(k.name)}</h3><p>${k.coins} coins · ${amounts(k.items)}</p><p>${esc(k.description)}</p><button data-build-kind="${k.id}">Place in world</button></article>`).join('')}</div><div class="v-production-list">${
+      machines
+        .map((m) => {
+          const near = Math.hypot(m.x - game.player.x, m.y - game.player.y) < 3;
+          return `<article><header><b>${esc(PRODUCTION_KINDS.find((k) => k.id === m.kind)!.name)}</b><span>${esc(m.phase)} · ${m.x}, ${m.y}</span></header>${m.job ? `<progress value="${m.progress}" max="1"></progress><p>${esc(m.job.blocked || `${m.job.completed}/${m.job.batches} batches completed`)} · ${Math.floor(m.progress * 100)}%</p>` : ''}<p>Stored: ${amounts(m.output)} ${!near ? '· Approach to supply or collect' : ''}</p>${
+            !m.job
+              ? `<select aria-label="Production recipe" data-machine-recipe="${m.id}">${game.productionRecipes
+                  .filter((r) => r.kind === m.kind)
+                  .map(
+                    (r) =>
+                      `<option value="${r.id}">${esc(r.name)} · ${amounts(r.inputs)} → ${amounts(r.output)} · ${r.seconds}s</option>`,
+                  )
+                  .join(
+                    '',
+                  )}</select><select aria-label="Batch count" data-machine-batches="${m.id}">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n} batch${n > 1 ? 'es' : ''}</option>`).join('')}</select><button data-machine-start="${m.id}" ${near ? '' : 'disabled'}>Load inputs</button>`
+              : `<button data-machine-cancel="${m.id}" ${near ? '' : 'disabled'}>Cancel & retrieve inputs</button>${m.phase === 'blocked' ? `<button data-machine-retry="${m.id}" ${near ? '' : 'disabled'}>Retry</button>` : ''}`
+          }<button data-machine-collect="${m.id}" ${near && Object.values(m.output).some((n) => n) ? '' : 'disabled'}>Collect output</button><button data-machine-track="${m.id}">Track</button></article>`;
+        })
+        .join('') ||
+      '<p>No production platforms yet. Gather timber and ore with your tools, then choose a clear work site.</p>'
+    }</div>`,
+  );
+  el('v-work-close').onclick = closeModal;
+  document.querySelectorAll<HTMLElement>('[data-build-kind]').forEach(
+    (n) =>
+      (n.onclick = () => {
+        placingProduction = n.dataset.buildKind as ProductionKind;
+        closeModal();
+        toast('Choose a clear 3×3 patch within two paces. Click to build; Escape cancels.', 8000);
+      }),
+  );
+  const finish = (result: { ok: boolean; message: string }) => {
+    save();
+    workMenu();
+    toast(result.message);
+  };
+  document.querySelectorAll<HTMLElement>('[data-machine-start]').forEach(
+    (n) =>
+      (n.onclick = () => {
+        const id = n.dataset.machineStart!;
+        finish(
+          game.startProduction(
+            id,
+            document.querySelector<HTMLSelectElement>(`[data-machine-recipe="${id}"]`)!.value,
+            Number(
+              document.querySelector<HTMLSelectElement>(`[data-machine-batches="${id}"]`)!.value,
+            ),
+          ),
+        );
+      }),
+  );
+  document
+    .querySelectorAll<HTMLElement>('[data-machine-cancel]')
+    .forEach((n) => (n.onclick = () => finish(game.cancelProduction(n.dataset.machineCancel!))));
+  document
+    .querySelectorAll<HTMLElement>('[data-machine-retry]')
+    .forEach((n) => (n.onclick = () => finish(game.retryProduction(n.dataset.machineRetry!))));
+  document
+    .querySelectorAll<HTMLElement>('[data-machine-collect]')
+    .forEach((n) => (n.onclick = () => finish(game.collectProduction(n.dataset.machineCollect!))));
+  document.querySelectorAll<HTMLElement>('[data-machine-track]').forEach(
+    (n) =>
+      (n.onclick = () => {
+        const m = machines.find((m) => m.id === n.dataset.machineTrack)!;
+        mapWaypoint = { x: m.x, y: m.y };
+        trackedQuestId = 'map-waypoint';
+        closeModal();
+      }),
+  );
+}
+el('v-galaxy').onclick = galaxyMenu;
+el('v-work').onclick = workMenu;
+let rosterPage = 0,
+  rosterSignature = '';
+function renderRoster() {
+  const all = [
+    {
+      id: multiplayer.peerId || '$self',
+      name: game.player.name,
+      appearance: game.displayAppearance,
+    },
+    ...multiplayer.peers.map(({ id, name, appearance }) => ({ id, name, appearance })),
+  ];
+  rosterPage = Math.min(rosterPage, Math.max(0, Math.ceil(all.length / 2) - 1));
+  const signature = JSON.stringify([rosterPage, multiplayer.status, all]);
+  if (signature === rosterSignature) return;
+  rosterSignature = signature;
+  el('v-roster-title').textContent =
+    multiplayer.status === 'online' ? `Room · ${all.length} travelers` : 'Traveling alone';
+  el('v-roster-page').hidden = all.length <= 2;
+  const shown = all.slice(rosterPage * 2, rosterPage * 2 + 2);
+  el('v-roster-list').innerHTML =
+    shown
+      .map(
+        (p, i) =>
+          `<button class="v-traveler-row" data-roster-id="${esc(p.id)}"><canvas id="v-roster-face-${i}" width="96" height="112"></canvas><span><b>${esc(p.name)}</b><small>${p.id === multiplayer.peerId || p.id === '$self' ? 'Your continuing life' : 'Track this traveler'}</small></span><i title="${multiplayer.status === 'online' ? 'Online' : 'Solo'}"></i></button>`,
+      )
+      .join('') +
+    (multiplayer.status !== 'online'
+      ? '<button id="v-roster-invite">Invite a traveler</button>'
+      : '');
+  shown.forEach((p, i) =>
+    drawPortrait(el<HTMLCanvasElement>(`v-roster-face-${i}`).getContext('2d')!, p.appearance),
+  );
+  document.querySelectorAll<HTMLElement>('[data-roster-id]').forEach(
+    (n) =>
+      (n.onclick = () => {
+        const peer = multiplayer.peers.find((p) => p.id === n.dataset.rosterId);
+        if (peer) {
+          mapWaypoint = { x: peer.x, y: peer.y };
+          trackedQuestId = 'map-waypoint';
+          toast(`Following ${peer.name} on the map.`);
+        } else lifeMenu();
+      }),
+  );
+  const invite = document.getElementById('v-roster-invite');
+  if (invite) invite.onclick = togetherMenu;
+}
+el('v-roster-page').onclick = () => {
+  rosterPage = (rosterPage + 1) % Math.ceil((multiplayer.peers.length + 1) / 2);
+  renderRoster();
+};
+el('v-map-less').onclick = () => renderer.setZoom(renderer.zoom - 0.15);
+el('v-map-more').onclick = () => renderer.setZoom(renderer.zoom + 0.15);
+document
+  .querySelectorAll<HTMLElement>('[data-phrase-send]')
+  .forEach((n) => (n.onclick = () => void say(phraseShortcuts[Number(n.dataset.phraseSend)])));
 multiplayer.onChange = () => {
+  if (multiplayer.status !== 'online') registeredProduction.clear();
   game.setSharedWorld(multiplayer.status !== 'offline');
   game.setSharedCombat(multiplayer.status !== 'offline', `${game.world.seed}:${multiplayer.room}`);
   el('s-together').textContent =
     multiplayer.status === 'online'
-      ? `Together · ${multiplayer.peers.length + 1}`
+      ? `Room · ${multiplayer.peers.length + 1}`
       : multiplayer.status === 'disconnected'
         ? 'Reconnect'
-        : 'Together';
+        : 'Room';
+  el('v-chat-status').textContent =
+    multiplayer.status === 'online'
+      ? `Room ${multiplayer.room} · ${multiplayer.peers.length + 1}/8`
+      : multiplayer.status === 'disconnected'
+        ? 'Connection interrupted'
+        : 'Traveling alone';
+  renderRoster();
   const signature = `${multiplayer.status}:${multiplayer.room}:${multiplayer.peers.map((p) => p.id).join(',')}`;
   if (signature !== multiplayerRoster) {
     multiplayerRoster = signature;
+    if (multiplayer.status === 'online') {
+      try {
+        rememberWorld({
+          seed: game.world.seed,
+          generation: game.world.generation,
+          room: multiplayer.room,
+          endpoint: roomServer,
+          visitedAt: Date.now(),
+        });
+      } catch {}
+    }
+
     if (modal === 'together' && multiplayer.status !== 'connecting') togetherMenu();
   }
 };
 multiplayer.onMessage = (text) => toast(text, 7000);
+let savedCombatEvent = 0,
+  savedCombatRoom = '';
 multiplayer.onCombat = (frame) => {
   const accepted = game.applySharedCombat(frame, multiplayer.peerId);
-  if (accepted.eventId) multiplayer.acknowledgeCombat(accepted.eventId);
+  if (savedCombatRoom !== multiplayer.room) {
+    savedCombatRoom = multiplayer.room;
+    savedCombatEvent = 0;
+  }
+  if (accepted.eventId > savedCombatEvent && save()) savedCombatEvent = accepted.eventId;
+  if (accepted.eventId && accepted.eventId <= savedCombatEvent)
+    multiplayer.acknowledgeCombat(accepted.eventId);
 };
 function sendCombatPose(
   force = false,
@@ -1082,6 +1942,9 @@ multiplayer.onEmote = (id, gesture) => {
 };
 multiplayer.onWorld = (change) => {
   if (change.type === 'welcome') {
+    el('v-chat-log').replaceChildren();
+    for (const message of change.chat ?? [])
+      appendChat(message.name, message.text, false, message.at);
     for (const id of game.opened)
       if (id.includes(':door') && !change.opened.includes(id)) {
         game.opened.delete(id);
@@ -1385,6 +2248,27 @@ canvas.addEventListener('pointerdown', (event) => {
     return;
   }
   if (event.button !== 0) return;
+  if (placingProduction) {
+    const preview = game.productionPreview(placingProduction, ground);
+    if (!preview.ok) {
+      toast(preview.message);
+      if (Math.hypot(ground.x - game.player.x, ground.y - game.player.y) > 2) {
+        walk = pathTo(ground);
+        walkTarget = undefined;
+        walkStuck = 0;
+      }
+      return;
+    }
+    void placeProduction(placingProduction, ground);
+    return;
+  }
+  const machine = game.productionStructures.find(
+    (m) => Math.hypot(m.x - ground.x, m.y - ground.y) < 1.4,
+  );
+  if (machine) {
+    workMenu();
+    return;
+  }
   const target = identify(ground);
   if (target) approach(target);
   else {
@@ -1533,10 +2417,16 @@ addEventListener('keydown', (e) => {
     }
     return;
   }
+  if (k === 'escape' && placingProduction) {
+    e.preventDefault();
+    placingProduction = null;
+    toast('Construction cancelled.');
+    return;
+  }
   if (k === 'escape') {
     e.preventDefault();
     if (modal === 'journal') foldNotebook(true);
-    else if (modal && modal !== 'title' && modal !== 'lost') closeModal();
+    else if (modal && !['title', 'lost', 'life-in-use'].includes(modal)) closeModal();
     else if (game.dialogue) {
       game.dialogue = null;
       updateDialogue();
@@ -1549,6 +2439,22 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (modal || !started) return;
+  if (k === 'enter') {
+    e.preventDefault();
+    setChatCollapsed(false);
+    el('v-chat-input').focus();
+    return;
+  }
+  if (/^f[789]$/.test(k)) {
+    e.preventDefault();
+    if (!e.repeat) void say(phraseShortcuts[Number(k.slice(1)) - 7]);
+    return;
+  }
+  if (k === 'g' && !e.repeat) {
+    e.preventDefault();
+    galaxyMenu();
+    return;
+  }
   if (!e.repeat) {
     if (k === 'l') {
       lifeMenu();
@@ -1715,8 +2621,18 @@ function frame(now: number) {
     if (event.kind === 'transfer' && !transferStarted) transfer('return');
   }
   sendCombatPose();
+  void syncProduction(now);
   renderer.draw(game, {
     peers: multiplayer.peers,
+    machines: multiplayer.machines,
+    placement:
+      placingProduction && pointer
+        ? {
+            kind: placingProduction,
+            point: { x: Math.round(pointer.x), y: Math.round(pointer.y) },
+            valid: game.productionPreview(placingProduction, pointer).ok,
+          }
+        : undefined,
     playerAppearance: game.displayAppearance,
     emotes: peerEmotes,
     reducedMotion: reducedMotion.matches,
@@ -1735,6 +2651,7 @@ function frame(now: number) {
   });
   if (now - uiLast > 160) {
     updateUI();
+    renderRoster();
     uiLast = now;
   }
   if (now - mapLast > 1500 && !modal) {
@@ -1754,6 +2671,11 @@ Object.defineProperty(window, 'stichos', {
       return structuredClone({
         seed: game.world.seed,
         worldGeneration: game.world.generation,
+        lifeOrigin: game.lifeOrigin,
+        lifeCandidate: game.lifeOrigin,
+        identityName: game.identityName,
+        browserIdentity: getBrowserPlayerId(),
+        productionStructures: game.productionStructures,
         hasNotebook: game.hasNotebook,
         notebook: { ...notebookView },
         player: game.player,
@@ -1787,6 +2709,15 @@ Object.defineProperty(window, 'stichos', {
           room: multiplayer.room,
           peerId: multiplayer.peerId,
           peers: multiplayer.peers,
+          machines: multiplayer.machines,
+          placement:
+            placingProduction && pointer
+              ? {
+                  kind: placingProduction,
+                  point: { x: Math.round(pointer.x), y: Math.round(pointer.y) },
+                  valid: game.productionPreview(placingProduction, pointer).ok,
+                }
+              : undefined,
           pending: sharedActionPending,
         },
         transferReady: game.transferReady,
@@ -1833,6 +2764,9 @@ Object.defineProperty(window, 'stichos', {
     vaults(x: number, y: number, radius = 100) {
       return structuredClone(game.world.vaultsAround(x, y, radius));
     },
+    productionPreview(kind: ProductionKind, point: Point) {
+      return structuredClone(game.productionPreview(kind, point));
+    },
     botanicalProfile(prop: Prop) {
       return structuredClone(game.botanicalProfile(prop));
     },
@@ -1846,5 +2780,23 @@ Object.defineProperty(window, 'stichos', {
   configurable: true,
 });
 updateUI();
-title();
+async function enterBrowserLife() {
+  if (await claimLifeTab()) {
+    title();
+    return;
+  }
+  openModal(
+    'life-in-use',
+    `<h2>This mind is already awake.</h2><p>Verso is open in another tab of this browser. Close that tab to continue the same life here.</p><button id="v-retry-life-tab" class="s-primary">Continue here</button>`,
+  );
+  el('v-retry-life-tab').onclick = () => void enterBrowserLife();
+}
+void enterBrowserLife();
+addEventListener('pagehide', () => {
+  save();
+  releaseLifeTab();
+});
+addEventListener('pageshow', (event) => {
+  if (event.persisted) void enterBrowserLife();
+});
 requestAnimationFrame(frame);

@@ -130,7 +130,7 @@ export function createPeerTransport(
           type: 'error',
           code: 'storage_failed',
           reason:
-            'This world could not be saved in browser storage. Export your personal save and free storage before closing.',
+            'This world could not be saved in browser storage. Free browser storage and keep this tab open until saving succeeds.',
         }),
       });
     });

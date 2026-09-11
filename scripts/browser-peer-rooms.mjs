@@ -223,7 +223,7 @@ async function traveler(name, seed = '3886') {
   await focus();
   await wait("window.stichos?.state.modal==='title'", 'title ready');
   await fill('#s-seed-input', seed);
-  await click('#s-start button');
+  await click('#v-theo-story');
   await wait('window.stichos.state.transfer', 'opening intro');
   await click('#s-skip');
   await wait("window.stichos.state.modal===''&&!window.stichos.state.transfer", 'present day');
@@ -237,6 +237,7 @@ async function room(c, code = '') {
   await c.focus();
   await c.click('#s-together');
   await c.fill('#s-room-name', c.name);
+  await c.click('.v-room-mode summary');
   await c.click('#s-room-mode');
   await c.key('Home', 'Home', 36);
   await c.key('Enter', 'Enter', 13);

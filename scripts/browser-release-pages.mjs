@@ -176,6 +176,8 @@ async function traveler(name, seed = '3886') {
     fs.writeFileSync(path.join(out, `${label}.png`), Buffer.from(r.data, 'base64'));
   };
   const worldClick = async (p) => {
+    await focus();
+    await delay(150);
     const screen = await read(
       `(()=>{const p=window.stichos.worldToScreen(${JSON.stringify(p)}),r=document.querySelector('canvas').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top};})()`,
     );
@@ -223,7 +225,7 @@ async function traveler(name, seed = '3886') {
   await focus();
   await wait("window.stichos?.state.modal==='title'", 'title ready');
   await fill('#s-seed-input', seed);
-  await click('#s-start button');
+  await click('#v-theo-story');
   await wait('window.stichos.state.transfer', 'opening intro');
   await click('#s-skip');
   await wait("window.stichos.state.modal===''&&!window.stichos.state.transfer", 'present day');
@@ -237,7 +239,7 @@ try {
   const version = await (await fetch(`${endpoint}/json/version`)).json();
   browser = await connect(version.webSocketDebuggerUrl);
   const c = await traveler('Release traveler');
-  await c.move({ x: 3, y: 5 });
+  await c.move({ x: 0, y: 7 });
   pass('Game starts and accepts actual walking input');
   await c.click('#s-life');
   await c.click('[data-life-tab="compact"]');
