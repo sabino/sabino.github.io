@@ -38,3 +38,15 @@ UI: polished narrow brass-edged dark petrol MMO interface covering RIGHTMOST300p
 
 This is the exact target game screenshot, not a cinematic image or painting. Prioritize coherent top-down square terrain, recognizable humanoids, rich Gothic snow forest materials, depth layering, and a sophisticated playable MMO screen. Do not copy alien creatures, purple ground or floating-island composition from the baseline.
 Narrative correction: the traveler is Theo, already stranded here for twenty local years, now in year3886. This is a future Gothic cathedral colony in a cold blue botanical world with radio-era technology, warm human refuge and a distant industrial threat. A brass field-radio prop by the gate is appropriate. Do not imply a newly arrived chosen hero or alien-bodied reincarnation. Sidebar approximately296px, topbar56px, bottom hotbar68px. Keep all tiny text sparse and readable.
+
+## Generation 3 building archetypes
+
+Generation 3 separates distant cities from the villages and hamlets between them. Each city has one church; only the explicit `Tile.buildingKind: 'church'` uses the monumental nave and chapels. The other six kinds have distinct construction: shuttered houses, inns with dormers and hanging cup signs, workshops with asymmetric metal roofs and brick stacks, glazed greenhouses with visible planting benches, low storehouses with louvered lofts, and modest civic halls with clock pediments.
+
+The building seed varies roof ridges, chimneys, materials, glazing and snow loads. Each assembly follows its actual rectangular footprint and centered north/south doors; door props retain their open/closed state, and roofs cut away on entry. Detail is baked into the existing bounded architectural cache. Generations 1 and 2 retain their previous architecture, and generation changes invalidate world-dependent caches. The approved cold pixel style and code-generated runtime assets remain intact.
+
+These unedited browser captures show the actual generation 3 game, including a village reached by walking and its discovered road in the atlas:
+
+- [Stíchos cathedral square](../images/stichos.png)
+- [Calfell village](../images/stichos-village.png)
+- [Atlas road discovery](../images/stichos-atlas.png)
