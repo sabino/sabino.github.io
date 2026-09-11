@@ -33,7 +33,7 @@ function sustain(game: Stichos) {
   assert.equal(game.phase, 'playing', `The campaign must remain survivable at ${key(game.player)}`);
 }
 /** All travel uses movement input. Planning inspects public collision; no player or quest assignment. */
-function walk(game: Stichos, target: Point, tolerance = 1.25) {
+function walk(game: Stichos, target: Point, tolerance = 1.25, combatFrame?: () => void) {
   game.choose('close');
   const start = { x: Math.round(game.player.x), y: Math.round(game.player.y) };
   const queue = [start],
@@ -48,7 +48,10 @@ function walk(game: Stichos, target: Point, tolerance = 1.25) {
   let end: Point | undefined;
   for (let i = 0; i < queue.length && i < 25000; i++) {
     const p = queue[i];
-    if (distance(p, target) <= tolerance && !game.world.blocked(p.x, p.y, game.removed)) {
+    if (
+      distance(p, target) <= tolerance &&
+      (!game.world.blocked(p.x, p.y, game.removed) || doors.has(key(p)))
+    ) {
       end = p;
       break;
     }
@@ -82,6 +85,7 @@ function walk(game: Stichos, target: Point, tolerance = 1.25) {
     }
     for (let i = 0; distance(game.player, point) > 0.025 && i < 40; i++) {
       sustain(game);
+      combatFrame?.();
       const dx = point.x - game.player.x,
         dy = point.y - game.player.y,
         d = Math.hypot(dx, dy);
@@ -221,6 +225,135 @@ function opening(game: Stichos) {
   assert.equal(game.storyStage, 4);
 }
 
+/** Branch from an earned campaign state. Neither enemy health nor possessions/positions are assigned. */
+function confrontArchive(source: Stichos) {
+  let game = Stichos.restore(source.save());
+  const step = game.campaignObjective!;
+  assert.equal(step.kind, 'encounter');
+  const merchant = game.world
+    .npcsAround(step.town.x, step.town.y, 24)
+    .find((n) => n.role === 'merchant')!;
+  click(game, merchant);
+  const beforePurchase = game.player.coins;
+  game.choose('weapon:bow');
+  game.choose('close');
+  assert.ok(game.weapons.has('bow'));
+  assert.equal(game.player.coins, beforePurchase - 32);
+  click(game, step.target);
+  fixture('before-first-encounter', game);
+  game.choose('campaign:fight');
+  assert.equal(game.campaign.step, 5, 'Declaring a confrontation does not complete it.');
+  assert.match(game.campaignObjective!.target.id, /:guard:/);
+  const guards = game.world
+    .npcsAround(step.vault!.x, step.vault!.y, 24)
+    .filter((n) => n.id.startsWith(`${step.vault!.id}:guard:`));
+  assert.deepEqual(new Set(guards.map((n) => n.appearance.weapon)), new Set(['bow', 'sword']));
+  const ids = new Set(guards.map((n) => n.id));
+  const remaining = () => game.npcs.filter((n) => ids.has(n.id) && n.hp > 0);
+  let rangedHit = false,
+    meleeHit = false,
+    bowShots = 0,
+    enemyBowWarnings = 0,
+    enemyMeleeWarnings = 0;
+  let lowestHealth = game.player.hp;
+  const totalInitialHp = guards.reduce((sum, n) => sum + n.hp, 0);
+  const sight = (a: Point, b: Point) => {
+    const length = distance(a, b),
+      count = Math.ceil(length / 0.15);
+    for (let i = 1; i < count; i++)
+      if (
+        game.world.blocked(
+          a.x + ((b.x - a.x) * i) / count,
+          a.y + ((b.y - a.y) * i) / count,
+          game.removed,
+        )
+      )
+        return false;
+    return true;
+  };
+  const frame = () => {
+    sustain(game);
+    lowestHealth = Math.min(lowestHealth, game.player.hp);
+    const active = remaining();
+    if (
+      !rangedHit &&
+      active.length === 2 &&
+      active.reduce((sum, n) => sum + n.hp, 0) < totalInitialHp
+    )
+      rangedHit = true;
+    enemyBowWarnings += Number(game.effects.some((e) => e.text === 'Drawing bow'));
+    enemyMeleeWarnings += Number(game.effects.some((e) => e.text === 'Striking'));
+    const target = active.sort((a, b) => distance(a, game.player) - distance(b, game.player))[0];
+    if (!target) return;
+    const weapon = rangedHit ? 'staff' : 'bow';
+    game.equip(weapon);
+    if (
+      distance(target, game.player) > game.weaponProfile(weapon).range ||
+      !sight(game.player, target)
+    )
+      return;
+    const before = target.hp,
+      cooldown = game.player.attackCooldown;
+    game.attack(target);
+    if (weapon === 'bow' && cooldown === 0 && game.player.attackCooldown > 0) bowShots++;
+    if (weapon === 'staff' && target.hp < before) meleeHit = true;
+  };
+  const south = Math.round((Math.floor(step.vault!.y / STOP_SPACING) + 1) * STOP_SPACING);
+  road(game, { x: step.vault!.entrance.x, y: south });
+  while (game.player.y > step.vault!.entrance.y + 25)
+    walk(game, { x: step.vault!.entrance.x, y: game.player.y - 25 }, 0.1, frame);
+  walk(game, step.vault!.entrance, 0.1, frame);
+  for (let tick = 0; tick < 1200 && game.campaign.step === 5; tick++) {
+    const target =
+      remaining().sort((a, b) => distance(a, game.player) - distance(b, game.player))[0] ??
+      guards.find((n) => !game.removed.has(n.id))!;
+    assert.ok(target, 'A live tracked guard remains until the encounter completes.');
+    const range = rangedHit ? 1.1 : 3;
+    if (distance(target, game.player) > range + 0.15 || !sight(game.player, target))
+      walk(game, target, range, frame);
+    frame();
+    game.update(0.05, { x: 0, y: 0, run: false });
+  }
+  assert.equal(game.phase, 'playing');
+  assert.equal(game.campaign.step, 6, 'Both actual guards must die to open the archive lead.');
+  assert.ok(
+    rangedHit && meleeHit && bowShots > 0,
+    'Both travelling arrows and directional staff hits dealt real damage.',
+  );
+  assert.ok(
+    enemyBowWarnings > 0 && enemyMeleeWarnings > 0,
+    'Both generated enemy weapon families telegraphed attacks.',
+  );
+  assert.ok(guards.every((n) => game.removed.has(n.id)));
+  assert.equal(game.save().campaign.choices[step.id], 'fight');
+  game = Stichos.restore(game.save());
+  assert.ok(
+    guards.every((n) => game.removed.has(n.id)),
+    'Dead guards remain absent after restoration.',
+  );
+  const cache = game.campaignObjective!.target;
+  walk(game, cache);
+  game.interact(cache.id);
+  assert.equal(game.campaign.step, 7, 'The real archive can be searched after the combat route.');
+  const coins = game.player.coins;
+  game.interact(cache.id);
+  assert.equal(
+    game.player.coins,
+    coins,
+    'Repeated archive search cannot duplicate the combat or loot reward.',
+  );
+  fixture('after-first-combat', game);
+  return {
+    bowShots,
+    rangedHit,
+    meleeHit,
+    enemyBowWarnings,
+    enemyMeleeWarnings,
+    lowestHealth,
+    time: game.time - source.time,
+  };
+}
+
 test('six acts assemble distinct real towns, unique archives and genuine coil anchors across world generations', () => {
   for (const generation of [1, 2, 3] as const)
     for (const seed of [3886, 0x53544943, 1, 73, 9876]) {
@@ -268,6 +401,7 @@ test('a whole generation-three campaign resolves through actual movement, harves
     walk(game, { x: step.town.x - 4, y: step.town.y + 2 });
     game.rest();
     if (step.cost) stock(game, step.cost, step.town);
+    if (index === 5) t.diagnostic(JSON.stringify({ combatAlternative: confrontArchive(game) }));
     if (step.kind === 'puzzle') {
       if (index === 22) fixture('before-final-puzzle', game);
       click(game, step.target);

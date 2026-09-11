@@ -130,7 +130,7 @@ The current generation-3 checks are `--atlas`, `--visual`, and storage. The full
 
 ## Campaign, ending and free-life browser checkpoint
 
-Frozen preview `app-CYu5WpWe.js`, workspace browser `app-1319943` at its discovered loopback CDP endpoint. `scripts/browser-stichos-campaign.mjs` passed **8/8 checks with zero runtime errors** in a disposable browser context. It used the actual file chooser to import saves earned by the complete public-action simulation; no browser simulation fields, position, inventory or quest state were injected.
+The final repeat used frozen preview `app-CSGK7Fcb.js`, CSS `app-CYoMy-Rj.css`, service worker `d38b930dc8226185004b`, and workspace browser `app-1319943` at its discovered loopback CDP endpoint. `scripts/browser-stichos-campaign.mjs` passed **8/8 checks with zero runtime errors** in a disposable browser context on 11 September 2026. This repeat includes solid closed doors and actual click routes that open them before entering. It used the actual file chooser to import saves earned by the complete public-action simulation; no browser simulation fields, position, inventory or quest state were injected.
 
 Verified with real mouse/keyboard input: the Calling page hides the ending before investigation; all four final plaza lamps and radio complete the puzzle; the final decision opens a readable ending celebration; continuing returns to the same world; seven optional purposes and known identities are visible; an owned garden consumes a seed portion, prevents early harvest, advances through actual rest actions and pays its displayed yield; gathered timber/ore fund an equipment upgrade that changes its real profile; a selected willing host lacks the physical notebook, and returning to the original priest restores the exact original inventory and book. The Calling page also fits and closes at 390×844.
 
@@ -143,7 +143,7 @@ VERSO_QA_FIXTURES=1 node --experimental-strip-types --test --test-name-pattern='
 node scripts/browser-stichos-campaign.mjs http://127.0.0.1:WORKSPACE_CDP_PORT http://localhost:4174/
 ```
 
-The opt-in fixture files are `.dream-loop/campaign-fixtures/before-final-puzzle.json`, `before-ending.json`, `campaign-complete.json` and `free-life-home.json`. Ordinary test execution does not write them. The source of these states completes the radio opening, all 24 investigation objectives and post-story home/commission/identity actions through public simulation APIs. Unit tests separately cover all 81 weapon part combinations, matching forged previews and actual handling, physical weapon ownership across possession, and malformed recipe/owner/seed rejection. The modular forging UI was checked separately on the following frozen build.
+The opt-in fixture files are `.dream-loop/campaign-fixtures/before-final-puzzle.json`, `before-ending.json`, `campaign-complete.json` and `free-life-home.json`. The additional combat branch writes `before-first-encounter.json` and `after-first-combat.json`, both earned through public gameplay actions. Ordinary test execution does not write them. The source of these states completes the radio opening, all 24 investigation objectives and post-story home/commission/identity actions through public simulation APIs. Unit tests separately cover all 81 weapon part combinations, matching forged previews and actual handling, physical weapon ownership across possession, and malformed recipe/owner/seed rejection. The modular forging UI was checked separately on the following frozen build.
 
 ## Component forging browser checkpoint
 
