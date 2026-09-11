@@ -579,6 +579,11 @@ export class Stichos {
     }
     if (record.trusted && !plan.relationships.some((r) => r.npcId === record.trusted))
       throw new Error('A personal history names an unrelated witness.');
+    if (
+      record.aligned &&
+      this.freeLifeState.completed - record.baselineCommissions < plan.commissionGoal
+    )
+      throw new Error('The personal record predates its required work.');
     return { plan, record };
   }
   get personalStory() {
@@ -1667,6 +1672,9 @@ export class Stichos {
       return { ok: false, message: 'Make room before collecting the complete order.' };
     for (const id of result.consumeIds) this.removed.add(id);
     this.gain(result.output);
+    if (this.universeLife)
+      for (const [item, amount] of Object.entries(result.output))
+        this.recordFreeLife('field', item, amount ?? 0);
     Object.assign(order, result.order);
     if (order.serial > this.winterLaborBaseline)
       this.recordWinterWork({

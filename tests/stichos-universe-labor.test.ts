@@ -29,6 +29,24 @@ test('a generated household employs its actual personal relationships with delib
   assert.equal(game.chooseEstateTrust('invented-worker', true).ok, false);
   const preview = game.laborPreview(ally.id, 'garden');
   assert.ok(preview.ok);
+  const town = game.lifeOrigin!.settlement,
+    boardId = `${town.id}:notice`;
+  const offered = new Set(preview.order.allocations.map((a) => a.item));
+  for (let attempt = 0; ; attempt++) {
+    assert.ok(attempt < 30);
+    game.interact(boardId);
+    game.choose('life:contract');
+    const contract = game.freeLife.contract!;
+    if (contract.kind === 'field' && offered.has(contract.item!)) {
+      game.choose('close');
+      break;
+    }
+    game.choose('close');
+    game.interact(boardId);
+    game.choose('life:cancel');
+    game.choose('close');
+  }
+  assert.equal(game.freeLife.contract!.progress, 0);
   const coins = game.player.coins,
     carried = game.carried;
   assert.ok(game.hireLabor(ally.id, 'garden').ok);
@@ -68,6 +86,17 @@ test('a generated household employs its actual personal relationships with delib
   assert.ok(game.collectLabor(order.id).ok);
   assert.equal(game.carried, carried + order.allocations.reduce((a, b) => a + b.amount, 0));
   assert.ok(order.allocations.every((a) => game.removed.has(a.propId)));
+  const contract = game.freeLife.contract!;
+  assert.equal(
+    contract.progress,
+    Math.min(
+      contract.required,
+      order.allocations
+        .filter((a) => a.item === contract.item)
+        .reduce((sum, a) => sum + a.amount, 0),
+    ),
+    'fresh paid gathering counts toward the accepted field commission',
+  );
   assert.equal(game.collectLabor(order.id).ok, false);
   assert.equal(
     game.hireLabor(ally.id, 'garden').ok,
