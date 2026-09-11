@@ -1,5 +1,5 @@
-/** Real-input universe QA in fresh contexts of a verified Agent Workspace browser.
- * node scripts/browser-universe.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
+/** Real-input continuing-life and PWA QA in fresh contexts of a verified Agent Workspace browser.
+ * node scripts/browser-life-offline.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
  * Only reads DOM/diagnostics; game and storage changes are driven by actual inputs.
  */
 import fs from 'node:fs';
@@ -17,7 +17,7 @@ if (
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(
   root,
-  '.dream-loop/universe-release-qa' + (new URL(url).hostname === 'sabino.pro' ? '-public' : ''),
+  '.dream-loop/life-offline' + (new URL(url).hostname === 'sabino.pro' ? '-public' : ''),
 );
 fs.mkdirSync(out, { recursive: true });
 const started = new Date(),
@@ -29,7 +29,9 @@ const pass = (name, detail = '') => {
   results.push({ name, detail });
   console.log(`PASS ${name}: ${detail}`);
 };
-let browser, failure, observedFps;
+let browser, failure;
+let offlineTesting = false;
+const offlineResponses = [];
 async function connect(address, events = () => {}) {
   const ws = new WebSocket(address);
   await new Promise((resolve, reject) => {
@@ -93,6 +95,11 @@ async function traveler(name, targetUrl = url, mobile = false, sharedContext) {
             wire.push({ direction: method.endsWith('Sent') ? 'sent' : 'received', message: m });
         } catch {}
       }
+      if (method === 'Network.responseReceived' && offlineTesting)
+        offlineResponses.push({
+          url: params.response.url,
+          fromServiceWorker: params.response.fromServiceWorker,
+        });
       if (method === 'Runtime.exceptionThrown') errors.push({ name, ...params.exceptionDetails });
       if (method === 'Runtime.consoleAPICalled' && params.type === 'error')
         errors.push({ name, ...params });
@@ -207,7 +214,7 @@ async function traveler(name, targetUrl = url, mobile = false, sharedContext) {
   await page.send('Page.enable');
   await page.send('Runtime.enable');
   await page.send('Network.enable');
-  await page.send('Network.setBypassServiceWorker', { bypass: true });
+  await page.send('Network.setBypassServiceWorker', { bypass: false });
   await page.send('Emulation.setDeviceMetricsOverride', {
     width: mobile ? 390 : 1440,
     height: mobile ? 844 : 960,
@@ -224,200 +231,140 @@ async function traveler(name, targetUrl = url, mobile = false, sharedContext) {
   return c;
 }
 
-async function begin(c, seed = '3886') {
-  await c.fill('#s-seed-input', seed);
-  await c.click('#v-theo-story');
-  await c.wait('window.stichos.state.transfer', 'story opens');
-  await c.click('#s-skip');
-  await c.wait("window.stichos.state.modal===''&&!window.stichos.state.transfer", 'world ready');
+async function networkOffline(c, value) {
+  await c.page.send('Network.emulateNetworkConditionsByRule', {
+    emulateOfflineServiceWorker: value,
+    matchedNetworkConditions: value
+      ? [{ urlPattern: '', offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 }]
+      : [],
+  });
+  await c.page.send('Network.overrideNetworkState', {
+    offline: value,
+    latency: 0,
+    downloadThroughput: value ? 0 : -1,
+    uploadThroughput: value ? 0 : -1,
+  });
 }
-async function room(c, code = '') {
-  await c.focus();
-  await c.click('#s-together');
-  await c.fill('#s-room-name', c.name);
-  if (code) await c.fill('#s-room-code', code);
-  await c.click('#s-room-form button[type=submit]');
-  await c.wait("window.stichos.state.multiplayer.status==='online'", 'room online', 30000);
-  const id = (await c.state()).multiplayer.room;
-  await c.click('#s-room-return');
-  return id;
-}
-async function worldClick(c, p) {
-  await c.focus();
-  await delay(150);
-  const screen = await c.read(
-    `(()=>{const p=window.stichos.worldToScreen(${JSON.stringify(p)}),r=document.querySelector('canvas').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top};})()`,
-  );
-  await c.point(screen.x, screen.y);
-}
-async function move(c, p) {
-  await worldClick(c, p);
-  await c.wait(
-    `Math.hypot(window.stichos.state.player.x-(${p.x}),window.stichos.state.player.y-(${p.y}))<.3`,
-    'actual walking ' + JSON.stringify(p),
-    12000,
-  );
-}
-async function chat(c, text, channel = 'world') {
-  await c.focus();
-  await c.click(`[data-chat-channel=${channel}]`);
-  await c.fill('#v-chat-input', text);
-  await c.key('Enter', 'Enter', 13);
+async function pause(c) {
+  if ((await c.state()).modal === 'pause') return;
   await c.key('Escape', 'Escape', 27);
+  await c.wait("window.stichos.state.modal==='pause'", 'pause saves the life');
 }
-async function received(c, text) {
-  await c.wait(
-    `document.querySelector('#v-chat-log').textContent.includes(${JSON.stringify(text)})`,
-    'chat received ' + text,
-  );
+async function exactLife(c, saved, label) {
+  const current = await c.state();
+  for (const k of ['seed', 'worldGeneration', 'bodyId', 'browserIdentity'])
+    assert.equal(current[k], saved[k], `${label}: ${k}`);
+  assert.equal(current.player.x, saved.player.x, `${label}: x`);
+  assert.equal(current.player.y, saved.player.y, `${label}: y`);
+  assert.equal(current.player.name, saved.player.name, `${label}: name`);
+  assert.deepEqual(current.displayAppearance, saved.displayAppearance, `${label}: appearance`);
+  assert.deepEqual(current.inventory, saved.inventory, `${label}: inventory`);
+  return current;
 }
+let c, manifest, worker, cacheFacts;
 try {
   const version = await (await fetch(`${endpoint}/json/version`)).json();
   browser = await connect(version.webSocketDebuggerUrl);
-  const a = await traveler('Mira'),
-    b = await traveler('Elias');
-  await begin(a);
-  await begin(b);
-  const code = await room(a);
-  await room(b, code);
-  await a.wait('window.stichos.state.multiplayer.peers.length===1', 'two travelers');
-  await chat(a, 'The market is clear. Meet by the greenhouse.');
-  await received(b, 'The market is clear. Meet by the greenhouse.');
-  await delay(1100);
-  await chat(b, 'I have the cequin. Keep the north road open.', 'say');
-  await received(a, 'I have the cequin. Keep the north road open.');
-  pass('Real two-player Room and nearby Local chat cross WebRTC');
-  await a.click('#v-chat-settings');
-  await a.fill('[data-phrase="0"]', '/room Supply route confirmed.');
-  await a.click('#v-shortcuts-form button');
-  await delay(1100);
-  await a.key('F7', 'F7', 118);
-  await received(b, 'Supply route confirmed.');
-  pass('A customized F7 chat command sends only on actual shortcut input');
-  await move(a, { x: -1, y: 5 });
-  await move(b, { x: 1, y: 5 });
-  await worldClick(a, { x: -2, y: 5 });
-  await delay(800);
-  await worldClick(a, { x: -2, y: 5 });
-  await a.wait("window.stichos.state.removed.includes('origin:cequin')", 'harvest authority');
-  await b.wait("window.stichos.state.removed.includes('origin:cequin')", 'harvest shared');
-  await delay(6000);
-  await a.focus();
-  await a.shot('01-two-traveler-desktop');
-  const before = await a.state(),
-    visitorBefore = await b.state();
-  observedFps = await a.read('window.stichos.fps');
-  console.log('FPS ' + observedFps);
-  await a.key('Escape', 'Escape', 27);
-  await a.page.send('Page.reload', { ignoreCache: true });
-  await a.wait("window.stichos?.state.modal==='title'", 'host reload title');
-  await b.wait(
-    "window.stichos.state.multiplayer.status==='disconnected'",
-    'visitor sees host leave',
+  c = await traveler('ContinuingLife');
+  await c.fill('#s-seed-input', '3886');
+  await c.click('#v-theo-story');
+  await c.wait('window.stichos.state.transfer', 'story arrival');
+  await c.click('#s-skip');
+  await c.wait(
+    "window.stichos.state.modal===''&&!window.stichos.state.transfer",
+    'inhabited world',
   );
-  await a.click('#s-continue');
-  await a.wait("window.stichos.state.modal===''", 'host own life restored');
-  // The old invitation URL initiates a visitor reconnect; wait until it fails before resuming authority.
-  await a.wait(
-    "window.stichos.state.multiplayer.status!=='connecting'",
-    'old host join resolves',
-    30000,
-  );
-  await a.click('#s-together');
-  await a.wait(
-    `!!document.querySelector('[data-resume-world="${code}"]')`,
-    'owned world resume control',
-  );
-  await a.click(`[data-resume-world="${code}"]`);
-  await a.wait("window.stichos.state.multiplayer.status==='online'", 'restored room online', 30000);
-  await a.click('#s-room-return');
-  assert.equal((await a.state()).bodyId, before.bodyId);
-  assert((await a.state()).removed.includes('origin:cequin'));
-  await b.click('#s-together');
-  await b.click('#s-room-reconnect');
-  await b.wait(
-    "window.stichos.state.multiplayer.status==='online'",
-    'visitor private reconnect',
-    30000,
-  );
-  await b.click('#s-room-return');
-  assert.equal((await b.state()).multiplayer.peerId, visitorBefore.multiplayer.peerId);
-  assert((await b.state()).removed.includes('origin:cequin'));
+  const initial = await c.state();
+  await c.key('s', 'KeyS', 83, 1500);
+  await pause(c);
+  const saved = await c.state();
+  assert(saved.player.y > initial.player.y + 2, 'actual walking moved the player');
+  await c.page.send('Page.reload', { ignoreCache: false });
+  await c.wait("window.stichos?.state.modal==='title'", 'reload title');
+  await c.click('#s-continue');
+  await c.wait("window.stichos.state.modal===''", 'saved life continued');
+  await exactLife(c, saved, 'online reload');
   pass(
-    'Host-owned checkpoint resumes after reload; visitor credentials recover the same peer and depleted plant',
+    'Walking, Pause, reload and Continue preserve exact location, body, browser identity and belongings',
   );
-  await a.click('#v-chat-settings');
-  assert.equal(
-    await a.read('document.querySelector(\'[data-phrase="0"]\').value'),
-    '/room Supply route confirmed.',
+  await pause(c);
+  await c.wait('navigator.serviceWorker.controller!==null', 'active worker controls page', 30000);
+  worker = await c.read(
+    '(async()=>{const r=await navigator.serviceWorker.getRegistration();return {scope:r.scope,active:r.active?.scriptURL,state:r.active?.state,controller:navigator.serviceWorker.controller?.scriptURL}})()',
   );
-  await a.click('#v-shortcuts-close');
-  await delay(1100);
-  await a.key('F7', 'F7', 118);
-  await received(b, 'Supply route confirmed.');
-  pass('Customized shortcut survives a full page reload');
-  const second = await traveler('SecondTab', url, false, a.browserContextId);
-  assert.equal((await second.state()).modal, 'life-in-use');
-  await second.key('Escape', 'Escape', 27);
-  assert.equal((await second.state()).modal, 'life-in-use');
-  await browser.send('Target.closeTarget', { targetId: a.targetId });
-  a.closed = true;
-  await second.click('#v-retry-life-tab');
-  await second.wait("window.stichos.state.modal==='title'", 'same identity lease released');
-  await second.click('#s-continue');
-  assert.equal((await second.state()).bodyId, before.bodyId);
-  pass(
-    'Same-browser second tab is locked, Escape cannot bypass, closing the first permits continuing',
+  assert.equal(worker.scope, new URL('./', url).href, 'worker respects the app folder scope');
+  assert.equal(worker.state, 'activated');
+  cacheFacts = await c.read(
+    '(async()=>{const keys=await caches.keys();return await Promise.all(keys.map(async name=>({name,assets:(await(await caches.open(name)).keys()).map(r=>r.url)})))})()',
   );
-  const p = await traveler('PublicOne'),
-    q = await traveler('PublicTwo', url, true);
-  await begin(p, '989123');
-  await begin(q, '989123');
-  for (const c of [p, q]) {
-    await c.focus();
-    await c.click('#s-together');
-    await c.click('#v-room-public');
-    await c.wait(
-      "window.stichos.state.multiplayer.status==='online'",
-      'public frequency online',
-      40000,
-    );
+  assert(
+    cacheFacts.some((k) => k.assets.length > 10),
+    'app assets are cached',
+  );
+  manifest = await c.read(
+    "(async()=>{const href=document.querySelector('link[rel=manifest]').href;const response=await fetch(href);const manifest=await response.json();const icons=await Promise.all(manifest.icons.map(async i=>{const url=new URL(i.src,href).href;const r=await fetch(url);const bitmap=await createImageBitmap(await r.blob());const result={url,width:bitmap.width,height:bitmap.height,status:r.status,sizes:i.sizes,purpose:i.purpose};bitmap.close();return result}));return{href,manifest,icons}})()",
+  );
+  assert.equal(new URL(manifest.manifest.scope, manifest.href).href, new URL('./', url).href);
+  assert.equal(new URL(manifest.manifest.start_url, manifest.href).href, new URL('./', url).href);
+  assert.equal(manifest.manifest.display, 'standalone');
+  for (const i of manifest.icons) {
+    assert.equal(i.status, 200);
+    assert.equal(`${i.width}x${i.height}`, i.sizes);
+    assert(i.url.startsWith(new URL('./', url).href));
   }
-  assert.equal((await p.state()).multiplayer.room, (await q.state()).multiplayer.room);
-  await p.wait('window.stichos.state.multiplayer.peers.length===1', 'public peer arrived');
-  assert(await q.read('document.querySelector(".s-shell").classList.contains("chat-collapsed")'));
-  await delay(3500);
-  await q.shot('02-mobile-collapsed-world');
+  assert(manifest.icons.some((i) => i.width === 192));
+  assert(manifest.icons.some((i) => i.width === 512));
   pass(
-    'Two independent lives find the same public planetary room without exchanging a code',
-    (await p.state()).multiplayer.room,
+    'Active scoped service worker and standalone manifest resolve real 192px/512px icons',
+    worker.scope,
+  );
+  await c.page.send('Network.setCacheDisabled', { cacheDisabled: true });
+  offlineTesting = true;
+  await networkOffline(c, true);
+  await c.page.send('Page.reload', { ignoreCache: false });
+  await c.wait("window.stichos?.state.modal==='title'", 'offline title', 30000);
+  assert(
+    await c.read(
+      `(async()=>{try{await fetch(new URL('__verso_uncached_probe__?t='+Date.now(),location.href),{cache:'no-store'});return false}catch{return true}})()`,
+    ),
+    'uncached network request must fail',
+  );
+  assert(
+    offlineResponses.some(
+      (r) => r.fromServiceWorker && new URL(r.url).pathname === new URL(url).pathname,
+    ),
+    'offline navigation comes from service worker',
+  );
+  assert(
+    offlineResponses.some(
+      (r) => r.fromServiceWorker && /\/assets\/app-.*\.js/.test(new URL(r.url).pathname),
+    ),
+    'game bundle comes from service worker',
+  );
+  await c.click('#s-continue');
+  await c.wait("window.stichos.state.modal===''", 'offline life continued');
+  await exactLife(c, saved, 'offline reload');
+  await c.key('s', 'KeyS', 83, 550);
+  assert((await c.state()).player.y > saved.player.y + 0.5, 'actual walking works offline');
+  await pause(c);
+  await c.shot('01-offline-continuing-life');
+  pass(
+    'Network-disabled reload and Continue retain the same life; actual offline movement works from cached assets',
   );
   assert.deepEqual(errors, []);
-  pass('No browser exceptions or error logs');
+  pass('No runtime exceptions or error logs');
 } catch (error) {
   failure = error;
   console.error(error.stack);
-  for (const c of clients.filter((c) => !c.closed)) {
-    await c.shot(`FAIL-${c.name}`).catch(() => {});
-    fs.writeFileSync(
-      path.join(out, `FAIL-${c.name}.json`),
-      JSON.stringify(
-        {
-          state: await c.state().catch(() => null),
-          dom: await c.read('document.body.innerText').catch(() => null),
-        },
-        null,
-        2,
-      ),
-    );
-  }
+
+  if (c) await c.shot('99-failure').catch(() => {});
 } finally {
+  if (c) await networkOffline(c, false).catch(() => {});
   fs.writeFileSync(
     path.join(out, 'results.json'),
     JSON.stringify(
       {
         status: failure ? 'FAIL' : 'PASS',
-        observedFps,
         started,
         finished: new Date(),
         url,
@@ -425,13 +372,19 @@ try {
         errors,
         failure: failure?.stack,
         builds: clients.map((c) => c.build),
+        worker,
+        manifest,
+        cacheFacts,
+        offlineResponses,
       },
       null,
       2,
     ),
   );
-  for (const id of new Set(clients.map((c) => c.browserContextId)))
-    await browser?.send('Target.disposeBrowserContext', { browserContextId: id }).catch(() => {});
+  for (const contextId of new Set(clients.map((c) => c.browserContextId)))
+    await browser
+      ?.send('Target.disposeBrowserContext', { browserContextId: contextId })
+      .catch(() => {});
   clients.forEach((c) => c.page.close());
   browser?.close();
 }

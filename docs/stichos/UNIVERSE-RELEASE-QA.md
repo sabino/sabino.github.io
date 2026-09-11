@@ -1,6 +1,6 @@
 # Multiplayer universe release QA
 
-On 11 September 2026, seven checks passed in 40 seconds against the frozen production preview at `http://localhost:4174/`. The browser loaded `app-BsBd1dau.js`, `app-BbuTIZnE.css`, and `index-wRZM3Wtj.js`. Root changes after this snapshot require a final release smoke test.
+On 11 September 2026, seven checks passed against both the final production preview at `http://localhost:4174/` and the deployed [Verso game](https://sabino.pro/games/verso/). Each run completed in approximately 40 seconds. The browser loaded `app-4jvai5g6.js`, `app-BbuTIZnE.css`, and `index-CHsUkZiB.js`. Both final runs include the character-name and life-ownership guards. The public run verifies the HTTPS deployment and nested game path with real WebRTC peers.
 
 The harness uses real Chromium in the authorized hidden Agent Workspace, with fresh browser contexts and native CDP pointer, text, and keyboard events. Evaluation reads only DOM and exposed diagnostics; it does not alter game state, browser storage, or application handlers. All created contexts are disposed afterward.
 
@@ -12,7 +12,7 @@ The harness uses real Chromium in the authorized hidden Agent Workspace, with fr
 - The mobile world at 390 × 844 opened with collapsed chat and reachable movement, ability, inventory, and chat controls.
 - No browser exceptions or error-level console messages occurred. The desktop diagnostic reported **60.00 FPS** after the two-player interaction; this is a short local observation, not a device-wide performance guarantee.
 
-Evidence is saved under `.dream-loop/universe-release-qa/`: `results.json`, `01-two-traveler-desktop.png` (1440 × 960), and `02-mobile-collapsed-world.png` (390 × 844). The first diagnostic attempt omitted Enter's native character payload, leaving text unsubmitted; the corrected harness sends a carriage return with the key event.
+Local evidence is saved under `.dream-loop/universe-release-qa/`, and public-deployment evidence under `.dream-loop/universe-release-qa-public/`: `results.json`, `01-two-traveler-desktop.png` (1440 × 960), and `02-mobile-collapsed-world.png` (390 × 844). The first diagnostic attempt omitted Enter's native character payload, leaving text unsubmitted; the corrected harness sends a carriage return with the key event.
 
 Reproduce with the verified workspace-owned CDP endpoint:
 
