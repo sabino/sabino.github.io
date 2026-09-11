@@ -1,6 +1,6 @@
 # Verso — Destino: Stíchos
 
-A continuous browser RPG based on Sabino's **Destino: Stíchos** story. You are Theo Bishop, stranded for twenty local years in a priest's body. In the cold, cequin keeps people breathing. Six families compete over botanical knowledge, industrial production, and the future. The Sallas secret may explain the silence from home.
+A continuous browser RPG based on Sabino's **Destino: Stíchos** story. Stíchos is the planet; **Vespera** is the starting city. You are Theo Bishop, an exceptionally intelligent traveler from the future, stranded for twenty local years in a priest's body. In the cold, cequin keeps people breathing. Six families compete over botanical knowledge, industrial production, and the future. The Sallas secret may explain the silence from home.
 
 Walk beyond the cathedral, follow roads into other settlements, gather plants and materials, prepare medicine, trade, fight, and make promises to the people you meet. The terrain streams as you travel. There is no physical rift or extraction gate in this experience. Mind travel inhabits another living humanoid in the world.
 
@@ -22,13 +22,14 @@ npm run preview
 
 Open **http://localhost:4174**. This is now the default experience. The production `dist/` directory can be served by a static server, including beneath a URL subpath. The game has no runtime account, asset CDN, or model API dependency.
 
-The first sequence is a memory of the failed transmission. Play resumes in **3886**, after Theo's twenty years on Stíchos. Use **Continue** during the sequence to skip it. The name or number entered on the title screen determines the world; the same seed reproduces its initial geography, inhabitants, resources, and equipment properties.
+The opening has six recollections, advanced at your pace with **Continue** or the arrow keys. **Begin in 3886** skips directly to play. The failed transmission happened in **3866**; play resumes in **3886**, after twenty stíchoi, equivalent to ten Earth years. The name or number entered on the title screen determines the world; the same seed reproduces its initial geography, inhabitants, resources, and equipment properties.
 
 ## Things to do
 
 - **Explore:** square-tile terrain continues across positive and negative coordinates. Roads and bridges connect generated settlements. Frostwood, tundra, marshes, and highlands contain different resources and terrain. There is no enclosing island boundary.
 - **Travel between distinct places:** major cities occupy a 640-tile lattice, with one church per city. Smaller villages and hamlets break up the journey, usually about 190–237 tiles apart on trunk routes. Homes, inns, workshops, greenhouses, storehouses, and civic halls have distinct generated footprints, facades, and useful interiors.
 - **Uncover the atlas:** explored terrain and discovered places stay in Theo’s memory across saves and body changes. Pan, zoom, locate coordinates, fit the whole explored region, and mark a direction to follow. Unvisited country remains dark.
+- **Read a life already lived:** Theo’s bound notebook contains eighteen dated entries from 3866–3886, four illustrated botanical studies, a searchable glossary, and the current investigation. His scientific habits, mistakes, concealed identity, public compromises, and Sallas hypotheses develop over ten Earth years. The priest physically keeps the paper book; another host can recall its words without acquiring it.
 - **Gather and prepare:** cequin supports breathing, heartleaf becomes medicine, emberroot restores warmth. Timber and conductive ore supply equipment and radio repairs. Gathering changes the actual world, and harvested objects stay removed when you leave and return.
 - **Recognize botanical varieties:** stems, branches, leaf arrangement, buds, and roots are generated together. Wild varieties yield different amounts according to their visible growth. Hover or approach to inspect the harvest before gathering.
 - **Talk and decide:** botanists offer local supply work; a merchant buys supplies and sells provisions and weapons; the archivist and engineer advance the Sallas investigation. The opening cequin choice changes clan trust and consumes the same scarce bundle either way.
@@ -65,11 +66,13 @@ For the first excavation in a new generation-3 life, take the road south to the 
 | 3 / 4 / 5 / 6            | Cequin / salve / warming tonic / food              |
 | I / B                    | Satchel / preparation recipes                      |
 | K                        | Inspect this body’s generated equipment            |
-| J / M                    | Journal / map                                      |
+| J / M                    | Notebook / map                                     |
 | Escape                   | Close conversation, close a panel, or pause        |
 | Mouse wheel              | Zoom                                               |
 
 Touch controls provide movement, interaction, attacks, medicine, and the satchel. Desktop equipment buttons select weapons you own; buy additional types from a merchant. The journal records quest details and clan trust. Choose **Follow this thread** to track an active task in the sidebar and on the map. Click an inventory item to read what it does. Lens preparation requires a workbench; botanical preparations can be made while traveling.
+
+**J** or the satchel’s notebook button brings out the priest’s closed book. **Open notebook** unfolds it; **Close book** folds the cover shut, and **Put away**, **J**, or **Escape** returns to the world. Use the contents, leaf arrows, and section tabs to read. **Plain type** switches the handwriting to a reading font. **Remember the beginning** replays the introduction without restarting the life. In another body, the same control opens clearly identified remembered pages; the physical notebook remains with the priest. Current threads and fresh observations continue to follow Theo’s knowledge.
 
 Press **M** for the atlas. Drag or focus the chart and use arrow keys to pan; scroll or press **+ / −** to zoom. **My body** recenters, **All explored** fits the remembered world, and known-place buttons locate discovered settlements. Coordinate search changes the view without revealing terrain. Click a point and choose **Follow this mark** for a bearing in your field notes; this does not teleport or automatically walk the character. The current view and chart mark last for the active life in this page; discovered terrain and places are saved. The atlas represents the continuous world as a plane; a wrapping globe is not implemented.
 
@@ -110,6 +113,7 @@ The browser harness uses actual input in an isolated Agent Workspace Chromium an
 ```sh
 node scripts/browser-stichos-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
 node scripts/browser-stichos-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/ --atlas
+node scripts/browser-notebook-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
 ```
 
 The QA report distinguishes what was verified in the browser from simulation tests. Save download/import, invalid-file preservation, and service-worker offline reload and play are also exercised by `scripts/browser-stichos-storage.mjs`. Physical gamepads are not currently integrated into Stíchos. This is an expanding playable foundation, with an opening investigation and repeatable local work; the full Sallas story, large-scale war simulation, multiplayer, and richer long-term quest generation are not finished.

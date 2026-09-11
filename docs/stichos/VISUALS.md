@@ -1,5 +1,11 @@
 # Stíchos visual direction
 
+The private notebook now has a cloth cover, clasp, page edges, an opening/folding interaction, ink studies built from botanical construction parameters, and a plain-type reading option. Its handwritten text uses the locally bundled **Caveat** font by the Caveat Project Authors, distributed under the [SIL Open Font License](../../public/fonts/OFL-Caveat.txt); source: [Google Fonts’ Caveat directory](https://github.com/google/fonts/tree/main/ofl/caveat). The font loads from the game itself and joins its offline cache. The notebook UI is HTML/CSS and original SVG; no generated screenshot is used at runtime.
+
+The notebook reference at `.dream-loop/notebook/target.png` refines the previous live journal and world screenshots. It guides paper, ink, binding, and composition only. Incidental text invented within that reference is not story canon; the reviewed prose lives in `lore.ts` and its boundaries in [STORY.md](STORY.md). The physical book stays with the priest’s body, while another host sees an explicitly identified recollection of the pages.
+
+All humanoids share directional held-item composition. When facing north, the held arm and item draw before cloak, torso, and head; south-facing poses retain foreground items. Raw heading determines depth independently of the four-direction pose, including both northern diagonals. The pose cache includes that depth state. An actual Canvas2D comparison tested 720 appearances, headings, weapons, and motion/attack poses; it also forced the former foreground order to confirm the check detects the reported overlap.
+
 The target was generated with the built-in imagegen tool on 10 September 2026, using `docs/images/procedural-crossing.png` as the inspected existing-product baseline. This is an explicitly requested major direction change: continuous snowy square-tile terrain, Gothic botanical settlements, and humanoid inhabitants. The target is a reference only; runtime ground, architecture, vegetation, items, and people are drawn from code-generated parts.
 
 Target: `.dream-loop/stichos/target.png`.

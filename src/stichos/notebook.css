@@ -1,0 +1,779 @@
+@font-face {
+  font-family: 'Theo Hand';
+  src: url('/fonts/Caveat.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+.s-modal.is-notebook {
+  padding: 34px 30px;
+  background: #07151be6;
+}
+.is-notebook .s-window {
+  width: min(1280px, 100%);
+  padding: 0;
+  border: 1px solid #7e8b73;
+  box-shadow:
+    0 22px 80px #0009,
+    0 0 0 5px #203a3c,
+    0 0 0 6px #8a8868;
+  background: #e3d8b9;
+  color: #283b3d;
+}
+.is-notebook .s-window::before,
+.is-notebook .s-window::after {
+  display: none;
+}
+.s-notebook-header {
+  position: sticky;
+  top: -34px;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 20px;
+  padding: 24px 32px 15px;
+  background: linear-gradient(100deg, #233e3e, #132e35);
+  border-bottom: 1px solid #879578;
+}
+.is-notebook .s-window:has(.is-shut) {
+  width: min(460px, 100%);
+  background: none;
+  border: none;
+  box-shadow: none;
+  perspective: 1400px;
+}
+.s-notebook-cover {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 650px;
+  padding: 39px 38px 27px 51px;
+  border: 1px solid #8e9a79;
+  border-radius: 4px 12px 12px 4px;
+  color: #dbce9e;
+  background:
+    repeating-linear-gradient(95deg, #bdd4ae05 0 1px, transparent 1px 4px),
+    radial-gradient(ellipse at 15% 10%, #57756859, transparent 75%), #1c393b;
+  box-shadow:
+    inset 6px 0 6px #06191e,
+    inset 13px 0 #526b5444,
+    inset -7px 0 4px #0d262bdd,
+    8px 4px #b4a17d,
+    10px 5px #4e614e,
+    17px 20px 50px #0009;
+  transform-origin: left center;
+}
+.s-notebook-cover::before {
+  content: '';
+  position: absolute;
+  inset: 16px 15px 16px 24px;
+  border: 1px dashed #9ba98466;
+  border-radius: 2px 5px 5px 2px;
+  pointer-events: none;
+}
+.s-cover-owner {
+  font:
+    11px/1.7 Georgia,
+    serif;
+  color: #dacc9d;
+  text-align: center;
+}
+.s-cover-frame {
+  border: 1px solid #81906b;
+  padding: 26px 26px 20px;
+  margin-top: 28px;
+  text-align: center;
+  width: 100%;
+  box-shadow:
+    inset 0 0 0 5px #253d3b,
+    inset 0 0 0 6px #81906b4f;
+}
+.s-cover-rule {
+  font:
+    8px/1.4 system-ui,
+    sans-serif;
+  letter-spacing: 2px;
+  color: #b5bc9a;
+}
+.s-window .s-cover-frame h2 {
+  font:
+    32px/1.2 Georgia,
+    serif;
+  color: #ddcfa5;
+  margin: 17px 0 2px;
+}
+.s-cover-plant {
+  color: #b8b887;
+  width: 115px;
+  height: 115px;
+  margin: 0 auto;
+}
+.s-cover-plant .s-botanical-study text {
+  display: none;
+}
+.s-window .s-cover-frame p {
+  margin: 10px 0 0;
+  color: #abb697;
+  font:
+    11px/1.8 Georgia,
+    serif;
+}
+.s-window .s-cover-note {
+  color: #b6c1a6;
+  font:
+    22px/1.1 'Theo Hand',
+    cursive;
+  text-align: center;
+  margin: 22px 0;
+  transform: rotate(-2deg);
+}
+.s-notebook-cover button {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 15px;
+  color: #e7d9b0;
+}
+.s-notebook-cover #s-journal-return {
+  border: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 11px;
+  padding: 6px;
+}
+.s-cover-binding {
+  position: absolute;
+  right: -13px;
+  top: 47%;
+  width: 37px;
+  height: 46px;
+  border: 1px solid #73856c;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #455d4b, #2b413c);
+  box-shadow: 2px 3px 4px #0006;
+}
+.s-cover-binding::after {
+  content: '◇';
+  position: absolute;
+  left: 11px;
+  top: 7px;
+  color: #a99a70;
+}
+.is-unfolding .s-notebook-cover {
+  animation: s-cover-open 0.35s ease-in both;
+}
+.is-folding .s-notebook-spread,
+.is-folding .s-notebook-footer {
+  transform-origin: left center;
+  animation: s-book-fold 0.3s ease-in both;
+}
+.remembered-book .s-notebook-spread {
+  background: #d4dccf;
+}
+.remembered-book .s-notebook-header {
+  background: #172e3e;
+}
+.remembered-book .s-notebook-leaf {
+  background: linear-gradient(90deg, #455b6322, transparent 30px);
+}
+@keyframes s-cover-open {
+  to {
+    transform: rotateY(-75deg);
+    opacity: 0.35;
+  }
+}
+@keyframes s-book-fold {
+  to {
+    transform: perspective(1400px) rotateY(-70deg);
+    opacity: 0.15;
+  }
+}
+.s-notebook-header h2 {
+  margin: 5px 0 0;
+  font-size: 31px;
+  color: #ebdfbb;
+}
+.s-notebook-header p {
+  margin: 4px 0 0;
+  color: #acbcb6;
+  font:
+    11px/1.6 system-ui,
+    sans-serif;
+}
+.s-notebook-header .s-chapter {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+.s-notebook-header button {
+  margin-top: 8px;
+  white-space: nowrap;
+}
+.s-notebook-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 10px 28px 0;
+  background: #1a3439;
+  border-bottom: 1px solid #917c57;
+}
+.s-notebook-tabs button {
+  padding: 10px 22px;
+  background: #294248;
+  color: #c1d0c8;
+  box-shadow: none;
+  border: 1px solid #59706a;
+  border-bottom: 0;
+  position: relative;
+  top: 1px;
+  border-radius: 2px 2px 0 0;
+}
+.s-notebook-tabs button[aria-pressed='true'] {
+  background: #e5d9b9;
+  color: #263d3e;
+  border-color: #d0be98;
+}
+.s-notebook-spread {
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  background: radial-gradient(ellipse at 10% 95%, #b8a17033, transparent 60%), #e7ddc2;
+  min-height: 580px;
+}
+.s-notebook-spread.single-leaf {
+  grid-template-columns: minmax(0, 1fr);
+}
+.s-notebook-contents {
+  padding: 29px 24px 20px 30px;
+  border-right: 1px solid #9b8c6880;
+  background: linear-gradient(90deg, transparent 89%, #7f6a472b 97%, #f3e8cb 99%, #574a3236);
+}
+.s-notebook-overline {
+  color: #746146;
+  font:
+    10px/1.6 system-ui,
+    sans-serif;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+.s-notebook-contents nav {
+  margin-top: 14px;
+  max-height: 508px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #8b8568 transparent;
+}
+.s-notebook-contents nav button {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+  gap: 11px;
+  padding: 9px 5px;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid #a89b762a;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+  color: #344749;
+  font:
+    14px/1.45 Georgia,
+    serif;
+}
+.s-notebook-contents nav button small {
+  font:
+    10px/1.4 system-ui,
+    sans-serif;
+  color: #75654b;
+}
+.s-notebook-contents nav button[aria-current] {
+  color: #8b452c;
+  box-shadow: inset 3px 0 #985839;
+  background: #bd9f6633;
+  padding-left: 9px;
+}
+.s-notebook-contents nav button:hover {
+  background: #b6aa823b;
+}
+.s-notebook-contents .s-notebook-aside {
+  color: #687061;
+  font:
+    22px/1.1 'Theo Hand',
+    cursive;
+  margin: 24px 0 0;
+  transform: rotate(-2deg);
+}
+.s-notebook-select {
+  display: none;
+}
+.s-notebook-leaf {
+  position: relative;
+  padding: 31px 49px 22px;
+  min-width: 0;
+  background:
+    linear-gradient(90deg, #77624113, transparent 35px),
+    radial-gradient(ellipse at 95% 0, #fff8de99, transparent 70%);
+}
+.s-notebook-leaf::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  right: 6px;
+  width: 3px;
+  border-right: 1px solid #aa94604f;
+  border-left: 1px solid #aa946035;
+  pointer-events: none;
+}
+.s-notebook-leaf h3 {
+  font:
+    500 40px/1.1 'Theo Hand',
+    cursive;
+  color: #293f42;
+  margin: 9px 0 0;
+}
+.s-notebook-leaf .s-leaf-subtitle {
+  color: #776349;
+  font:
+    12px/1.7 Georgia,
+    serif;
+  margin: 8px 0 21px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #9c865451;
+}
+.s-handwriting {
+  background: repeating-linear-gradient(transparent 0 31px, #78866f16 31px 32px);
+}
+.s-handwriting p {
+  font:
+    450 24px/32px 'Theo Hand',
+    cursive;
+  color: #2a4146;
+  margin: 0 0 16px;
+}
+.s-margin-note {
+  clear: both;
+  margin-top: 20px;
+  border-left: 2px solid #9b62424a;
+  padding: 0 0 0 18px;
+}
+.s-margin-note span {
+  font:
+    9px system-ui,
+    sans-serif;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #856045;
+}
+.s-margin-note p {
+  font:
+    500 23px/1.25 'Theo Hand',
+    cursive;
+  color: #7b4837;
+  margin: 3px 0 0;
+}
+.s-leaf-signature {
+  text-align: right;
+  margin-top: 12px;
+  padding-right: 20px;
+  font:
+    27px 'Theo Hand',
+    cursive;
+  color: #455947;
+  transform: rotate(-3deg);
+}
+.s-notebook-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid #a9956d;
+  padding: 14px 30px;
+  background: #d8ceb0;
+}
+.s-notebook-pages,
+.s-notebook-tools {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.s-notebook-pages span {
+  font:
+    11px Georgia,
+    serif;
+  color: #78684d;
+  white-space: nowrap;
+}
+.s-notebook-footer button,
+.s-notebook-leaf button {
+  box-shadow: none;
+  color: #2e484a;
+  border-color: #8f947973;
+  background: #c4ccb039;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.s-notebook-footer button:disabled {
+  opacity: 0.35;
+}
+.s-notebook-footer button:hover:not(:disabled),
+.s-notebook-leaf button:hover {
+  background: #c6c3a5;
+}
+.s-plant-leaf figure {
+  float: right;
+  width: 200px;
+  margin: 5px -14px 18px 22px;
+  color: #4b6550;
+  transform: rotate(2deg);
+}
+.s-botanical-study {
+  width: 100%;
+  height: auto;
+}
+.s-botanical-study text {
+  font:
+    15px 'Theo Hand',
+    cursive;
+  fill: currentColor;
+}
+.s-plant-leaf figcaption {
+  text-align: center;
+  font:
+    11px/1.6 Georgia,
+    serif;
+  color: #71684d;
+}
+.s-glossary-leaf {
+  padding-left: 55px;
+  padding-right: 55px;
+}
+.s-glossary-search {
+  display: block;
+  max-width: 420px;
+  margin-top: 20px;
+}
+.s-window .s-glossary-search {
+  color: #78664b;
+}
+.s-window .s-glossary-search input {
+  background: #f0e8cd;
+  color: #293c3e;
+  border-color: #9c9b7d;
+}
+.s-glossary {
+  columns: 2;
+  column-gap: 58px;
+  margin-top: 26px;
+}
+.s-glossary > div {
+  break-inside: avoid;
+  padding-bottom: 16px;
+}
+.s-glossary dt {
+  font:
+    600 26px 'Theo Hand',
+    cursive;
+  color: #79472f;
+}
+.s-glossary dd {
+  margin: 3px 0 0;
+  font:
+    15px/1.8 Georgia,
+    serif;
+  color: #33474a;
+}
+.s-notebook-leaf #s-glossary-empty {
+  color: #6f4631;
+}
+.s-notebook-threads {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 36px;
+}
+.s-notebook-threads h3 {
+  font:
+    20px/1.5 Georgia,
+    serif;
+  margin-top: 25px;
+}
+.s-notebook-threads h4 {
+  color: #4c5443;
+}
+.s-notebook-threads p {
+  color: #34494a;
+  font:
+    22px/1.3 'Theo Hand',
+    cursive;
+}
+.s-notebook-threads .s-notebook-caption {
+  font:
+    12px/1.6 Georgia,
+    serif;
+  color: #776449;
+}
+.s-notebook-threads .s-quest-record small,
+.s-notebook-threads .s-quest-record span {
+  color: #726349;
+}
+.s-notebook-threads .s-quest-record b {
+  color: #3e5b54;
+}
+.s-notebook-threads .s-clan-row {
+  color: #314947;
+  border-color: #ab9d792e;
+}
+.s-notebook-threads .s-clan-row span {
+  color: #695c46;
+}
+.plain-type .s-handwriting {
+  background: none;
+}
+.plain-type .s-handwriting p,
+.plain-type .s-notebook-threads p {
+  font:
+    17px/1.9 Georgia,
+    serif;
+}
+.plain-type .s-margin-note p {
+  font:
+    italic 16px/1.7 Georgia,
+    serif;
+}
+.plain-type .s-notebook-leaf h3 {
+  font:
+    28px/1.3 Georgia,
+    serif;
+}
+.plain-type .s-glossary dt {
+  font:
+    20px/1.5 Georgia,
+    serif;
+}
+.s-intro-controls {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 27px;
+  z-index: 2;
+}
+.s-intro-controls span {
+  color: #b4c4c2;
+  font:
+    11px/1.5 system-ui,
+    sans-serif;
+  letter-spacing: 1px;
+}
+.s-transfer .s-intro-controls button {
+  position: static;
+  margin: 0;
+  padding: 10px 18px;
+  background: #203c43;
+  color: #e9ddbb;
+}
+.s-transfer.is-opening > p {
+  max-width: 680px;
+  font-size: 18px;
+  line-height: 1.9;
+}
+.s-transfer.is-opening > #s-skip {
+  font-size: 11px;
+  opacity: 0.78;
+  margin-top: 22px;
+}
+.s-transfer.is-opening .s-transfer-ring {
+  opacity: 0.4;
+}
+.s-transfer.is-opening > span {
+  color: #d0bd8b;
+}
+.s-pocketbook {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 25px 1fr;
+  text-align: left;
+  padding: 7px 8px;
+  margin-top: 9px;
+  color: #c2c4a7;
+  border-color: #72806a88;
+  background: #1d3639;
+  box-shadow: none;
+}
+.s-pocketbook > span {
+  grid-row: 1/3;
+  font-size: 24px;
+  align-self: center;
+  color: #aeb38b;
+}
+.s-pocketbook strong {
+  font-size: 11px;
+  font-weight: normal;
+}
+.s-pocketbook small {
+  font:
+    9px/1.5 system-ui,
+    sans-serif;
+  color: #8daba9;
+}
+@media (max-width: 1050px) {
+  .s-notebook-spread {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+  .s-notebook-leaf {
+    padding: 27px 30px 23px;
+  }
+  .s-notebook-header {
+    padding: 20px 25px 14px;
+  }
+  .s-notebook-footer {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .s-plant-leaf figure {
+    width: 160px;
+    margin-right: 0;
+  }
+}
+@media (max-width: 720px) {
+  .s-notebook-header {
+    top: -12px;
+  }
+  .s-notebook-cover {
+    min-height: 0;
+    padding: 27px 27px 20px 37px;
+  }
+  .s-cover-frame {
+    padding: 20px 13px 15px;
+    margin-top: 20px;
+  }
+  .s-window .s-cover-frame h2 {
+    font-size: 29px;
+  }
+  .s-modal.is-notebook {
+    padding: 12px 10px;
+  }
+  .s-notebook-header {
+    gap: 8px;
+    padding: 20px 18px 16px;
+  }
+  .s-notebook-header h2 {
+    font-size: 23px;
+    line-height: 1.2;
+  }
+  .s-notebook-header .s-chapter {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+  .s-notebook-header button {
+    padding: 6px 9px;
+    font-size: 11px;
+  }
+  .s-notebook-header button kbd {
+    display: none;
+  }
+  .s-notebook-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+    padding: 8px 12px;
+  }
+  .s-notebook-tabs button {
+    top: 0;
+    border-bottom: 1px solid #59706a;
+    font-size: 12px;
+    padding: 8px 6px;
+  }
+  .s-notebook-spread {
+    display: block;
+    min-height: 0;
+  }
+  .s-notebook-contents {
+    padding: 15px 21px;
+    border-bottom: 1px solid #a9956d;
+    background: #dcd2b5;
+  }
+  .s-notebook-contents > .s-notebook-overline,
+  .s-notebook-contents nav,
+  .s-notebook-aside {
+    display: none;
+  }
+  .s-window .s-notebook-select {
+    display: block;
+    color: #736146;
+  }
+  .s-notebook-select select {
+    display: block;
+    margin-top: 5px;
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #9e997a;
+    background: #e9dfbf;
+    color: #2b4546;
+    font:
+      13px Georgia,
+      serif;
+  }
+  .s-notebook-leaf {
+    padding: 23px 22px 25px;
+  }
+  .s-notebook-leaf h3 {
+    font-size: 35px;
+  }
+  .s-handwriting p {
+    font-size: 23px;
+    line-height: 30px;
+  }
+  .s-handwriting {
+    background-size: auto;
+    background-image: repeating-linear-gradient(transparent 0 29px, #78866f16 29px 30px);
+  }
+  .s-notebook-footer {
+    padding: 12px 17px;
+  }
+  .s-notebook-pages {
+    width: 100%;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .s-notebook-tools {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .s-notebook-footer button {
+    font-size: 11px;
+    padding: 7px;
+  }
+  .s-glossary {
+    columns: 1;
+  }
+  .s-notebook-threads {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .s-plant-leaf figure {
+    width: 140px;
+    margin: 0 0 14px 13px;
+  }
+  .s-intro-controls {
+    gap: 10px;
+  }
+  .s-transfer .s-intro-controls button {
+    font-size: 12px;
+    padding: 10px;
+  }
+  .s-intro-controls span {
+    font-size: 9px;
+    letter-spacing: 0;
+  }
+  .s-transfer.is-opening > p {
+    font-size: 15px;
+    line-height: 1.8;
+    padding: 0 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-unfolding .s-notebook-cover,
+  .is-folding .s-notebook-spread,
+  .is-folding .s-notebook-footer {
+    animation: none;
+  }
+}

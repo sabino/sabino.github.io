@@ -1,4 +1,8 @@
 import './style.css';
+import './notebook.css';
+import { notebookHtml } from './notebook';
+import type { NotebookSection, NotebookView } from './notebook';
+import { INTRO_BEATS, JOURNAL_ENTRIES, PLANT_NOTES } from './lore';
 import { Stichos, ITEMS, RECIPES } from './session';
 import { StichosRenderer } from './render';
 import { drawPortrait } from './portrait';
@@ -15,16 +19,16 @@ import type { ItemId, Npc, Point, Prop } from './types';
 void registerOffline();
 const root = document.getElementById('app')!;
 root.innerHTML = `<main class="s-shell">
- <header class="s-header"><a class="s-brand" href="?">VERSO<span>Destino: Stíchos</span></a><div class="s-location"><strong id="s-place">The cathedral quarter</strong><span id="s-coordinates">Stíchos · 3886</span></div><nav><button id="s-sound" title="Sound">♫</button><button id="s-journal" title="Journal (J)">Journal <kbd>J</kbd></button><button id="s-pause" aria-label="Pause">Ⅱ</button></nav></header>
+ <header class="s-header"><a class="s-brand" href="?">VERSO<span>Destino: Stíchos</span></a><div class="s-location"><strong id="s-place">Vespera</strong><span id="s-coordinates">Stíchos · 3886</span></div><nav><button id="s-sound" title="Sound">♫</button><button id="s-journal" title="Journal (J)">Journal <kbd>J</kbd></button><button id="s-pause" aria-label="Pause">Ⅱ</button></nav></header>
  <section class="s-world-wrap"><canvas id="s-world" tabindex="0" aria-label="The continuous world of Stíchos. WASD or click to walk. E to interact."></canvas><div class="s-weather"><i></i><span id="s-weather">A cold morning</span></div><div class="s-mobile-status"><span>♥ <b id="s-mobile-hp"></b><i><em id="s-mobile-hp-bar"></em></i></span><span>Breath <b id="s-mobile-breath"></b><i><em id="s-mobile-breath-bar"></em></i></span></div><div class="s-compass">N<span>◇</span></div><div id="s-hover" class="s-hover" hidden></div><button id="s-context" class="s-context" hidden></button><div id="s-toast" class="s-toast" role="status" aria-live="polite"></div><div class="s-world-caption">The road disappears into snow.</div></section>
  <aside class="s-sidebar"><section class="s-person"><div class="s-person-heading"><canvas id="s-portrait" width="96" height="112" aria-label="Your current human host"></canvas><div><small id="s-body-label">A borrowed life</small><h1 id="s-person-name">Theo Bishop</h1></div><strong id="s-level">1</strong></div><div class="s-meter health"><label>Vitality <b id="s-hp-label"></b></label><div><i id="s-hp"></i></div></div><div class="s-meter breath"><label>Breath <b id="s-breath-label"></b></label><div><i id="s-breath"></i></div></div><div class="s-person-minor"><span id="s-warmth"></span><span id="s-stamina"></span></div><div class="s-xp"><i id="s-xp"></i></div></section>
- <section class="s-map-block"><canvas id="s-map" width="240" height="150" aria-label="Map around your current position"></canvas><div><span id="s-map-label">Cathedral district</span><button id="s-expand-map" title="Map (M)">⤢</button></div></section>
+ <section class="s-map-block"><canvas id="s-map" width="240" height="150" aria-label="Map around your current position"></canvas><div><span id="s-map-label">Vespera</span><button id="s-expand-map" title="Map (M)">⤢</button></div></section>
  <section class="s-task"><small>Following a thread</small><h2 id="s-quest-title"></h2><p id="s-quest-objective"></p><span id="s-quest-distance"></span><button id="s-track">Read journal</button></section>
- <section class="s-pack"><div class="s-pack-heading"><h2>Your satchel</h2><span id="s-coins"></span></div><div class="s-tabs" role="tablist" aria-label="Satchel view"><button id="s-tab-pack" role="tab" aria-selected="true">Belongings</button><button id="s-tab-craft" role="tab" aria-selected="false">Prepare</button></div><div id="s-pack-content"></div><div id="s-item-detail" class="s-item-detail">Select an item to examine it.</div></section>
+ <section class="s-pack"><div class="s-pack-heading"><h2>Your satchel</h2><span id="s-coins"></span></div><div class="s-tabs" role="tablist" aria-label="Satchel view"><button id="s-tab-pack" role="tab" aria-selected="true">Belongings</button><button id="s-tab-craft" role="tab" aria-selected="false">Prepare</button></div><div id="s-pack-content"></div><button id="s-pocketbook" class="s-pocketbook"><span aria-hidden="true">▤</span><strong id="s-pocketbook-label">The priest’s notebook</strong><small id="s-pocketbook-note">In this body’s keeping</small></button><div id="s-item-detail" class="s-item-detail">Select an item to examine it.</div></section>
  <footer class="s-side-footer"><span id="s-distance">0 paces traveled</span><button id="s-help">Controls</button></footer></aside>
  <footer class="s-actionbar"><div class="s-equipment"><button data-equip="staff" title="Equip staff">${itemIcon('staff')}</button><button data-equip="sword" title="Equip sword">${itemIcon('sword')}</button><button data-equip="bow" title="Equip bow">${itemIcon('bow')}</button><button id="s-inspect-gear" title="Inspect equipment (K)">Gear</button></div><div class="s-hotkeys"><button data-action="attack" title="Attack (F / 1)"><kbd>1</kbd>${itemIcon('sword')}<span>Strike</span></button><button data-action="ward" title="Botanical ward (Q / 2)"><kbd>2</kbd>${itemIcon('ward')}<span>Ward</span><i id="s-ward-cooldown"></i></button><button data-use="cequin" title="Breathe cequin (3)"><kbd>3</kbd>${itemIcon('cequin')}<b data-count="cequin"></b><span>Breathe</span></button><button data-use="salve" title="Apply salve (4)"><kbd>4</kbd>${itemIcon('salve')}<b data-count="salve"></b><span>Heal</span></button><button data-use="tonic" title="Use warming tonic (5)"><kbd>5</kbd>${itemIcon('tonic')}<b data-count="tonic"></b><span>Warm</span></button><button data-use="rations" title="Eat (6)"><kbd>6</kbd>${itemIcon('rations')}<b data-count="rations"></b><span>Eat</span></button><button data-action="interact" title="Interact (E)"><kbd>E</kbd>${itemIcon('hand')}<span>Interact</span></button></div><button id="s-mobile-pack">Satchel</button><span class="s-walk-help">WASD / click to walk<br>Shift to run</span></footer>
  <div class="s-mobile-move"><button data-move="w">↑</button><button data-move="a">←</button><button data-move="s">↓</button><button data-move="d">→</button></div>
- <div id="s-dialogue" class="s-dialogue" hidden></div><div id="s-modal" class="s-modal" hidden></div><div id="s-transfer" class="s-transfer" hidden><div class="s-transfer-ring"></div><span id="s-transfer-time"></span><h2 id="s-transfer-line"></h2><p id="s-transfer-sub"></p><button id="s-skip">Continue</button></div></main>`;
+ <div id="s-dialogue" class="s-dialogue" hidden></div><div id="s-modal" class="s-modal" hidden></div><div id="s-transfer" class="s-transfer" role="dialog" aria-modal="true" aria-labelledby="s-transfer-line" hidden><div class="s-transfer-ring"></div><span id="s-transfer-time"></span><h2 id="s-transfer-line"></h2><p id="s-transfer-sub"></p><div id="s-intro-controls" class="s-intro-controls" hidden><button id="s-intro-prev">← Back</button><span id="s-intro-page" aria-live="polite"></span><button id="s-intro-next">Continue →</button></div><button id="s-skip">Continue</button></div></main>`;
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (text: unknown) =>
@@ -94,6 +98,18 @@ let transferStarted = 0,
   transferStep = -1;
 let pendingTransfer: (() => void) | null = null;
 let ignoreNextTransfer = false;
+let introPage = 0,
+  replayingIntro = false;
+const notebookView: NotebookView = {
+  section: 'years',
+  entry: 0,
+  plant: 0,
+  plain: false,
+  open: false,
+};
+try {
+  notebookView.plain = localStorage.getItem('verso.notebook.plain') === 'true';
+} catch {}
 let fps = 60,
   frames = 0,
   frameSeconds = 0;
@@ -146,6 +162,7 @@ function activate(next: Stichos) {
   keys.clear();
   packSignature = '';
   trackedQuestId = null;
+  notebookView.open = false;
   chartView = null;
   mapWaypoint = null;
   dialogueSignature = '';
@@ -171,7 +188,7 @@ function openModal(kind: string, html: string) {
   setInert(true);
   const container = el('s-modal');
   container.hidden = false;
-  container.className = `s-modal ${kind === 'title' ? 'is-title' : kind === 'map' ? 'is-atlas' : ''}`;
+  container.className = `s-modal ${kind === 'title' ? 'is-title' : kind === 'map' ? 'is-atlas' : kind === 'journal' ? 'is-notebook' : ''}`;
   container.innerHTML = `<section class="s-window" role="dialog" aria-modal="true">${html}</section>`;
   const heading = container.querySelector('h2');
   if (heading) {
@@ -195,7 +212,7 @@ function closeModal() {
 function title() {
   openModal(
     'title',
-    `<div class="s-title-mark">V E R S O</div><span class="s-chapter">Destino: Stíchos</span><h2>Someone else's face.<br>Twenty years of silence.</h2><p>Cold air. A cathedral. A civilization on the edge of war.<br>You remember a home that this body has never seen.</p><form id="s-start"><label>A possible Stíchos<input id="s-seed-input" value="0x53544943" maxlength="64" aria-label="World seed"></label><button class="s-primary" type="submit">Remember how it began</button></form>${stored ? '<button id="s-continue" class="s-continue">Continue this life</button>' : ''}<p class="s-title-foot">A continuous world of botanical medicine, clan loyalties,<br>and a voice on the other side of a broken transmission.</p>`,
+    `<div class="s-title-mark">V E R S O</div><span class="s-chapter">Destino: Stíchos</span><h2>I came from the future.<br>I woke in his past.</h2><p>Planet Stíchos, year 3886. For twenty local years, Theo Bishop has worn a priest’s face. Now a war is beginning—and the family he came to study may be his only way home.</p><form id="s-start"><label>A possible Stíchos<input id="s-seed-input" value="0x53544943" maxlength="64" aria-label="World seed"></label><button class="s-primary" type="submit">Remember how it began</button></form>${stored ? '<button id="s-continue" class="s-continue">Continue this life</button>' : ''}<p class="s-title-foot">A continuous world of botanical medicine, clan loyalties,<br>and a voice on the other side of a broken transmission.</p>`,
   );
   el<HTMLFormElement>('s-start').onsubmit = (event) => {
     event.preventDefault();
@@ -217,28 +234,7 @@ function title() {
       }
     };
 }
-const opening = [
-  [
-    'Transmission archive',
-    'Your mind leaves before your body knows.',
-    'Somewhere on Earth. Twenty Stíchoi years ago.',
-  ],
-  [
-    'Signal interrupted',
-    'That is not my heartbeat.',
-    'Destination mismatch. A priest opens his eyes.',
-  ],
-  [
-    'Stíchos · 3886',
-    'Ten Earth years. Twenty years here.',
-    'My name in this world is Theo Bishop.',
-  ],
-  [
-    'The cathedral quarter',
-    'I have spent too long waiting.',
-    'The Sallas secret may be my only way home. First, breathe.',
-  ],
-];
+const opening = INTRO_BEATS;
 const returning = [
   [
     'A faint connection',
@@ -270,12 +266,16 @@ function transfer(kind: 'opening' | 'return' | 'clinic', after?: () => void) {
   walk = [];
   game.dialogue = null;
   transferKind = kind;
+  introPage = 0;
+  el('s-intro-controls').hidden = kind !== 'opening';
+  el('s-skip').textContent = kind === 'opening' ? 'Begin in 3886 · skip recollection' : 'Continue';
+  el('s-transfer').classList.toggle('is-opening', kind === 'opening');
   pendingTransfer = after ?? null;
   transferStarted = performance.now();
   transferStep = -1;
   el('s-transfer').hidden = false;
   setInert(true);
-  el('s-skip').focus({ preventScroll: true });
+  el(kind === 'opening' ? 's-intro-next' : 's-skip').focus({ preventScroll: true });
   audio.pause(false);
   audio.play(kind === 'clinic' ? 'breath' : 'mind-transfer');
 }
@@ -290,6 +290,11 @@ function endTransfer() {
   setInert(false);
   paused = false;
   canvas.focus({ preventScroll: true });
+  if (replayingIntro) {
+    replayingIntro = false;
+    journal();
+    return;
+  }
   save();
   if (game.phase === 'lost') {
     lost();
@@ -303,24 +308,52 @@ function endTransfer() {
   );
 }
 el('s-skip').onclick = endTransfer;
+function turnIntro(delta: number) {
+  if (introPage + delta >= opening.length) {
+    endTransfer();
+    return;
+  }
+  introPage = Math.max(0, introPage + delta);
+  transferStep = -1;
+}
+el('s-intro-next').onclick = () => turnIntro(1);
+el('s-intro-prev').onclick = () => turnIntro(-1);
 function updateTransfer(now: number) {
   if (!transferStarted) return;
   const lines =
       transferKind === 'opening' ? opening : transferKind === 'clinic' ? recovering : returning,
     seconds = (now - transferStarted) / 1000;
   const duration = reducedMotion.matches ? 2.5 : 3.1;
-  const step = Math.min(lines.length - 1, Math.floor(seconds / duration));
+  const step =
+    transferKind === 'opening'
+      ? introPage
+      : Math.min(lines.length - 1, Math.floor(seconds / duration));
   if (step !== transferStep) {
     transferStep = step;
     el('s-transfer-time').textContent = lines[step][0];
     el('s-transfer-line').textContent = lines[step][1];
     el('s-transfer-sub').textContent = lines[step][2];
     el('s-transfer').dataset.step = String(step);
+    if (transferKind === 'opening') {
+      el<HTMLButtonElement>('s-intro-prev').disabled = step === 0;
+      el('s-intro-next').textContent =
+        step === lines.length - 1
+          ? replayingIntro
+            ? 'Return to the notebook'
+            : 'Wake in Vespera'
+          : 'Continue →';
+      el('s-intro-page').textContent = `${step + 1} / ${lines.length} · recollection`;
+    }
     if (step === 1) audio.play('radio');
   }
   const p = seconds / (lines.length * duration);
-  el('s-transfer').style.setProperty('--transfer', String(Math.sin(Math.PI * p)));
-  if (p >= 1) endTransfer();
+  el('s-transfer').style.setProperty(
+    '--transfer',
+    String(
+      transferKind === 'opening' ? 0.55 + Math.sin(seconds * 0.6) * 0.15 : Math.sin(Math.PI * p),
+    ),
+  );
+  if (p >= 1 && transferKind !== 'opening') endTransfer();
 }
 
 function pauseMenu() {
@@ -380,21 +413,119 @@ function controls() {
   );
   el('s-help-return').onclick = closeModal;
 }
-function journal() {
-  openModal(
-    'journal',
-    `<span class="s-chapter">Theo Bishop's record · 3886</span><h2>What survives the transmission.</h2><div class="s-journal-columns"><div><h3>Threads to follow</h3>${game.quests.map((q) => `<article class="s-quest-record ${q.complete ? 'complete' : ''}"><small>${q.complete ? 'Resolved' : 'Unfinished'}</small><h4>${esc(q.title)}</h4><p>${esc(q.description)}</p><b>${esc(q.objective)}</b>${q.target ? `<span>Near ${Math.round(q.target.x)}, ${Math.round(q.target.y)}</span>` : ''}${!q.complete ? `<button class="s-track-quest" data-track-quest="${esc(q.id)}">Follow this thread</button>` : ''}</article>`).join('')}<h3>The six families</h3>${game.world.clans.map((c, i) => `<div class="s-clan-row"><i style="background:${c.color}"></i><strong>${esc(c.name)}</strong><span>Trust ${game.reputation[i] ?? 0}</span></div>`).join('')}</div><div><h3>Remembered words</h3><blockquote>“Não, eu devo fazer algo!”</blockquote><p>I have avoided changing history for twenty years. Orlando Brown is preparing to industrialize the plants that keep this world alive. The Sallas secret may be my way home. Silence is becoming a choice.</p>${game.journal
-      .slice()
-      .reverse()
-      .map(
-        (entry) =>
-          `<article class="s-memory"><h4>${esc(entry.title)}</h4><p>${esc(entry.text)}</p></article>`,
-      )
-      .join(
-        '',
-      )}</div></div><button id="s-journal-return" class="s-primary">Close the record</button>`,
+function journal(section?: NotebookSection) {
+  if (section) {
+    notebookView.section = section;
+    notebookView.open = true;
+  }
+  openModal('journal', notebookHtml(game, notebookView));
+  const refresh = (focus = '#s-leaf-title') => {
+    journal();
+    el('s-modal').querySelector<HTMLElement>(focus)?.focus({ preventScroll: true });
+  };
+  el('s-journal-return').onclick = () => {
+    if (game.hasNotebook && notebookView.open) foldNotebook(false);
+    else closeModal();
+  };
+  const open = el('s-notebook-open');
+  if (open) {
+    open.onclick = () => {
+      el('s-modal').querySelector('.s-notebook')?.classList.add('is-unfolding');
+      open.setAttribute('disabled', '');
+      setTimeout(
+        () => {
+          if (modal !== 'journal') return;
+          notebookView.open = true;
+          refresh();
+        },
+        reducedMotion.matches ? 0 : 350,
+      );
+    };
+    return;
+  }
+  el('s-modal')
+    .querySelectorAll<HTMLButtonElement>('[data-notebook-section]')
+    .forEach((button) => {
+      button.onclick = () => {
+        notebookView.section = button.dataset.notebookSection as NotebookSection;
+        refresh(`[data-notebook-section="${notebookView.section}"]`);
+      };
+    });
+  const leaf = (n: number) => {
+    if (notebookView.section === 'years')
+      notebookView.entry = Math.max(0, Math.min(JOURNAL_ENTRIES.length - 1, n));
+    else notebookView.plant = Math.max(0, Math.min(PLANT_NOTES.length - 1, n));
+    refresh();
+  };
+  el('s-modal')
+    .querySelectorAll<HTMLButtonElement>('[data-leaf]')
+    .forEach((button) => {
+      button.onclick = () => leaf(Number(button.dataset.leaf));
+    });
+  const select = el<HTMLSelectElement>('s-notebook-select');
+  if (select) select.onchange = () => leaf(Number(select.value));
+  const current = () =>
+    notebookView.section === 'years' ? notebookView.entry : notebookView.plant;
+  const prev = el('s-leaf-prev'),
+    next = el('s-leaf-next');
+  if (prev) prev.onclick = () => leaf(current() - 1);
+  if (next) next.onclick = () => leaf(current() + 1);
+  el('s-notebook-type').onclick = () => {
+    notebookView.plain = !notebookView.plain;
+    try {
+      localStorage.setItem('verso.notebook.plain', String(notebookView.plain));
+    } catch {}
+    refresh('#s-notebook-type');
+  };
+  el('s-notebook-intro').onclick = () => {
+    replayingIntro = true;
+    transfer('opening');
+  };
+  const search = el<HTMLInputElement>('s-glossary-search');
+  if (search)
+    search.oninput = () => {
+      const query = search.value
+        .trim()
+        .toLocaleLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      let visible = 0;
+      el('s-modal')
+        .querySelectorAll<HTMLElement>('[data-glossary]')
+        .forEach((entry) => {
+          entry.hidden = !entry.dataset
+            .glossary!.normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .includes(query);
+          if (!entry.hidden) visible++;
+        });
+      el('s-glossary-empty').hidden = visible !== 0;
+    };
+}
+function foldNotebook(putAway: boolean) {
+  if (!game.hasNotebook || !notebookView.open) {
+    closeModal();
+    return;
+  }
+  const book = el('s-modal').querySelector<HTMLElement>('.s-notebook');
+  if (!book || book.classList.contains('is-folding')) return;
+  book.classList.add('is-folding');
+  book.inert = true;
+  setTimeout(
+    () => {
+      if (modal !== 'journal') return;
+      notebookView.open = false;
+      journal();
+      if (putAway)
+        setTimeout(
+          () => {
+            if (modal === 'journal' && !notebookView.open) closeModal();
+          },
+          reducedMotion.matches ? 0 : 180,
+        );
+    },
+    reducedMotion.matches ? 0 : 300,
   );
-  el('s-journal-return').onclick = closeModal;
 }
 function atlasSource(): AtlasSource {
   return {
@@ -575,6 +706,12 @@ function updateDialogue() {
   };
 }
 function updateUI() {
+  el('s-pocketbook-label').textContent = game.hasNotebook
+    ? 'The priest’s notebook'
+    : 'Remembered pages';
+  el('s-pocketbook-note').textContent = game.hasNotebook
+    ? 'In this body’s keeping'
+    : 'The book remains with the priest';
   const p = game.player,
     tile = game.world.tile(p.x, p.y);
   el('s-person-name').textContent = p.bodyName;
@@ -834,7 +971,8 @@ root.addEventListener('click', (event) => {
   audio.play('click');
   if (d.trackQuest) {
     trackedQuestId = d.trackQuest;
-    closeModal();
+    if (modal === 'journal') foldNotebook(true);
+    else closeModal();
     updateUI();
     drawMap();
   }
@@ -879,8 +1017,12 @@ root.addEventListener('click', (event) => {
 });
 el('s-context').onclick = () => act('interact');
 el('s-pause').onclick = pauseMenu;
-el('s-journal').onclick = journal;
-el('s-track').onclick = journal;
+el('s-journal').onclick = () => journal();
+el('s-pocketbook').onclick = () => {
+  notebookView.open = false;
+  journal();
+};
+el('s-track').onclick = () => journal('threads');
 el('s-expand-map').onclick = mapModal;
 el('s-help').onclick = controls;
 el('s-inspect-gear').onclick = equipmentMenu;
@@ -912,12 +1054,12 @@ document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((button) => 
   button.onlostpointercapture = release;
 });
 addEventListener('keydown', (e) => {
-  if (e.key === 'Tab' && modal) {
+  if (e.key === 'Tab' && (modal || transferStarted)) {
     const focus = [
-      ...el('s-modal').querySelectorAll<HTMLElement>(
-        'button:not(:disabled),input:not([hidden]),a[href]',
+      ...el(transferStarted ? 's-transfer' : 's-modal').querySelectorAll<HTMLElement>(
+        'button:not(:disabled),input:not([hidden]),select,textarea,a[href],[tabindex="0"]',
       ),
-    ];
+    ].filter((node) => node.getClientRects().length && !node.closest('[hidden],[inert]'));
     const first = focus[0],
       last = focus.at(-1);
     if (e.shiftKey && document.activeElement === first) {
@@ -929,12 +1071,14 @@ addEventListener('keydown', (e) => {
     }
     return;
   }
-  if ((e.target as HTMLElement).matches('input,textarea,select')) return;
+  if (e.key !== 'Escape' && (e.target as HTMLElement).matches('input,textarea,select')) return;
   const k = e.key.toLowerCase();
   if (transferStarted) {
-    if (k === 'escape' || k === 'enter') {
+    if (k === 'enter' && (e.target as HTMLElement).closest('button')) return;
+    if (['escape', 'enter', 'arrowright', 'arrowleft'].includes(k)) {
       e.preventDefault();
-      endTransfer();
+      if (k === 'escape' || transferKind !== 'opening') endTransfer();
+      else turnIntro(k === 'arrowleft' ? -1 : 1);
     }
     return;
   }
@@ -943,8 +1087,14 @@ addEventListener('keydown', (e) => {
     if (game.dialogue) {
       game.dialogue = null;
       updateDialogue();
-    } else if (modal && modal !== 'title' && modal !== 'lost') closeModal();
+    } else if (modal === 'journal') foldNotebook(true);
+    else if (modal && modal !== 'title' && modal !== 'lost') closeModal();
     else if (!modal) pauseMenu();
+    return;
+  }
+  if (modal === 'journal' && k === 'j') {
+    e.preventDefault();
+    foldNotebook(true);
     return;
   }
   if (modal || !started) return;
@@ -1103,7 +1253,8 @@ function frame(now: number) {
           Math.min(
             1,
             (now - transferStarted) /
-              ((reducedMotion.matches ? 2500 : 3100) * (transferKind === 'opening' ? 4 : 2)),
+              ((reducedMotion.matches ? 2500 : 3100) *
+                (transferKind === 'opening' ? opening.length : 2)),
           ),
         )
       : 0,
@@ -1130,6 +1281,8 @@ Object.defineProperty(window, 'stichos', {
       return structuredClone({
         seed: game.world.seed,
         worldGeneration: game.world.generation,
+        hasNotebook: game.hasNotebook,
+        notebook: { ...notebookView },
         player: game.player,
         phase: game.phase,
         time: game.time,
