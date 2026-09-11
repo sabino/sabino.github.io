@@ -4,7 +4,7 @@
 
 Verso’s primary start is a generated resident in a generated civilization. Geography, climate, practical technology, personal history, relationships and body-owned equipment reconstruct from their recorded seeds and generator version. Stíchos is one optional civilization; Theo’s authored story remains the explicit generation-three legacy entry. The current behavior is described in [generated worlds and lives](GENERATED-LIVES.md), [ordinary equipment](ORDINARY-EQUIPMENT.md) and [the life/universe contract](UNIVERSE.md).
 
-The full suite passed **383/383 tests in 76.04 seconds**, with no failures, skips or cancellations, at source `1c4112b`. Formatting and production build also passed. The earlier stale merchant-label expectation is corrected to the civilization's actual profession. Evidence: `.dream-loop/generation4-final-tests-2.log`. Final public asset identity and browser verification are recorded in [PAGES.md](PAGES.md).
+The full suite passed **384/384 tests in 79.92 seconds**, with no failures, skips or cancellations, at source `2a083ee`. Formatting and production build passed. The final housing correction at `fcb0c64` then passed **24 focused tests**, covering actual local residential homes, personal story completion/reload, paid worker jobs, ecology, planned parcels and legacy compatibility; TypeScript and formatting passed again. Evidence: `.dream-loop/generation4-release-tests.log`. Public asset identity and final browser verification are recorded in [PAGES.md](PAGES.md).
 
 ### Generated lives and equipment through ordinary UI
 

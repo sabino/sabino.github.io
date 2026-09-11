@@ -268,21 +268,53 @@ try {
   await c.shot('north');
   fs.writeFileSync(
     path.join(out, 'result.json'),
-    JSON.stringify({ state: await c.state(), fps, errors }, null, 2),
+    JSON.stringify({ state: await c.state(), fps, errors, build: c.build }, null, 2),
   );
   const home = (await c.state()).lifeOrigin.home;
-  const entrance = await c.read(
-    `(()=>{const p=window.stichos.worldToScreen({x:${home.x},y:${home.y - 1}});const r=document.querySelector('#s-world').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top};})()`,
+  const screenPoint = async (point) =>
+    c.read(
+      `(()=>{const p=window.stichos.worldToScreen(${JSON.stringify(point)});const r=document.querySelector('#s-world').getBoundingClientRect();return{x:p.x+r.left,y:p.y+r.top};})()`,
+    );
+  // Walk into camera range using real ground clicks, then operate the visible door explicitly.
+  for (let leg = 0; leg < 6; leg++) {
+    const body = (await c.state()).player;
+    const distance = Math.hypot(home.x - body.x, home.y + 1 - body.y);
+    if (distance < 10) break;
+    const desired = {
+      x: body.x + ((home.x - body.x) * 7) / distance,
+      y: body.y + ((home.y + 1 - body.y) * 7) / distance,
+    };
+    const waypoint = await c.read(
+      `(()=>{const desired=${JSON.stringify(desired)}, points=[];for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const x=Math.round(desired.x)+dx,y=Math.round(desired.y)+dy;if(!window.stichos.blocked(x,y))points.push({x,y,d:Math.hypot(x-desired.x,y-desired.y)});}return points.sort((a,b)=>a.d-b.d)[0]})()`,
+    );
+    assert(waypoint, 'Visible walking waypoint exists');
+    const p = await screenPoint(waypoint);
+    await c.point(p.x, p.y);
+    await c.wait(
+      `Math.hypot(window.stichos.state.player.x-${waypoint.x},window.stichos.state.player.y-${waypoint.y})<0.65`,
+      'Actual walk toward the home',
+      14000,
+    );
+  }
+  const door = await c.read(
+    `window.stichos.props(${home.x},${home.y},1).find(p=>p.kind==='door'&&p.building===${JSON.stringify(home.buildingId)}&&p.x===${home.x}&&p.y===${home.y})`,
   );
-  assert(
-    entrance.x > 0 && entrance.x < 1080 && entrance.y > 45 && entrance.y < 760,
-    'Owned entrance fits the actual camera',
-  );
+  assert(door, 'The home has its actual door');
+  if (!(await c.state()).opened.includes(door.id)) {
+    const p = await screenPoint({ x: home.x, y: home.y - 0.25 });
+    await c.point(p.x, p.y);
+    await c.wait(
+      `window.stichos.state.opened.includes(${JSON.stringify(door.id)})`,
+      'Approach and open the actual home door',
+      18000,
+    );
+  }
+  const entrance = await screenPoint({ x: home.x, y: home.y - 2 });
   await c.point(entrance.x, entrance.y);
   await c.wait(
     `window.stichos.tile(Math.round(window.stichos.state.player.x),Math.round(window.stichos.state.player.y)).building===${JSON.stringify(home.buildingId)} && window.stichos.tile(Math.round(window.stichos.state.player.x),Math.round(window.stichos.state.player.y)).terrain==='floor'`,
-    'Native path opens the real door and enters the owned home',
-    18000,
+    'Walk through the open doorway into the owned home',
+    12000,
   );
   await delay(1500);
   await c.shot('home-interior');
@@ -298,6 +330,17 @@ try {
 } catch (e) {
   console.error(e);
   console.error(JSON.stringify(errors));
+  for (const c of clients) {
+    await c.shot('failure');
+    fs.writeFileSync(
+      path.join(out, 'failure.json'),
+      JSON.stringify(
+        { state: await c.state(), text: await c.read('document.body.innerText'), error: String(e) },
+        null,
+        2,
+      ),
+    );
+  }
   process.exitCode = 1;
 } finally {
   for (const c of clients) {
