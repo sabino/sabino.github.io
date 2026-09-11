@@ -1,5 +1,5 @@
 import { random, deriveSeed } from '../procedural/random.ts';
-import type { Appearance, PropKind, Terrain, Tile } from './types.ts';
+import type { Appearance, BuildingKind, PropKind, Terrain, Tile } from './types.ts';
 import { drawWeapon, weaponGenome } from './equipment.ts';
 import { drawPlant } from './botany.ts';
 import type { PlantKind } from './botany.ts';
@@ -9,6 +9,7 @@ export interface Sprite {
   x: number;
   y: number;
 }
+export type CivilBuildingKind = Exclude<BuildingKind, 'church'>;
 type Ctx = CanvasRenderingContext2D;
 const snow = ['#d9e3ee', '#c9d6e6', '#b7c8df', '#edf0f2', '#91aac6'];
 const stone = ['#82909d', '#8796a2', '#8d9aa7', '#7e8d9b', '#919eaa'];
@@ -76,6 +77,496 @@ function blob(
     pts.push([x + Math.cos(a) * w * k, y + Math.sin(a) * h * k]);
   }
   poly(ctx, pts, fill);
+}
+
+/** Footprint-sized civic architecture, baked once by the renderer's bounded roof cache.
+ * All archetypes share a south entrance at the real center door. Roofs and bays are
+ * assembled from seeded parts; their overhangs never imply additional walkable rooms.
+ */
+export function makeCivilBuilding(
+  kind: CivilBuildingKind,
+  seed: number,
+  columns: number,
+  rows: number,
+): Sprite {
+  const rng = random(deriveSeed(seed, kind, 'civil-architecture'));
+  const w = columns * 32,
+    h = rows * 32,
+    x = 32,
+    y = 128,
+    front = y + h,
+    middle = x + w / 2,
+    facade = { house: 57, inn: 78, workshop: 53, greenhouse: 43, storehouse: 46, hall: 69 }[kind],
+    eave = front - facade,
+    back = y - 30,
+    rise = kind === 'storehouse' ? 22 : kind === 'greenhouse' ? 29 : 32 + Math.floor(rng() * 13),
+    ridge = middle + (kind === 'workshop' ? -w * 0.16 : (rng() - 0.5) * w * 0.15),
+    wood = ['#526268', '#626468', '#575c68', '#655e5a'][Math.floor(rng() * 4)],
+    trim = ['#718d93', '#898573', '#927c67', '#657e8b'][Math.floor(rng() * 4)],
+    warm = kind === 'inn' || kind === 'house' || kind === 'hall';
+
+  return image(
+    w + 64,
+    h + 151,
+    (ctx) => {
+      const clip = (points: number[][], paint: () => void) => {
+        ctx.save();
+        ctx.beginPath();
+        points.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+        ctx.closePath();
+        ctx.clip();
+        paint();
+        ctx.restore();
+      };
+      const masonry = (left: number, top: number, width: number, height: number, brick = false) => {
+        rect(ctx, left, top, width, height, '#2a3e50');
+        const blockW = brick ? 13 : 19,
+          blockH = brick ? 6 : 9;
+        for (let row = 0; row < height / blockH; row++)
+          for (let col = -1; col < width / blockW; col++) {
+            const px = left + col * blockW + ((row % 2) * blockW) / 2,
+              py = top + row * blockH,
+              start = Math.max(left, px + 1),
+              end = Math.min(left + width, px + blockW - 1);
+            if (end <= start) continue;
+            const tone = brick
+              ? ['#635b5b', '#6c6260', '#5a555b', '#736762'][Math.floor(rng() * 4)]
+              : ['#4c6374', '#536c7c', '#496071', '#5b7180'][Math.floor(rng() * 4)];
+            rect(ctx, start, py + 1, end - start, Math.min(blockH - 1, top + height - py), tone);
+            if (rng() > 0.35)
+              rect(ctx, start + 1, py + 1, Math.max(1, end - start - 3), 1, color(tone, 10));
+          }
+      };
+      const boards = (
+        left: number,
+        top: number,
+        width: number,
+        height: number,
+        vertical = false,
+      ) => {
+        rect(ctx, left, top, width, height, color(wood, -20));
+        for (let k = 0; k < (vertical ? width : height); k += 7) {
+          const tone = color(wood, Math.floor(rng() * 14) - 7);
+          rect(
+            ctx,
+            left + (vertical ? k : 0),
+            top + (vertical ? 0 : k),
+            vertical ? Math.min(6, width - k) : width,
+            vertical ? height : Math.min(6, height - k),
+            tone,
+          );
+          if (vertical)
+            line(ctx, left + k + 1, top + 4, left + k + 1, top + height - 5, color(tone, 9));
+        }
+      };
+      const pane = (
+        cx: number,
+        foot: number,
+        width: number,
+        height: number,
+        amber = warm,
+        shutters = false,
+      ) => {
+        rect(ctx, cx - width / 2 - 4, foot - height - 4, width + 8, height + 8, '#283d4e');
+        rect(ctx, cx - width / 2 - 2, foot - height - 2, width + 4, height + 4, trim);
+        rect(ctx, cx - width / 2, foot - height, width, height, amber ? '#74644d' : '#416b79');
+        for (let py = 0; py < height - 2; py += 10)
+          for (let px = 0; px < width - 2; px += 9) {
+            rect(
+              ctx,
+              cx - width / 2 + px + 1,
+              foot - height + py + 1,
+              Math.min(7, width - px - 2),
+              Math.min(8, height - py - 2),
+              amber
+                ? ['#c6a573', '#d6b786', '#9e885f'][Math.floor(rng() * 3)]
+                : ['#709596', '#557f89', '#91b5b5'][Math.floor(rng() * 3)],
+            );
+          }
+        rect(ctx, cx - 1, foot - height, 2, height, '#43575d');
+        rect(ctx, cx - width / 2, foot - height / 2, width, 2, '#43575d');
+        rect(ctx, cx - width / 2 - 5, foot + 2, width + 10, 3, '#9fadb4');
+        rect(ctx, cx - width / 2 - 4, foot + 1, width + 7, 2, '#d1dfe7');
+        if (shutters)
+          for (const side of [-1, 1]) {
+            const sx = cx + side * (width / 2 + 8) - 4;
+            boards(sx, foot - height, 8, height, true);
+            rect(ctx, sx, foot - 7, 8, 2, '#89928b');
+            rect(ctx, sx, foot - height + 5, 8, 2, '#89928b');
+          }
+      };
+      const chimney = (cx: number, foot: number, height: number, industrial = false) => {
+        const cw = industrial ? 23 : 16;
+        poly(
+          ctx,
+          [
+            [cx + cw - 3, foot],
+            [cx + cw + 6, foot - 3],
+            [cx + cw + 6, foot - height],
+            [cx + cw - 3, foot - height + 3],
+          ],
+          '#324655',
+        );
+        masonry(cx, foot - height, cw, height, industrial);
+        rect(ctx, cx - 3, foot - height - 2, cw + 6, 5, '#71838e');
+        rect(ctx, cx - 2, foot - height - 3, cw + 4, 2, '#d1e0e9');
+        rect(ctx, cx + 3, foot - height - 3, cw - 6, 2, '#263b4a');
+        if (industrial) {
+          rect(ctx, cx - 1, foot - height + 12, cw + 2, 3, '#354953');
+          rect(ctx, cx - 1, foot - height + 29, cw + 2, 3, '#354953');
+        }
+      };
+      const slate = (points: number[][], tint: string, metal = false) => {
+        poly(ctx, points, tint);
+        clip(points, () => {
+          for (let py = back - rise - 12, row = 0; py < eave + 8; py += metal ? 20 : 7, row++)
+            for (let px = x - 14; px < x + w + 16; px += metal ? 31 : 11) {
+              const xx = px + (row % 2) * (metal ? 0 : 5),
+                tone = color(tint, Math.floor(rng() * 10) - 5);
+              rect(ctx, xx, py, metal ? 29 : 10, metal ? 18 : 6, tone);
+              rect(ctx, xx + 1, py, metal ? 27 : 8, 1, color(tone, 12));
+              if (metal) rect(ctx, xx, py, 1, 19, color(tone, -15));
+            }
+          for (let i = 0; i < w / 27; i++) {
+            const sx = x + rng() * w,
+              sy = back - rise + rng() * (eave - back + rise),
+              span = 23 + rng() * 36;
+            poly(
+              ctx,
+              [
+                [sx - 4, sy + 6],
+                [sx + 7, sy],
+                [sx + span * 0.5, sy - 2],
+                [sx + span, sy + 3],
+                [sx + span - 4, sy + 10],
+                [sx + 10, sy + 13],
+              ],
+              '#9eb6ce',
+            );
+            poly(
+              ctx,
+              [
+                [sx - 2, sy + 5],
+                [sx + 8, sy],
+                [sx + span * 0.5, sy - 2],
+                [sx + span, sy + 3],
+                [sx + span - 7, sy + 7],
+                [sx + 10, sy + 8],
+              ],
+              '#d0e0ec',
+            );
+          }
+        });
+      };
+      const lamp = (cx: number, foot: number) => {
+        rect(ctx, cx - 2, foot - 22, 3, 24, '#273d4c');
+        line(ctx, cx - 1, foot - 21, cx + 9, foot - 21, '#84938f', 2);
+        rect(ctx, cx + 4, foot - 19, 9, 13, '#283e4c');
+        rect(ctx, cx + 6, foot - 17, 5, 8, '#d0ad70');
+        rect(ctx, cx + 7, foot - 16, 2, 6, '#f0ce8c');
+        rect(ctx, cx + 3, foot - 21, 11, 3, '#9eadae');
+      };
+
+      // A dark foot/recess follows the real rectangular wall, with a snowy plinth.
+      rect(ctx, x + 3, front - 4, w + 8, 11, '#324a6182');
+      masonry(x, y - 30, w, h + 30, kind === 'workshop');
+      if (kind === 'inn' || kind === 'house' || kind === 'storehouse') {
+        boards(x + 3, eave, w - 6, facade - 12, kind === 'storehouse');
+        for (let bx = x + 4; bx < x + w; bx += kind === 'inn' ? 42 : 48) {
+          rect(ctx, bx, eave, 5, facade - 10, '#2c424b');
+          rect(ctx, bx + 1, eave, 2, facade - 12, trim);
+          if (kind === 'inn' || kind === 'storehouse') {
+            line(ctx, bx + 4, front - 16, Math.min(bx + 40, x + w - 4), eave + 4, '#344951', 3);
+          }
+        }
+        rect(ctx, x, front - 14, w, 4, '#344a57');
+      }
+
+      if (kind === 'greenhouse') {
+        // Visible benches and growth beneath individual translucent roof panes.
+        rect(ctx, x + 5, back, w - 10, front - back - 13, '#35545a');
+        for (let bx = x + 18; bx < x + w - 12; bx += 38)
+          for (let by = back + 28; by < front - 24; by += 48) {
+            rect(ctx, bx - 9, by - 7, 22, 16, '#776f5d');
+            rect(ctx, bx - 8, by - 6, 20, 10, '#253e42');
+            drawPlant(
+              ctx,
+              deriveSeed(seed, bx, by),
+              rng() > 0.5 ? 'cequin' : 'heartleaf',
+              bx + 3,
+              by + 3,
+              0.45,
+            );
+          }
+        const glassShape = [
+          [x - 5, back + 5],
+          [ridge, back - rise],
+          [x + w + 5, back + 5],
+          [x + w + 5, eave],
+          [ridge, eave - rise],
+          [x - 5, eave],
+        ];
+        poly(ctx, glassShape, '#639a9c68');
+        clip(glassShape, () => {
+          for (let px = x - 4; px <= x + w + 5; px += 22) {
+            line(ctx, px, back - rise, px, eave + 5, '#314d59', 3);
+            line(ctx, px + 1, back - rise, px + 1, eave + 4, '#a5bfc4');
+            for (let py = back - rise; py < eave; py += 34) {
+              line(ctx, px + 5, py + 4, px + 16, py + 12, '#d5ece32e', 3);
+              rect(ctx, px + 3, py + 1, 17, 2, '#a5c6c152');
+            }
+          }
+          for (let py = back; py < eave + 10; py += 34) {
+            line(ctx, x - 6, py, ridge, py - rise, '#4d777f', 3);
+            line(ctx, ridge, py - rise, x + w + 6, py, '#3b6470', 3);
+          }
+        });
+        for (const side of [-1, 1]) {
+          const edge = side < 0 ? x - 5 : x + w + 5;
+          line(ctx, edge, back + 5, edge, eave, '#b9d0d6', 4);
+          line(ctx, edge, eave, ridge, eave - rise, '#bed3d6', 4);
+        }
+        line(ctx, ridge, back - rise, ridge, eave - rise, '#d4e2e5', 4);
+        for (let cx = x + 21; cx < x + w - 10; cx += 30)
+          if (Math.abs(cx - middle) > 27) pane(cx, front - 12, 21, 30, false);
+        // Copper gutter and its drain are visually attached to the true side wall.
+        rect(ctx, x + w - 4, eave + 2, 4, facade - 2, '#9b8e72');
+        rect(ctx, x + w - 6, front - 9, 7, 3, '#c0baa1');
+      } else {
+        // Gable and hip layouts vary structurally; none reuse the cathedral facade.
+        const leftEdge = x - 7,
+          rightEdge = x + w + 7;
+        if (kind === 'storehouse') {
+          slate(
+            [
+              [leftEdge, back + 6],
+              [x + 24, back - rise],
+              [x + w - 24, back - rise],
+              [rightEdge, back + 6],
+              [rightEdge, eave],
+              [x + w - 24, eave - rise],
+              [x + 24, eave - rise],
+              [leftEdge, eave],
+            ],
+            '#40586b',
+          );
+          slate(
+            [
+              [leftEdge, eave],
+              [x + 24, eave - rise],
+              [x + w - 24, eave - rise],
+              [rightEdge, eave],
+            ],
+            '#354c5e',
+          );
+          line(ctx, x + 24, back - rise, x + w - 24, back - rise, '#d3e0e9', 4);
+          for (const xx of [x + 25, x + w - 25])
+            line(ctx, xx, back - rise, xx, eave - rise, '#8199b0', 2);
+        } else {
+          poly(
+            ctx,
+            [
+              [leftEdge, eave],
+              [ridge, eave - rise],
+              [rightEdge, eave],
+            ],
+            color(wood, 4),
+          );
+          slate(
+            [
+              [leftEdge, back + 6],
+              [ridge, back - rise],
+              [ridge, eave - rise],
+              [leftEdge, eave],
+            ],
+            '#476075',
+            kind === 'workshop',
+          );
+          slate(
+            [
+              [ridge, back - rise],
+              [rightEdge, back + 6],
+              [rightEdge, eave],
+              [ridge, eave - rise],
+            ],
+            '#344f65',
+            kind === 'workshop',
+          );
+          line(ctx, ridge, back - rise, ridge, eave - rise, '#cddde9', 4);
+          line(ctx, leftEdge, eave, ridge, eave - rise, '#bfcfdd', 4);
+          line(ctx, ridge, eave - rise, rightEdge, eave, '#9db4c9', 4);
+        }
+        rect(ctx, x - 8, eave, w + 16, 5, '#263e53');
+        rect(ctx, x - 7, eave - 2, w + 14, 2, '#bfcedc');
+
+        if (kind === 'inn') {
+          for (const side of [-1, 1]) {
+            const cx = middle + side * w * 0.3,
+              foot = eave - 15;
+            boards(cx - 20, foot - 26, 40, 29);
+            poly(
+              ctx,
+              [
+                [cx - 27, foot - 24],
+                [cx, foot - 48],
+                [cx + 27, foot - 24],
+              ],
+              '#354c60',
+            );
+            line(ctx, cx - 26, foot - 24, cx, foot - 47, '#c7d7e2', 3);
+            line(ctx, cx, foot - 47, cx + 26, foot - 24, '#aebfd0', 3);
+            pane(cx, foot - 3, 21, 22, true);
+            chimney(x + (side < 0 ? w * 0.17 : w * 0.8), back + 29, 44);
+          }
+          for (let cx = x + 24; cx < x + w - 12; cx += 42)
+            if (Math.abs(cx - middle) > 33) pane(cx, front - 20, 23, 35, true, true);
+          // A suspended crescent-cup sign is readable without text or invented NPCs.
+          line(ctx, middle + 31, front - 64, middle + 63, front - 64, '#ae9f78', 3);
+          line(ctx, middle + 39, front - 61, middle + 39, front - 53, '#b6a579', 2);
+          rect(ctx, middle + 32, front - 53, 29, 22, '#293f48');
+          rect(ctx, middle + 33, front - 52, 27, 20, '#66776d');
+          rect(ctx, middle + 42, front - 47, 11, 9, '#d0b984');
+          rect(ctx, middle + 51, front - 45, 5, 5, '#d0b984');
+          rect(ctx, middle + 52, front - 44, 2, 3, '#66776d');
+          rect(ctx, middle + 39, front - 36, 17, 2, '#c6b585');
+        } else if (kind === 'workshop') {
+          // Two raised sawtooth skylights and a brick stack distinguish the workshop.
+          for (let k = 0; k < 2; k++) {
+            const sx = x + w * (0.48 + k * 0.24),
+              sy = back + (eave - back) * 0.5;
+            poly(
+              ctx,
+              [
+                [sx - 13, sy + 12],
+                [sx - 13, sy - 12],
+                [sx + 18, sy + 7],
+                [sx + 18, sy + 16],
+              ],
+              '#293f50',
+            );
+            rect(ctx, sx - 11, sy - 8, 7, 18, '#7c9fa4');
+            line(ctx, sx - 13, sy - 13, sx + 19, sy + 7, '#c8d9e2', 3);
+          }
+          chimney(x + w * 0.18, back + 36, 57, true);
+          pane(x + w * 0.8, front - 17, Math.min(39, w * 0.22), 24, false);
+          boards(middle - 35, front - 43, 70, 43, true);
+          for (const dx of [-33, 0, 33]) rect(ctx, middle + dx, front - 43, 3, 43, '#273d47');
+          line(ctx, middle - 31, front - 6, middle - 3, front - 38, '#a0967b', 3);
+          line(ctx, middle + 4, front - 38, middle + 31, front - 6, '#a0967b', 3);
+          rect(ctx, middle - 42, front - 49, 85, 5, '#87989d');
+          // Mounted tool emblem, a small hammer above the real loading entrance.
+          line(ctx, middle + 4, front - 64, middle - 7, front - 52, '#b5a477', 3);
+          poly(
+            ctx,
+            [
+              [middle - 3, front - 67],
+              [middle + 1, front - 71],
+              [middle + 13, front - 60],
+              [middle + 8, front - 55],
+            ],
+            '#a8b9bb',
+          );
+        } else if (kind === 'storehouse') {
+          for (const side of [-1, 1]) {
+            const cx = middle + side * w * 0.32;
+            rect(ctx, cx - 15, front - 38, 30, 20, '#273e49');
+            for (let slat = 0; slat < 5; slat++)
+              rect(ctx, cx - 13, front - 36 + slat * 3, 26, 1, '#819497');
+          }
+          boards(middle - 34, front - 40, 68, 40, true);
+          for (const side of [-1, 1]) {
+            line(ctx, middle + side * 30, front - 4, middle + side * 4, front - 35, '#a79f80', 3);
+            rect(ctx, middle + side * 7, front - 20, 3, 7, '#273d48');
+          }
+          rect(ctx, middle - 40, front - 45, 80, 5, '#a5b6bd');
+          rect(ctx, middle - 36, front - 47, 72, 2, '#d5e0e7');
+          // Small louvered loft, with hoist directly over the existing doorway.
+          boards(middle - 17, eave - 27, 34, 24, true);
+          rect(ctx, middle - 20, eave - 29, 40, 3, '#a5b6bd');
+          line(ctx, middle, eave - 25, middle, eave - 9, '#b3a383', 2);
+        } else if (kind === 'hall') {
+          // A compact civic pediment and clock medallion, without chapel wings or spire.
+          const foot = eave + 4;
+          poly(
+            ctx,
+            [
+              [middle - 42, foot],
+              [middle, foot - 34],
+              [middle + 42, foot],
+            ],
+            '#566e7c',
+          );
+          line(ctx, middle - 43, foot, middle, foot - 35, '#d0dce4', 4);
+          line(ctx, middle, foot - 35, middle + 43, foot, '#b9cbd7', 4);
+          for (let py = -8; py <= 8; py++)
+            for (let px = -8; px <= 8; px++)
+              if (px * px + py * py <= 64)
+                rect(
+                  ctx,
+                  middle + px,
+                  foot - 13 + py,
+                  1,
+                  1,
+                  px * px + py * py > 38 ? '#b4aa88' : '#2d4956',
+                );
+          line(ctx, middle, foot - 13, middle, foot - 19, '#d5c395');
+          line(ctx, middle, foot - 13, middle + 5, foot - 11, '#d5c395');
+          for (const side of [-1, 1]) {
+            pane(middle + side * w * 0.3, front - 19, 26, 37, true);
+            const bx = middle + side * 37;
+            rect(ctx, bx - 3, front - 57, 7, 56, '#7d919d');
+            rect(ctx, bx - 5, front - 58, 11, 3, '#c4d3dc');
+          }
+          chimney(x + w * 0.78, back + 26, 31);
+        } else {
+          // Domestic gable: shuttered windows, asymmetric chimney and shallow porch.
+          for (const side of [-1, 1])
+            pane(middle + side * w * 0.31, front - 18, 22, 28, true, true);
+          chimney(x + w * (0.18 + rng() * 0.6), back + 27, 35 + Math.floor(rng() * 9));
+          const dormerX = middle + (rng() > 0.5 ? -1 : 1) * w * 0.15;
+          boards(dormerX - 16, eave - 24, 32, 23);
+          poly(
+            ctx,
+            [
+              [dormerX - 21, eave - 23],
+              [dormerX, eave - 41],
+              [dormerX + 21, eave - 23],
+            ],
+            '#3c5367',
+          );
+          line(ctx, dormerX - 21, eave - 23, dormerX, eave - 42, '#cfdee7', 3);
+          line(ctx, dormerX, eave - 42, dormerX + 21, eave - 23, '#afc4d5', 3);
+          pane(dormerX, eave - 3, 17, 17, true);
+        }
+      }
+
+      // Carved surround leaves the actual door prop in control of open/closed state.
+      const broad = kind === 'workshop' || kind === 'storehouse';
+      if (!broad) {
+        const dh = kind === 'inn' || kind === 'hall' ? 48 : 43;
+        rect(ctx, middle - 21, front - dh, 42, dh, '#273d4b');
+        rect(ctx, middle - 23, front - dh - 3, 46, 4, trim);
+        rect(ctx, middle - 22, front - dh, 4, dh, trim);
+        rect(ctx, middle + 18, front - dh, 4, dh, color(trim, -15));
+        line(ctx, middle - 25, front - dh - 4, middle, front - dh - 13, '#c8d8e2', 3);
+        line(ctx, middle, front - dh - 13, middle + 25, front - dh - 4, '#adbfce', 3);
+      }
+      for (const side of [-1, 1]) {
+        rect(ctx, side < 0 ? x : x + w - 4, eave + 4, 4, facade - 4, '#7f939f');
+        rect(ctx, side < 0 ? x + 1 : x + w - 3, eave + 4, 1, facade - 7, '#b0c0c9');
+      }
+      if (kind !== 'greenhouse' && kind !== 'storehouse') lamp(middle - 36, front - 24);
+      rect(ctx, x - 2, front - 3, w + 4, 3, '#9eb2c5');
+      rect(ctx, x - 2, front - 4, w + 2, 1, '#cedde7');
+      for (let i = 0; i < columns * 2; i++) {
+        const sx = x + rng() * w;
+        rect(ctx, sx, eave - 3, 4 + rng() * 12, 2 + rng() * 3, '#d0dfe9');
+        if (rng() > 0.6) rect(ctx, sx + 3, eave, 1, 3 + rng() * 5, '#b9cede');
+      }
+    },
+    x,
+    y,
+  );
 }
 
 /** Bounded, reusable pixel modules. No full landscape or complete character image is loaded. */
@@ -306,13 +797,19 @@ export class StichosArt {
     );
   }
 
-  prop(kind: PropKind, seed: number, opened = false, tint = '#687e80'): Sprite {
+  prop(
+    kind: PropKind,
+    seed: number,
+    opened = false,
+    tint = '#687e80',
+    doorStyle?: CivilBuildingKind | 'church',
+  ): Sprite {
     if (kind === 'cequin' || kind === 'heartleaf' || kind === 'emberroot' || kind === 'mushroom')
       return this.get(`plant:${kind}:${seed >>> 0}`, () => this.herb(kind, seed));
     // Organic silhouettes retain their full coordinate seed; the bounded sprite
     // cache controls memory without collapsing the forest into 24 repeated trees.
     const variant = kind === 'pine' || kind === 'rock' ? seed >>> 0 : seed % 12;
-    return this.get(`prop:${kind}:${variant}:${opened}:${tint}`, () => {
+    return this.get(`prop:${kind}:${variant}:${opened}:${tint}:${doorStyle ?? 'legacy'}`, () => {
       const rng = random(deriveSeed(variant, kind));
       if (kind === 'pine') return this.pine(rng);
       if (kind === 'rock') return this.rock(rng);
@@ -350,6 +847,60 @@ export class StichosArt {
             );
             rect(ctx, cx - 6, foot - 58, 12, 2, '#d9e0e3');
             rect(ctx, cx, foot - 66, 1, 3, '#9aa79e');
+          } else if (kind === 'door' && doorStyle && doorStyle !== 'church') {
+            const timber = doorStyle === 'workshop' || doorStyle === 'storehouse',
+              glass = doorStyle === 'greenhouse',
+              base = glass ? '#4f7477' : timber ? '#5b605c' : '#415159';
+            if (opened) {
+              poly(
+                ctx,
+                [
+                  [18, 87],
+                  [18, 46],
+                  [24, 50],
+                  [24, 83],
+                ],
+                base,
+              );
+              line(ctx, 20, 49, 20, 83, '#8b9d96');
+              rect(ctx, 22, 70, 2, 3, '#d2ba80');
+            } else {
+              rect(ctx, 18, 44, 29, 44, '#243a46');
+              for (let px = 20; px < 45; px += 5) {
+                rect(ctx, px, 46, 4, 39, color(base, Math.floor(rng() * 14) - 7));
+                line(ctx, px, 48, px, 84, color(base, 16));
+              }
+              if (glass || doorStyle === 'inn') {
+                rect(ctx, 22, 49, 21, glass ? 26 : 15, glass ? '#8eb8b5' : '#b3996a');
+                rect(ctx, 23, 51, 7, glass ? 10 : 11, glass ? '#67969b' : '#d1b880');
+                rect(ctx, 33, 51, 7, glass ? 10 : 11, glass ? '#afd0c7' : '#c9ac73');
+                rect(ctx, 31, 48, 2, glass ? 29 : 17, '#465e61');
+                if (glass) rect(ctx, 21, 62, 22, 2, '#465e61');
+              }
+              if (timber) {
+                line(ctx, 21, 81, 42, 49, '#97a196', 3);
+                rect(ctx, 20, 51, 25, 3, '#344750');
+                rect(ctx, 20, 77, 25, 3, '#344750');
+              } else {
+                rect(ctx, 21, 80, 24, 2, '#84938b');
+                if (doorStyle === 'hall') {
+                  poly(
+                    ctx,
+                    [
+                      [32, 51],
+                      [38, 58],
+                      [32, 66],
+                      [26, 58],
+                    ],
+                    '#b6ac86',
+                  );
+                  rect(ctx, 31, 54, 2, 9, '#526e70');
+                }
+              }
+              rect(ctx, 40, 68, 3, 5, '#c6b080');
+              rect(ctx, 41, 69, 1, 3, '#344b52');
+              rect(ctx, 18, 86, 29, 2, '#aabbbf');
+            }
           } else if (kind === 'door') {
             if (!opened) {
               poly(

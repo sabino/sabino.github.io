@@ -169,6 +169,30 @@ type EnemyIntent = {
   color: string;
   warning: Effect;
 };
+export const EXPLORATION_CELL_SIZE = 8;
+export interface ExplorationBounds {
+  minX: number;
+  minY: number;
+  /** Upper bounds are exclusive world-tile coordinates. */
+  maxX: number;
+  maxY: number;
+}
+export interface DiscoveredSite extends Point {
+  id: string;
+  name: string;
+  kind: 'settlement' | 'vault';
+  detail: string;
+  clan?: number;
+  radius: number;
+}
+type ExplorationSave = {
+  version: 1;
+  revision: number;
+  /** Prefix of the existing ordered visited list; no duplicate legacy coordinates are stored. */
+  legacyVisitedCount: number;
+  chunks: [number, number, number][];
+  sites: DiscoveredSite[];
+};
 const CAPACITY = 60;
 const clamp = (v: number, a = 0, b = 100) => Math.max(a, Math.min(b, v));
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -176,6 +200,20 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const itemIds = Object.keys(ITEMS) as ItemId[];
 const isItem = (v: string): v is ItemId => itemIds.includes(v as ItemId);
+const maxExplorationChunk = Math.ceil(Number.MAX_SAFE_INTEGER / CHUNK_SIZE);
+const chunkCoordinates = (key: unknown): [number, number] | null => {
+  if (typeof key !== 'string' || !/^-?\d+,-?\d+$/.test(key)) return null;
+  const [x, y] = key.split(',').map(Number);
+  if (
+    !Number.isSafeInteger(x) ||
+    !Number.isSafeInteger(y) ||
+    Math.abs(x) > maxExplorationChunk ||
+    Math.abs(y) > maxExplorationChunk ||
+    `${x},${y}` !== key
+  )
+    return null;
+  return [x, y];
+};
 
 /** Persistent human-scale simulation; chunk eviction never discards a player's actions. */
 export class Stichos {
@@ -194,6 +232,13 @@ export class Stichos {
   time = 0;
   distanceTraveled = 0;
   readonly visited = new Set<string>();
+  private fogChunks = new Map<string, number>();
+  private legacyFogChunks = new Set<string>();
+  private knownSites = new Map<string, Readonly<DiscoveredSite>>();
+  private knownSiteView: ReadonlyArray<Readonly<DiscoveredSite>> = Object.freeze([]);
+  private fogBounds: Readonly<ExplorationBounds> | null = null;
+  private knowledgeRevision = 0;
+  private lastExplorationPoint: Point | null = null;
   reputation = [0, 0, 0, 0, 0, 0];
   storyStage = 0;
   phase: 'playing' | 'lost' = 'playing';
@@ -214,9 +259,9 @@ export class Stichos {
   private transferDialogTarget: string | null = null;
   private seed: number;
 
-  constructor(seed: number, generation: WorldGeneration = 2) {
+  constructor(seed: number, generation: WorldGeneration = 3) {
     if (!Number.isSafeInteger(seed)) throw new Error('A world seed must be a safe integer.');
-    if (generation !== 1 && generation !== 2) throw new Error('Unknown world generation.');
+    if (![1, 2, 3].includes(generation)) throw new Error('Unknown world generation.');
     this.seed = seed >>> 0;
     this.world = new InfiniteWorld(this.seed, generation);
     this.restAnchor = { ...this.world.spawn };
@@ -266,6 +311,94 @@ export class Stichos {
 
   get transferReady() {
     return this.storyStage >= 4;
+  }
+  get explorationRevision() {
+    return this.knowledgeRevision;
+  }
+  get exploredBounds() {
+    return this.fogBounds;
+  }
+  get discoveredSites() {
+    return this.knownSiteView;
+  }
+
+  explored(x: number, y: number) {
+    if (
+      !finite(x) ||
+      !finite(y) ||
+      Math.abs(x) > Number.MAX_SAFE_INTEGER ||
+      Math.abs(y) > Number.MAX_SAFE_INTEGER
+    )
+      return false;
+    const cellX = Math.floor(x / EXPLORATION_CELL_SIZE),
+      cellY = Math.floor(y / EXPLORATION_CELL_SIZE);
+    const cx = Math.floor(cellX / 2),
+      cy = Math.floor(cellY / 2);
+    const key = `${cx},${cy}`;
+    if (this.legacyFogChunks.has(key)) return true;
+    const bit = 1 << ((cellY - cy * 2) * 2 + cellX - cx * 2);
+    return !!((this.fogChunks.get(key) ?? 0) & bit);
+  }
+
+  /** Read-only 8×8 world-cell origins, clipped without expanding old travel histories in memory. */
+  *exploredCells(
+    bounds?: ExplorationBounds,
+  ): IterableIterator<{ x: number; y: number; size: number }> {
+    if (
+      bounds &&
+      (!Object.values(bounds).every(finite) ||
+        bounds.maxX <= bounds.minX ||
+        bounds.maxY <= bounds.minY)
+    )
+      return;
+    const emit = function* (key: string, mask: number) {
+      const [cx, cy] = chunkCoordinates(key)!;
+      const chunkX = cx * CHUNK_SIZE,
+        chunkY = cy * CHUNK_SIZE;
+      if (
+        bounds &&
+        (chunkX >= bounds.maxX ||
+          chunkY >= bounds.maxY ||
+          chunkX + CHUNK_SIZE <= bounds.minX ||
+          chunkY + CHUNK_SIZE <= bounds.minY)
+      )
+        return;
+      for (let bit = 0; bit < 4; bit++) {
+        if (!(mask & (1 << bit))) continue;
+        const x = chunkX + (bit % 2) * EXPLORATION_CELL_SIZE;
+        const y = chunkY + Math.floor(bit / 2) * EXPLORATION_CELL_SIZE;
+        if (
+          !bounds ||
+          (x < bounds.maxX &&
+            y < bounds.maxY &&
+            x + EXPLORATION_CELL_SIZE > bounds.minX &&
+            y + EXPLORATION_CELL_SIZE > bounds.minY)
+        )
+          yield { x, y, size: EXPLORATION_CELL_SIZE };
+      }
+    };
+    if (bounds) {
+      const minX = Math.max(-maxExplorationChunk, Math.floor(bounds.minX / CHUNK_SIZE));
+      const minY = Math.max(-maxExplorationChunk, Math.floor(bounds.minY / CHUNK_SIZE));
+      const maxX = Math.min(maxExplorationChunk, Math.ceil(bounds.maxX / CHUNK_SIZE) - 1);
+      const maxY = Math.min(maxExplorationChunk, Math.ceil(bounds.maxY / CHUNK_SIZE) - 1);
+      if (minX > maxX || minY > maxY) return;
+      const area = (maxX - minX + 1) * (maxY - minY + 1);
+      // A small minimap samples visible chunk addresses instead of scanning a life's history.
+      if (area < 50000 && area < this.legacyFogChunks.size + this.fogChunks.size) {
+        for (let y = minY; y <= maxY; y++) {
+          for (let x = minX; x <= maxX; x++) {
+            const key = `${x},${y}`;
+            const mask = this.legacyFogChunks.has(key) ? 15 : (this.fogChunks.get(key) ?? 0);
+            if (mask) yield* emit(key, mask);
+          }
+        }
+        return;
+      }
+    }
+    for (const key of this.legacyFogChunks) yield* emit(key, 15);
+    for (const [key, mask] of this.fogChunks)
+      if (!this.legacyFogChunks.has(key)) yield* emit(key, mask);
   }
   get transferCandidate(): Npc | null {
     return this.transferCandidates[0] ?? null;
@@ -1334,7 +1467,11 @@ export class Stichos {
       return;
     }
     const number = (existing?.number ?? 0) + 1;
-    const nearby = this.world.settlementsAround(source.x, source.y, 112);
+    const nearby = this.world.settlementsAround(
+      source.x,
+      source.y,
+      this.world.generation === 3 ? 480 : 112,
+    );
     const home = [...nearby].sort((a, b) => distance(a, source) - distance(b, source))[0];
     if (!home || distance(home, source) > 32) return;
     const sourceClan = source.clan ?? home.clan;
@@ -1925,6 +2062,108 @@ export class Stichos {
     this.visited.add(
       `${Math.floor(this.player.x / CHUNK_SIZE)},${Math.floor(this.player.y / CHUNK_SIZE)}`,
     );
+    this.revealExploration();
+  }
+
+  private includeExploredBounds(x: number, y: number, size: number) {
+    const previous = this.fogBounds;
+    this.fogBounds = Object.freeze({
+      minX: Math.min(previous?.minX ?? x, x),
+      minY: Math.min(previous?.minY ?? y, y),
+      maxX: Math.max(previous?.maxX ?? x + size, x + size),
+      maxY: Math.max(previous?.maxY ?? y + size, y + size),
+    });
+  }
+
+  private revealExploration() {
+    const position = this.player;
+    if (this.lastExplorationPoint?.x === position.x && this.lastExplorationPoint.y === position.y)
+      return;
+    this.lastExplorationPoint = { x: position.x, y: position.y };
+    let changed = false;
+    const radius = 12,
+      size = EXPLORATION_CELL_SIZE;
+    for (
+      let y = Math.floor((position.y - radius) / size);
+      y <= Math.floor((position.y + radius) / size);
+      y++
+    ) {
+      for (
+        let x = Math.floor((position.x - radius) / size);
+        x <= Math.floor((position.x + radius) / size);
+        x++
+      ) {
+        // The cell containing the body always reveals; other cell centers lie within sight.
+        if (
+          Math.hypot(x * size + size / 2 - position.x, y * size + size / 2 - position.y) > radius &&
+          !(x === Math.floor(position.x / size) && y === Math.floor(position.y / size))
+        )
+          continue;
+        const cx = Math.floor(x / 2),
+          cy = Math.floor(y / 2),
+          key = `${cx},${cy}`;
+        if (
+          Math.abs(cx) > maxExplorationChunk ||
+          Math.abs(cy) > maxExplorationChunk ||
+          this.legacyFogChunks.has(key)
+        )
+          continue;
+        const bit = 1 << ((y - cy * 2) * 2 + x - cx * 2);
+        const before = this.fogChunks.get(key) ?? 0;
+        if (before & bit) continue;
+        this.fogChunks.set(key, before | bit);
+        this.includeExploredBounds(x * size, y * size, size);
+        changed = true;
+      }
+    }
+    const nearFootprint = (site: Point & { radius: number }) =>
+      Math.hypot(
+        Math.max(0, Math.abs(position.x - site.x) - site.radius),
+        Math.max(0, Math.abs(position.y - site.y) - site.radius),
+      ) <= radius;
+    let sitesChanged = false;
+    const rememberSite = (site: DiscoveredSite) => {
+      if (this.knownSites.has(site.id)) return;
+      this.knownSites.set(site.id, Object.freeze(site));
+      changed = sitesChanged = true;
+    };
+    for (const town of this.world.settlementsAround(position.x, position.y, 128)) {
+      if (!nearFootprint(town)) continue;
+      rememberSite({
+        id: town.id,
+        name: town.name,
+        x: town.x,
+        y: town.y,
+        kind: 'settlement',
+        detail: (town as Settlement & { rank?: string }).rank ?? town.kind,
+        clan: town.clan,
+        radius: town.radius,
+      });
+    }
+    for (const vault of this.world.vaultsAround(position.x, position.y, 40)) {
+      if (!nearFootprint(vault)) continue;
+      rememberSite({
+        id: vault.id,
+        name: 'Botanical vault',
+        x: vault.x,
+        y: vault.y,
+        kind: 'vault',
+        detail: 'Abandoned seed archive',
+        radius: vault.radius,
+      });
+    }
+    if (sitesChanged) this.knownSiteView = Object.freeze([...this.knownSites.values()]);
+    if (changed) this.knowledgeRevision++;
+  }
+
+  private explorationSave(): ExplorationSave {
+    return {
+      version: 1,
+      revision: this.knowledgeRevision,
+      legacyVisitedCount: this.legacyFogChunks.size,
+      chunks: [...this.fogChunks].map(([key, mask]) => [...chunkCoordinates(key)!, mask]),
+      sites: [...this.knownSites.values()],
+    };
   }
   private effect(
     kind: Effect['kind'],
@@ -1972,6 +2211,7 @@ export class Stichos {
       time: this.time,
       distanceTraveled: this.distanceTraveled,
       visited: [...this.visited],
+      exploration: this.explorationSave(),
       reputation: this.reputation,
       storyStage: this.storyStage,
       phase: this.phase,
@@ -2002,6 +2242,40 @@ export class Stichos {
     game.distanceTraveled = data.distanceTraveled;
     game.visited.clear();
     for (const id of data.visited) game.visited.add(id);
+    game.fogChunks.clear();
+    game.legacyFogChunks.clear();
+    game.knownSites.clear();
+    game.knownSiteView = Object.freeze([]);
+    game.fogBounds = null;
+    game.lastExplorationPoint = null;
+    const exploration = data.exploration;
+    // Old saves recorded entered chunks, not sight cells. Reconstruct only that approximate
+    // old trail lazily; retain its ordered prefix rather than expanding 100k chunks into cells.
+    const legacyCount = exploration?.legacyVisitedCount ?? data.visited.length;
+    for (let i = 0; i < legacyCount; i++) {
+      const key = data.visited[i];
+      game.legacyFogChunks.add(key);
+      const [cx, cy] = chunkCoordinates(key)!;
+      game.includeExploredBounds(cx * CHUNK_SIZE, cy * CHUNK_SIZE, CHUNK_SIZE);
+    }
+    if (exploration) {
+      for (const [cx, cy, mask] of exploration.chunks) {
+        const key = `${cx},${cy}`;
+        if (game.legacyFogChunks.has(key)) continue;
+        game.fogChunks.set(key, mask);
+        for (let bit = 0; bit < 4; bit++)
+          if (mask & (1 << bit))
+            game.includeExploredBounds(
+              cx * CHUNK_SIZE + (bit % 2) * EXPLORATION_CELL_SIZE,
+              cy * CHUNK_SIZE + Math.floor(bit / 2) * EXPLORATION_CELL_SIZE,
+              EXPLORATION_CELL_SIZE,
+            );
+      }
+      for (const site of exploration.sites)
+        game.knownSites.set(site.id, Object.freeze(clone(site)));
+      game.knownSiteView = Object.freeze([...game.knownSites.values()]);
+    }
+    game.knowledgeRevision = exploration?.revision ?? 0;
     game.reputation = [...data.reputation];
     game.storyStage = data.storyStage;
     game.phase = data.phase;
@@ -2054,6 +2328,7 @@ export class Stichos {
     if (!game.clear(game.player) || !game.clear(game.restAnchor))
       throw new Error('Saved position is inside blocked terrain.');
     game.refreshNpcs();
+    game.revealExploration();
     game.events = [];
     game.dialogue = null;
     return game;
@@ -2090,7 +2365,7 @@ function validateSave(value: unknown): SaveData {
     return fail();
   if (value.terrainRevision !== undefined && ![1, 2, 3].includes(value.terrainRevision as number))
     return fail();
-  if (value.worldGeneration !== undefined && ![1, 2].includes(value.worldGeneration as number))
+  if (value.worldGeneration !== undefined && ![1, 2, 3].includes(value.worldGeneration as number))
     return fail();
   const p = value.player;
   if (
@@ -2124,12 +2399,52 @@ function validateSave(value: unknown): SaveData {
     !strings(value.removed) ||
     !strings(value.opened) ||
     !strings(value.visited) ||
+    !(value.visited as string[]).every((key) => chunkCoordinates(key)) ||
     !Array.isArray(value.weapons) ||
     !value.weapons.length ||
     !value.weapons.every((w) => ['staff', 'sword', 'bow'].includes(w)) ||
     !value.weapons.includes((p.appearance as Record<string, unknown>).weapon)
   )
     return fail();
+  if (value.exploration !== undefined) {
+    const fog = value.exploration;
+    if (
+      !object(fog) ||
+      fog.version !== 1 ||
+      !number(fog.revision, 0, Number.MAX_SAFE_INTEGER, true) ||
+      !number(fog.legacyVisitedCount, 0, (value.visited as string[]).length, true) ||
+      !Array.isArray(fog.chunks) ||
+      !fog.chunks.every(
+        (chunk) =>
+          Array.isArray(chunk) &&
+          chunk.length === 3 &&
+          number(chunk[0], -maxExplorationChunk, maxExplorationChunk, true) &&
+          number(chunk[1], -maxExplorationChunk, maxExplorationChunk, true) &&
+          number(chunk[2], 1, 15, true),
+      ) ||
+      !Array.isArray(fog.sites) ||
+      !fog.sites.every(
+        (site) =>
+          object(site) &&
+          point(site) &&
+          text(site.id, 160) &&
+          text(site.name, 200) &&
+          text(site.detail, 200) &&
+          ['settlement', 'vault'].includes(site.kind as string) &&
+          number(site.radius, 1, 1024) &&
+          (site.clan === undefined || number(site.clan, 0, 5, true)),
+      )
+    )
+      return fail();
+    const legacy = new Set((value.visited as string[]).slice(0, fog.legacyVisitedCount as number));
+    const keys = fog.chunks.map(([x, y]) => `${x},${y}`);
+    if (
+      new Set(keys).size !== keys.length ||
+      keys.some((key) => legacy.has(key)) ||
+      new Set(fog.sites.map((site) => site.id)).size !== fog.sites.length
+    )
+      return fail();
+  }
   if (
     !number(value.time, 0, Number.MAX_SAFE_INTEGER) ||
     !number(value.distanceTraveled, 0, Number.MAX_SAFE_INTEGER) ||

@@ -1048,6 +1048,217 @@ svg {
   image-rendering: pixelated;
   border: 1px solid #7b8c7c;
 }
+.is-atlas .s-window {
+  width: min(1160px, 100%);
+  min-width: 0;
+  max-width: none;
+  padding: 24px 28px;
+}
+.s-atlas-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.s-atlas-heading h2 {
+  margin: 8px 0 16px;
+}
+.s-atlas-heading button {
+  flex: 0 0 auto;
+}
+.s-atlas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.s-atlas-toolbar button,
+.s-atlas-find button,
+.s-atlas-mark button {
+  padding: 8px 11px;
+  font-size: 12px;
+}
+.s-atlas-zoom {
+  display: flex;
+  gap: 3px;
+}
+.s-atlas-zoom button {
+  width: 36px;
+  font-size: 18px;
+  line-height: 18px;
+}
+#s-atlas-scale {
+  margin-left: auto;
+  font:
+    11px system-ui,
+    sans-serif;
+  color: #abc2ba;
+}
+.s-atlas-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 205px;
+  gap: 16px;
+}
+.s-atlas-chart {
+  min-width: 0;
+}
+#s-large-map {
+  cursor: grab;
+  touch-action: none;
+  outline-offset: 3px;
+}
+#s-large-map:active {
+  cursor: grabbing;
+}
+.s-atlas-coordinate-line {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #8ea9ad;
+  font:
+    10px system-ui,
+    sans-serif;
+  padding: 8px 1px;
+}
+.s-atlas-places {
+  border-left: 1px solid #76817455;
+  padding-left: 16px;
+  max-height: 550px;
+  overflow-y: auto;
+}
+.s-atlas-places h3 {
+  margin: 2px 0 12px;
+  color: #d9c59c;
+  font:
+    14px Georgia,
+    serif;
+  font-weight: normal;
+}
+.s-atlas-places > button {
+  display: block;
+  width: 100%;
+  padding: 10px 8px;
+  margin-bottom: 7px;
+  text-align: left;
+  background: #172c35;
+  border-color: #7a877144;
+}
+.s-atlas-places > button strong {
+  display: block;
+  color: #dfd0ae;
+  font:
+    13px Georgia,
+    serif;
+  font-weight: normal;
+}
+.s-atlas-places > button small {
+  display: block;
+  font:
+    10px/1.6 system-ui,
+    sans-serif;
+  color: #a0b6b8;
+  margin-top: 5px;
+}
+.s-atlas-mark {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #7b877144;
+}
+.s-atlas-mark button {
+  margin: 0 4px 6px 0;
+}
+.s-window .s-atlas-mark p,
+.s-window .s-atlas-places p {
+  font-size: 11px;
+  line-height: 1.65;
+  color: #aac0be;
+  margin: 6px 0 10px;
+}
+.s-atlas-find {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid #81927e44;
+}
+.s-atlas-find > span {
+  font-size: 12px;
+  color: #b5c8bd;
+  padding-bottom: 10px;
+}
+.s-window .s-atlas-find label {
+  font-size: 10px;
+  margin: 0;
+  width: 140px;
+}
+.s-window .s-atlas-find input {
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 8px;
+  font-size: 12px;
+}
+.s-window p.s-atlas-hint {
+  font:
+    11px/1.65 system-ui,
+    sans-serif;
+  color: #9eb4b3;
+  margin: 14px 0 0;
+}
+@media (max-width: 720px) {
+  .is-atlas .s-window {
+    width: 100%;
+    padding: 16px;
+  }
+  .s-atlas-heading {
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .s-atlas-heading h2 {
+    font-size: 22px;
+  }
+  .s-atlas-heading button {
+    padding: 9px;
+    font-size: 11px;
+    margin-top: 8px;
+  }
+  .s-atlas-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .s-atlas-places {
+    border-left: 0;
+    border-top: 1px solid #76817455;
+    padding: 12px 0 0;
+    max-height: 190px;
+  }
+  .s-atlas-places > button {
+    width: calc(50% - 5px);
+    display: inline-block;
+    vertical-align: top;
+    margin-right: 5px;
+  }
+  .s-atlas-mark {
+    margin-top: 8px;
+    padding-top: 10px;
+  }
+  .s-atlas-find {
+    gap: 8px;
+  }
+  .s-atlas-find > span {
+    width: 100%;
+    padding: 0;
+  }
+  .s-window .s-atlas-find label {
+    width: calc(50% - 4px);
+  }
+  #s-atlas-scale {
+    width: 100%;
+    margin: 0;
+  }
+}
 .s-transfer {
   position: absolute;
   inset: 0;

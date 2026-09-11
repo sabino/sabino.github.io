@@ -1,8 +1,8 @@
 import type { Stichos } from './session.ts';
 import type { Effect, Npc, Point, Prop, Tile } from './types.ts';
 import { random, deriveSeed } from '../procedural/random.ts';
-import { StichosArt, color, drawHumanoid, line, poly, rect } from './art.ts';
-import type { Sprite } from './art.ts';
+import { StichosArt, color, drawHumanoid, line, makeCivilBuilding, poly, rect } from './art.ts';
+import type { CivilBuildingKind, Sprite } from './art.ts';
 
 interface Building {
   id: string;
@@ -12,6 +12,7 @@ interface Building {
   maxY: number;
   clan: number;
   cathedral: boolean;
+  kind?: CivilBuildingKind | 'church';
 }
 interface Roof {
   sprite: Sprite;
@@ -159,6 +160,7 @@ export class StichosRenderer {
             if (!b) {
               // Resolve the full generated rectangle even when only its edge is visible.
               // This keeps roof geometry stable while scrolling into a settlement.
+              const kind = tile.buildingKind;
               b = {
                 id: tile.building,
                 minX: x,
@@ -166,7 +168,12 @@ export class StichosRenderer {
                 minY: y,
                 maxY: y,
                 clan: tile.clan ?? 0,
-                cathedral: tile.building.endsWith(':hall'),
+                // Legacy geography had a cathedral under every :hall ID. Gen3
+                // explicitly distinguishes a city church from a small civic hall.
+                cathedral:
+                  kind === 'church' ||
+                  (game.world.generation < 3 && tile.building.endsWith(':hall')),
+                kind: kind ?? (game.world.generation >= 3 ? 'house' : undefined),
               };
               while (game.world.tile(b.minX - 1, y).building === b.id && x - b.minX < 32) b.minX--;
               while (game.world.tile(b.maxX + 1, y).building === b.id && b.maxX - x < 32) b.maxX++;
@@ -606,8 +613,11 @@ export class StichosRenderer {
   }
 
   private prop(game: Stichos, prop: Prop) {
+    const building = prop.building ? this.buildingBounds.get(prop.building) : undefined;
+    const monumentalDoor =
+      building?.cathedral ?? (game.world.generation < 3 && !!prop.building?.endsWith(':hall'));
     const p = this.worldToScreen(prop),
-      s = (this.unit / 32) * (prop.kind === 'door' && prop.building?.endsWith(':hall') ? 2.2 : 1);
+      s = (this.unit / 32) * (prop.kind === 'door' && monumentalDoor ? 2.2 : 1);
     if (prop.kind === 'door') p.y += this.unit * 0.5;
     if (p.x < -96 * s || p.x > this.width + 96 * s || p.y < -32 * s || p.y > this.height + 160 * s)
       return;
@@ -616,6 +626,7 @@ export class StichosRenderer {
       prop.seed,
       game.opened.has(prop.id),
       game.world.clans[prop.clan ?? 0]?.color ?? '#68837c',
+      prop.kind === 'door' ? building?.kind : undefined,
     );
     // These planted resource trees are visibly pruned, with the same trunk footprint.
     const verticalScale = s * (prop.kind === 'pine' && /:timber:\d+$/.test(prop.id) ? 0.65 : 1);
@@ -772,7 +783,7 @@ export class StichosRenderer {
     const rows = b.maxY - b.minY + 1,
       cols = b.maxX - b.minX + 1;
     if (cols < 2 || rows < 2) return;
-    const key = `${game.world.seed}:${b.id}:${cols}:${rows}`;
+    const key = `${game.world.seed}:${game.world.generation}:${b.id}:${b.kind ?? 'legacy'}:${cols}:${rows}`;
     let roof = this.roofs.get(key);
     if (!roof) {
       roof = this.makeRoof(b, game.world.seed);
@@ -803,6 +814,16 @@ export class StichosRenderer {
           this.glow(center + side * 49 * s, right.y + 20 * s, 63 * s, '#eeb970', 0.19);
         }
         this.glow(center, right.y + 23 * s, 87 * s, '#edc58d', 0.13);
+      } else if (b.kind && b.kind !== 'greenhouse' && b.kind !== 'storehouse') {
+        const center = (left.x + right.x) / 2;
+        this.glow(center - 27 * s, right.y - 37 * s, 19 * s, '#edc38a', 0.17);
+        this.glow(
+          center - 27 * s,
+          right.y + 5 * s,
+          37 * s,
+          '#e9bc7e',
+          b.kind === 'inn' ? 0.16 : 0.1,
+        );
       }
     } else {
       // Roof lifted: preserve the north wall and side walls, lower/fade the near wall.
@@ -1487,6 +1508,15 @@ export class StichosRenderer {
 
   private makeRoof(b: Building, worldSeed: number): Roof {
     if (b.cathedral) return this.makeCathedral(b, worldSeed);
+    if (b.kind && b.kind !== 'church') {
+      const sprite = makeCivilBuilding(
+        b.kind,
+        deriveSeed(worldSeed, b.id),
+        b.maxX - b.minX + 1,
+        b.maxY - b.minY + 1,
+      );
+      return { sprite, width: sprite.image.width, height: sprite.image.height };
+    }
     const cols = b.maxX - b.minX + 1,
       rows = b.maxY - b.minY + 1,
       width = cols * 32 + 48,

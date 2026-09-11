@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Stichos, ITEMS } from '../src/stichos/session.ts';
+import { Stichos, ITEMS, EXPLORATION_CELL_SIZE } from '../src/stichos/session.ts';
 import { appearance } from '../src/stichos/world.ts';
 import type { ItemId, Npc, Point, Prop } from '../src/stichos/types.ts';
 
@@ -129,7 +129,7 @@ function vaultFixture(game: Stichos) {
 }
 
 test('a reachable vault notice marks the actual deep archive, whose reward is persistent and paid once', () => {
-  const game = new Stichos(3886);
+  const game = new Stichos(3886, 2);
   const { site, notice, chest } = vaultFixture(game);
   Object.assign(game.player, { x: site.entrance.x, y: 80 });
   walkTo(game, notice);
@@ -215,7 +215,7 @@ test('a reachable vault notice marks the actual deep archive, whose reward is pe
 });
 
 test('an archive with insufficient pack space remains closed and incomplete until the whole reward fits', () => {
-  const game = new Stichos(104);
+  const game = new Stichos(104, 2);
   const { site, notice, chest } = vaultFixture(game);
   Object.assign(game.player, { x: notice.x, y: notice.y });
   game.interact(notice.id);
@@ -242,7 +242,7 @@ test('an archive with insufficient pack space remains closed and incomplete unti
 });
 
 test('finding the vault notice after looting its archive records an already-complete survey', () => {
-  const game = new Stichos(19);
+  const game = new Stichos(19, 2);
   const { site, notice, chest } = vaultFixture(game);
   Object.assign(game.player, { x: chest.x, y: chest.y });
   game.interact(chest.id);
@@ -368,7 +368,7 @@ test('legacy wilderness and the origin teaching garden keep their established ce
 });
 
 test('correspondence requires a real journey and lets disclosure change family trust without repeat payments', () => {
-  const game = new Stichos(3886);
+  const game = new Stichos(3886, 2);
   npc(game, 'origin-archivist');
   game.choose('dispatch:request');
   const job = game.save().correspondenceJobs[0];
@@ -382,7 +382,7 @@ test('correspondence requires a real journey and lets disclosure change family t
   const coins = game.player.coins;
   game.choose(`dispatch:deliver:${job.sourceId}`);
   assert.equal(game.player.coins, coins, 'an accepted task cannot be completed at its source');
-  const duplicate = new Stichos(3886);
+  const duplicate = new Stichos(3886, 2);
   npc(duplicate, 'origin-archivist');
   duplicate.choose('dispatch:request');
   assert.deepEqual(
@@ -427,7 +427,7 @@ test('correspondence requires a real journey and lets disclosure change family t
 });
 
 test('a dead correspondence recipient can be cancelled at a noticeboard and replaced without reward farming', () => {
-  const game = new Stichos(104);
+  const game = new Stichos(104, 2);
   npc(game, 'origin-engineer');
   game.choose('dispatch:request');
   const job = game.save().correspondenceJobs[0];
@@ -476,7 +476,7 @@ test('a dead correspondence recipient can be cancelled at a noticeboard and repl
 });
 
 test('the opening story consumes gathered materials, repairs a radio, and permits voluntary mental travel without replacing the world', () => {
-  const game = new Stichos(3886);
+  const game = new Stichos(3886, 2);
   opening(game);
   assert.equal(game.inventory.cequin ?? 0, 0);
   assert.ok(game.reputation[0] < 0);
@@ -574,7 +574,7 @@ test('the opening story consumes gathered materials, repairs a radio, and permit
 });
 
 test('body possessions survive repeated possession and restoration without refreshing consumed supplies', () => {
-  const game = new Stichos(3886);
+  const game = new Stichos(3886, 2);
   game.storyStage = 4;
   game.weapons.add('bow');
   game.equip('bow');
@@ -636,7 +636,7 @@ test('body possessions survive repeated possession and restoration without refre
 });
 
 test('a shrine offers distinct bodies and revalidates the exact chosen person before possession', () => {
-  const game = new Stichos(3886);
+  const game = new Stichos(3886, 2);
   game.storyStage = 4;
   const shrine = prop(game, (p) => p.kind === 'shrine');
   walkTo(game, shrine);
@@ -668,7 +668,7 @@ test('a shrine offers distinct bodies and revalidates the exact chosen person be
 });
 
 test('an ethical alternative cannot pay twice or invent cequin and has different family consequences', () => {
-  const game = new Stichos(8);
+  const game = new Stichos(8, 2);
   npc(game, 'origin-botanist');
   game.choose('learn-cequin');
   game.use('cequin');
@@ -693,7 +693,7 @@ test('an ethical alternative cannot pay twice or invent cequin and has different
 });
 
 test('harvest, pack capacity, consumables and crafting form a finite resource loop', () => {
-  const game = new Stichos(19);
+  const game = new Stichos(19, 2);
   const plant = prop(game, (p) => p.kind === 'heartleaf');
   gather(game, plant);
   assert.equal(game.inventory.heartleaf, 2);
@@ -729,7 +729,7 @@ test('harvest, pack capacity, consumables and crafting form a finite resource lo
 });
 
 test('merchant transactions revalidate coins, stock in the player pack, and ownership', () => {
-  const game = new Stichos(17);
+  const game = new Stichos(17, 2);
   const merchant = game.world.npcsAround(0, 0, 20).find((n) => n.role === 'merchant')!;
   npc(game, merchant.id);
   const coins = game.player.coins;
@@ -756,7 +756,7 @@ test('merchant transactions revalidate coins, stock in the player pack, and owne
 });
 
 test('repeatable botanical supply jobs point at real plots and only reward actual deliveries once', () => {
-  const game = new Stichos(43);
+  const game = new Stichos(43, 2);
   npc(game, 'origin-botanist');
   game.choose('supply:accept');
   game.choose('close');
@@ -818,7 +818,7 @@ function enemyArena(
   player: Point = { x: 4000, y: 4000 },
   enemy: Point = { x: 4000, y: 3995 },
 ) {
-  const game = new Stichos(3886);
+  const game = new Stichos(3886, 2);
   Object.assign(game.player, player);
   for (const npc of game.world.npcsAround(player.x, player.y, 22)) game.removed.add(npc.id);
   const hostile = actor(game, 'weapon-arena-enemy', enemy.x, enemy.y);
@@ -957,7 +957,7 @@ test('a live bow within actual reach prevents resting and voluntary transfer unl
 });
 
 test('directional melee and a stamina-priced ward distinguish targets and persist deaths', () => {
-  const game = new Stichos(31);
+  const game = new Stichos(31, 2);
   const front = actor(game, 'front-raider', game.player.x + 0.7, game.player.y);
   const back = actor(game, 'back-raider', game.player.x - 1, game.player.y);
   const bystander = actor(game, 'innocent', game.player.x, game.player.y + 1, false);
@@ -991,7 +991,7 @@ test('directional melee and a stamina-priced ward distinguish targets and persis
 });
 
 test('long real-input walking crosses chunks continuously with bounded active actors and terrain cache', () => {
-  const game = new Stichos(901);
+  const game = new Stichos(901, 2);
   game.use('cequin');
   const x = game.player.x;
   for (let i = 0; i < 800; i++) game.update(0.1, { x: 0, y: 1, run: false });
@@ -1015,8 +1015,8 @@ test('long real-input walking crosses chunks continuously with bounded active ac
 });
 
 test('movement normalizes diagonals and cannot tunnel through a solid wall on a delayed frame', () => {
-  const a = new Stichos(2),
-    b = new Stichos(2);
+  const a = new Stichos(2, 2),
+    b = new Stichos(2, 2);
   a.update(0.1, { x: 1, y: 0, run: false });
   b.update(0.1, { x: 1, y: 1, run: false });
   assert.ok(Math.abs(dist(a.player, a.world.spawn) - dist(b.player, b.world.spawn)) < 1e-8);
@@ -1034,7 +1034,7 @@ test('movement normalizes diagonals and cannot tunnel through a solid wall on a 
 });
 
 test('save restoration rejects malformed and contradictory state rather than propagating corruption', () => {
-  const game = new Stichos(5),
+  const game = new Stichos(5, 2),
     original = game.save();
   for (const corrupt of [
     null,
@@ -1058,9 +1058,9 @@ test('save restoration rejects malformed and contradictory state rather than pro
 test('seeded weapon construction changes real damage, timing, reach and on-hit effects', () => {
   const seen = new Set<string>();
   for (const seed of [3, 8, 19, 31, 46, 57]) {
-    const game = new Stichos(seed);
+    const game = new Stichos(seed, 2);
     const profile = game.weaponProfile('staff');
-    assert.deepEqual(profile, new Stichos(seed).weaponProfile('staff'));
+    assert.deepEqual(profile, new Stichos(seed, 2).weaponProfile('staff'));
     seen.add(JSON.stringify(profile));
     const target = actor(game, 'weapon-target', game.player.x + 1, game.player.y);
     target.cooldown = 0;
@@ -1077,7 +1077,7 @@ test('seeded weapon construction changes real damage, timing, reach and on-hit e
     assert.deepEqual(restored.weaponProfile('staff'), profile);
   }
   assert.ok(seen.size >= 5);
-  const game = new Stichos(64);
+  const game = new Stichos(64, 2);
   game.weapons.add('bow');
   game.equip('bow');
   const target = game.npcs.find((n) => n.role === 'pilgrim')!;
@@ -1093,7 +1093,7 @@ test('seeded weapon construction changes real damage, timing, reach and on-hit e
 });
 
 test('a large exploration history and distant road position still round-trip without a scene boundary', () => {
-  const game = new Stichos(13);
+  const game = new Stichos(13, 2);
   for (let i = 0; i < 100005; i++) game.visited.add(`${i},0`);
   const save = game.save();
   save.player.x = 1_000_000_010;
@@ -1107,7 +1107,7 @@ test('a large exploration history and distant road position still round-trip wit
 });
 
 test('losing a body freezes action and clinic recovery preserves the world before mind travel is unlocked', () => {
-  const game = new Stichos(104);
+  const game = new Stichos(104, 2);
   gather(
     game,
     prop(game, (p) => p.kind === 'cequin'),
@@ -1139,7 +1139,7 @@ test('losing a body freezes action and clinic recovery preserves the world befor
 });
 
 test('post-signal loss without an answering host revives the occupied body at the clinic', () => {
-  const game = new Stichos(104);
+  const game = new Stichos(104, 2);
   game.storyStage = 4;
   const shrine = prop(game, (p) => p.kind === 'shrine');
   walkTo(game, shrine);
@@ -1186,7 +1186,7 @@ test('post-signal loss without an answering host revives the occupied body at th
 });
 
 test('legacy origin saves migrate displaced bodies locally while current and distant saves stay strict', () => {
-  const game = new Stichos(3886);
+  const game = new Stichos(3886, 2);
   const { terrainRevision: _revision, ...legacy } = game.save();
   const oldPosition = { x: 11, y: -3 };
   assert.ok(
@@ -1242,7 +1242,7 @@ test('legacy origin saves migrate displaced bodies locally while current and dis
 
 test('legacy wilderness saves retain their exact generator while new worlds opt into climate generation two', () => {
   const old = new Stichos(77, 1);
-  const current = new Stichos(77);
+  const current = new Stichos(77, 2);
   assert.equal(current.world.generation, 2);
   let changed: Point | undefined;
   for (let y = 24; y < 72 && !changed; y++) {
@@ -1260,5 +1260,263 @@ test('legacy wilderness saves retain their exact generator while new worlds opt 
   assert.ok(!restored.world.blocked(changed.x, changed.y));
   assert.equal(restored.save().worldGeneration, 1);
   assert.equal(Stichos.restore(current.save()).world.generation, 2);
-  assert.throws(() => Stichos.restore({ ...current.save(), worldGeneration: 3 }));
+  assert.throws(() => Stichos.restore({ ...current.save(), worldGeneration: 4 }));
+});
+
+test('actual generation-three travel reveals a persistent narrow trail while atlas queries reveal nothing', () => {
+  const game = new Stichos(3886);
+  assert.equal(game.world.generation, 3);
+  assert.equal(EXPLORATION_CELL_SIZE, 8);
+  assert.ok(game.explored(game.player.x, game.player.y));
+  assert.ok(!game.explored(0, 50));
+  const revision = game.explorationRevision;
+  const bounds = game.exploredBounds;
+  const cells = [...game.exploredCells()];
+  const sites = game.discoveredSites;
+  assert.ok(sites.some((site) => site.id === 'origin'));
+  assert.ok(Object.isFrozen(sites) && Object.isFrozen(sites[0]) && Object.isFrozen(bounds));
+  game.world.tile(640, 640);
+  game.world.settlementsAround(640, 640, 480);
+  game.world.vaultsAround(107, 107, 80);
+  assert.deepEqual([...game.exploredCells({ minX: 620, minY: 620, maxX: 660, maxY: 660 })], []);
+  assert.ok(!game.explored(640, 640));
+  assert.equal(game.explorationRevision, revision);
+  assert.equal(game.exploredBounds, bounds, 'queries preserve the cached bounds object');
+  assert.equal(game.discoveredSites, sites, 'queries preserve the cached discovery array');
+  assert.deepEqual([...game.exploredCells()], cells);
+  for (let i = 0; i < 170; i++) game.update(0.1, { x: 0, y: 1, run: false });
+  assert.ok(game.player.y > 55, 'the character actually traverses the open trunk road');
+  assert.ok(game.visited.size >= 4);
+  assert.ok(game.explored(0, 48));
+  assert.ok(!game.explored(32, 48), 'walking does not reveal the entire region around the road');
+  assert.ok(game.explorationRevision > revision);
+  const trail = [...game.exploredCells({ minX: -1, minY: 32, maxX: 1, maxY: 56 })];
+  assert.ok(trail.length >= 6, 'coarse atlas drawing retains each side of a narrow trail');
+  assert.ok(trail.every((cell) => cell.size === 8 && cell.x % 8 === 0 && cell.y % 8 === 0));
+  assert.equal(new Set(trail.map((cell) => `${cell.x},${cell.y}`)).size, trail.length);
+  const restored = Stichos.restore(JSON.parse(JSON.stringify(game.save())));
+  assert.equal(restored.world.generation, 3);
+  for (const cell of game.exploredCells()) assert.ok(restored.explored(cell.x, cell.y));
+  assert.ok(!restored.explored(32, 48));
+  assert.deepEqual(restored.discoveredSites, game.discoveredSites);
+  assert.ok(restored.exploredBounds!.maxY >= game.exploredBounds!.maxY);
+  const distantVillage = game.world.settlementsAround(0, 213, 50)[0];
+  assert.ok(distantVillage && !game.discoveredSites.some((site) => site.id === distantVillage.id));
+  for (let i = 0; i < 420; i++) game.update(0.1, { x: 0, y: 1, run: false });
+  assert.ok(game.player.y > 180, 'the same body walks the uninterrupted road to the next village');
+  const discoveredVillage = game.discoveredSites.find((site) => site.id === distantVillage.id);
+  assert.equal(discoveredVillage?.name, distantVillage.name);
+  assert.equal(discoveredVillage?.detail, distantVillage.rank);
+  assert.ok(
+    !game.explored(distantVillage.x, distantVillage.y),
+    'recognizing the village outskirts does not reveal its unseen center',
+  );
+  assert.deepEqual(Stichos.restore(game.save()).discoveredSites, game.discoveredSites);
+});
+
+test('distant correspondence reveals a destination marker without discovering its terrain or settlement', () => {
+  const game = new Stichos(3886);
+  npc(game, 'origin-archivist');
+  game.choose('dispatch:request');
+  const job = game.dispatches[0];
+  assert.ok(job, 'generation-three settlements have actual distant correspondence recipients');
+  assert.ok(dist(job.sourcePoint, job.target) > 150, 'new roads connect distant settlements');
+  assert.ok(!game.explored(job.target.x, job.target.y));
+  assert.ok(!game.discoveredSites.some((site) => site.id === job.settlementId));
+  const town = game.world
+    .settlementsAround(job.target.x, job.target.y, 48)
+    .find((site) => site.id === job.settlementId);
+  assert.ok(town);
+  const recipient = game.world
+    .npcsAround(job.target.x, job.target.y, 2)
+    .find((n) => n.id === job.recipientId);
+  assert.ok(recipient, 'a map promise refers to a real resident, not a fabricated coordinate');
+  const restored = Stichos.restore(game.save());
+  assert.deepEqual(restored.dispatches, game.dispatches);
+  assert.ok(!restored.explored(job.target.x, job.target.y));
+  assert.ok(!restored.discoveredSites.some((site) => site.id === job.settlementId));
+});
+
+test('entering the outskirts discovers a real vault footprint without exposing its deep interior', () => {
+  const game = new Stichos(3886, 2);
+  const vault = game.world.vaultsAround(40, 40, 1)[0];
+  assert.ok(vault);
+  assert.ok(!game.discoveredSites.some((site) => site.id === vault.id));
+  Object.assign(game.player, { x: vault.entrance.x, y: vault.y + vault.radius + 12 });
+  assert.ok(!game.world.blocked(game.player.x, game.player.y));
+  game.update(0.01, still);
+  const known = game.discoveredSites.find((site) => site.id === vault.id);
+  assert.ok(known);
+  assert.equal(known.kind, 'vault');
+  assert.deepEqual({ x: known.x, y: known.y }, { x: vault.x, y: vault.y });
+  assert.ok(
+    !game.explored(vault.x, vault.y),
+    'site knowledge does not erase undiscovered interior fog',
+  );
+  assert.deepEqual(Stichos.restore(game.save()).discoveredSites, game.discoveredSites);
+});
+
+test('mind transfer reveals the selected body location and preserves the previous life’s explored ground', () => {
+  const game = new Stichos(3886, 2);
+  game.storyStage = 4;
+  const shrine = prop(game, (p) => p.kind === 'shrine');
+  walkTo(game, shrine);
+  const oldGround = { x: game.player.x, y: game.player.y };
+  for (const npc of game.world.npcsAround(game.player.x, game.player.y, 22)) {
+    if (['pilgrim', 'refugee', 'guard'].includes(npc.role)) game.removed.add(npc.id);
+  }
+  // Pick a clear, still-fogged real world location within the signal's fourteen-tile reach.
+  let target: Point | undefined;
+  for (let y = Math.round(game.player.y) - 14; y <= game.player.y + 14 && !target; y++) {
+    for (let x = Math.round(game.player.x) - 14; x <= game.player.x + 14 && !target; x++) {
+      if (dist({ x, y }, game.player) <= 14 && !game.explored(x, y) && !game.world.blocked(x, y))
+        target = { x, y };
+    }
+  }
+  assert.ok(target, 'the fixture contains a human beyond the priest’s currently observed cells');
+  const host = actor(game, 'fog-transfer-host', target.x, target.y, false);
+  host.hp = 49;
+  game.npcs.push(host);
+  const previousCells = [...game.exploredCells()];
+  const revision = game.explorationRevision;
+  assert.ok(game.transferCandidates.some((npc) => npc.id === host.id));
+  game.reincarnate(host.id);
+  assert.equal(game.occupiedNpcId, host.id);
+  assert.ok(game.explored(target.x, target.y));
+  assert.ok(game.explored(oldGround.x, oldGround.y));
+  assert.ok(game.explorationRevision > revision);
+  for (const cell of previousCells) assert.ok(game.explored(cell.x, cell.y));
+  const restored = Stichos.restore(game.save());
+  assert.equal(restored.occupiedNpcId, host.id);
+  assert.ok(restored.explored(target.x, target.y) && restored.explored(oldGround.x, oldGround.y));
+});
+
+test('legacy travel fog stays compact for 100k visited chunks and new travel only adds local sight cells', () => {
+  const game = new Stichos(13, 2);
+  const { exploration: _fog, ...legacy } = game.save();
+  legacy.visited = Array.from({ length: 100005 }, (_, i) => `${i},0`);
+  legacy.player.x = 1_000_000_010;
+  legacy.player.y = 0;
+  const restored = Stichos.restore(legacy);
+  assert.ok(
+    restored.explored(16 * 50000 + 15, 15),
+    'old entered chunks are an explicit approximate footprint',
+  );
+  assert.ok(!restored.explored(16 * 50000, 24));
+  assert.equal(
+    [...restored.exploredCells({ minX: 16 * 50000, minY: 0, maxX: 16 * 50001, maxY: 16 })].length,
+    4,
+  );
+  for (let i = 0; i < 35; i++) restored.update(0.1, { x: 1, y: 0, run: false });
+  const saved = restored.save();
+  assert.equal(saved.exploration.legacyVisitedCount, 100005);
+  assert.ok(
+    saved.exploration.chunks.length < 12,
+    'migration never expands 100k old chunks into an explicit cell list',
+  );
+  assert.ok(JSON.stringify(saved).length < 8 * 1024 * 1024);
+  const again = Stichos.restore(JSON.parse(JSON.stringify(saved)));
+  assert.equal(again.save().exploration.legacyVisitedCount, 100005);
+  assert.ok(again.explored(16 * 50000 + 15, 15));
+  assert.ok(!again.explored(restored.player.x, 24));
+  assert.deepEqual([...again.visited], [...restored.visited]);
+});
+
+test('fog save validation rejects malformed coordinates, duplicate records and invalid masks without imposing a travel boundary', () => {
+  const saved = new Stichos(43, 2).save();
+  for (const key of ['NaN,0', '1.5,2', '01,0', '-0,0', '9007199254740992,0'])
+    assert.throws(() => Stichos.restore({ ...saved, visited: [key] }), /Invalid/);
+  const fog = saved.exploration;
+  for (const chunks of [
+    [[0, 0, 0]],
+    [[0, 0, 16]],
+    [[0.5, 0, 1]],
+    [[Infinity, 0, 1]],
+    [
+      [1, 1, 1],
+      [1, 1, 2],
+    ],
+  ])
+    assert.throws(() => Stichos.restore({ ...saved, exploration: { ...fog, chunks } }), /Invalid/);
+  for (const legacyVisitedCount of [-1, 0.5, saved.visited.length + 1])
+    assert.throws(
+      () => Stichos.restore({ ...saved, exploration: { ...fog, legacyVisitedCount } }),
+      /Invalid/,
+    );
+  assert.throws(
+    () => Stichos.restore({ ...saved, exploration: { ...fog, revision: NaN } }),
+    /Invalid/,
+  );
+  assert.throws(
+    () =>
+      Stichos.restore({ ...saved, exploration: { ...fog, sites: [fog.sites[0], fog.sites[0]] } }),
+    /Invalid/,
+  );
+  assert.throws(
+    () =>
+      Stichos.restore({
+        ...saved,
+        exploration: { ...fog, sites: [{ ...fog.sites[0], radius: -1 }] },
+      }),
+    /Invalid/,
+  );
+});
+
+test('bounded atlas queries match full known-cell filtering across negative seams without scanning travel history', () => {
+  const saved = new Stichos(13, 2).save();
+  saved.visited = Array.from({ length: 100005 }, (_, i) => `${i - 50000},0`);
+  saved.exploration = {
+    version: 1,
+    revision: 3,
+    legacyVisitedCount: saved.visited.length,
+    chunks: [
+      [-1, -1, 9],
+      [0, -1, 6],
+      [-2, 1, 5],
+      [1, 1, 10],
+    ],
+    sites: saved.exploration.sites,
+  };
+  const game = Stichos.restore(saved);
+  const all = [...game.exploredCells()];
+  const canonical = (cells: Iterable<{ x: number; y: number; size: number }>) =>
+    [...cells].map((cell) => `${cell.x},${cell.y},${cell.size}`).sort();
+  const storage = game as unknown as {
+    legacyFogChunks: Set<string>;
+    fogChunks: Map<string, number>;
+  };
+  const legacyIterator = storage.legacyFogChunks[Symbol.iterator];
+  const fogIterator = storage.fogChunks[Symbol.iterator];
+  storage.legacyFogChunks[Symbol.iterator] = function* () {
+    assert.fail('a small atlas query must not iterate the old travel history');
+  };
+  storage.fogChunks[Symbol.iterator] = function* () {
+    assert.fail('a small atlas query must not iterate all new knowledge');
+  };
+  const revision = game.explorationRevision;
+  for (const bounds of [
+    { minX: -16, minY: -16, maxX: 0, maxY: 0 },
+    { minX: -0.1, minY: -0.1, maxX: 0.1, maxY: 0.1 },
+    { minX: -32, minY: -8, maxX: 16, maxY: 24 },
+    { minX: -8, minY: -8, maxX: 8, maxY: 8 },
+    { minX: 10000000, minY: 10000000, maxX: 10000008, maxY: 10000008 },
+    { minX: 1e25, minY: 1e25, maxX: 1e25 + 1e15, maxY: 1e25 + 1e15 },
+  ]) {
+    const expected = all.filter(
+      (cell) =>
+        cell.x < bounds.maxX &&
+        cell.y < bounds.maxY &&
+        cell.x + cell.size > bounds.minX &&
+        cell.y + cell.size > bounds.minY,
+    );
+    assert.deepEqual(canonical(game.exploredCells(bounds)), canonical(expected));
+  }
+  storage.legacyFogChunks[Symbol.iterator] = legacyIterator;
+  storage.fogChunks[Symbol.iterator] = fogIterator;
+  assert.equal(game.explorationRevision, revision);
+  assert.deepEqual(
+    canonical(game.exploredCells()),
+    canonical(all),
+    'zoomed-out unbounded traversal still includes the whole known trail',
+  );
 });

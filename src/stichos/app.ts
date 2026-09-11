@@ -5,6 +5,8 @@ import { drawPortrait } from './portrait';
 import { weaponIcon } from './equipment';
 import type { WeaponKind } from './equipment';
 import { itemIcon } from './icons';
+import { AtlasController, AtlasPainter, atlasDistance } from './atlas';
+import type { AtlasView, AtlasSource } from './atlas';
 import { parseSeed, formatSeed } from '../seed';
 import { AudioDirector } from '../audio';
 import { registerOffline } from '../offline';
@@ -43,7 +45,21 @@ let started = false,
   packView: 'pack' | 'craft' = 'pack';
 let selectedItem: ItemId | null = null;
 let trackedQuestId: string | null = null;
+let mapWaypoint: Point | null = null;
+let chartView: AtlasView | null = null;
+let chartControl: AtlasController | null = null;
+const atlasPainter = new AtlasPainter();
 function trackedQuest() {
+  if (trackedQuestId === 'map-waypoint' && mapWaypoint)
+    return {
+      id: 'map-waypoint',
+      title: 'Your marked destination',
+      description: 'A point marked in Theo’s atlas.',
+      objective: `Travel toward ${Math.round(mapWaypoint.x)}, ${Math.round(mapWaypoint.y)}.`,
+      target: mapWaypoint,
+      complete: false,
+      stage: 0,
+    };
   const active = game.quests.filter((q) => !q.complete);
   return (
     active.find((q) => q.id === trackedQuestId) ??
@@ -85,6 +101,12 @@ let fps = 60,
 function resize() {
   const bounds = canvas.parentElement!.getBoundingClientRect();
   renderer.resize(bounds.width, bounds.height, Math.min(devicePixelRatio || 1, 2));
+  if (chartControl) {
+    const map = chartControl.canvas;
+    map.width = Math.max(260, Math.round(map.getBoundingClientRect().width));
+    map.height = Math.min(560, Math.max(290, Math.round(innerHeight * 0.51)));
+    chartControl.requestDraw();
+  }
 }
 addEventListener('resize', resize);
 resize();
@@ -124,6 +146,8 @@ function activate(next: Stichos) {
   keys.clear();
   packSignature = '';
   trackedQuestId = null;
+  chartView = null;
+  mapWaypoint = null;
   dialogueSignature = '';
   audio.setWorld(0, game.world.seed);
   renderer.draw(game);
@@ -136,6 +160,8 @@ function setInert(value: boolean) {
     .forEach((n) => (n.inert = value));
 }
 function openModal(kind: string, html: string) {
+  chartControl?.dispose();
+  chartControl = null;
   modal = kind;
   paused = true;
   keys.clear();
@@ -145,7 +171,7 @@ function openModal(kind: string, html: string) {
   setInert(true);
   const container = el('s-modal');
   container.hidden = false;
-  container.className = `s-modal ${kind === 'title' ? 'is-title' : ''}`;
+  container.className = `s-modal ${kind === 'title' ? 'is-title' : kind === 'map' ? 'is-atlas' : ''}`;
   container.innerHTML = `<section class="s-window" role="dialog" aria-modal="true">${html}</section>`;
   const heading = container.querySelector('h2');
   if (heading) {
@@ -156,6 +182,8 @@ function openModal(kind: string, html: string) {
   container.scrollTop = 0;
 }
 function closeModal() {
+  chartControl?.dispose();
+  chartControl = null;
   modal = '';
   el('s-modal').hidden = true;
   el('s-modal').innerHTML = '';
@@ -368,14 +396,112 @@ function journal() {
   );
   el('s-journal-return').onclick = closeModal;
 }
+function atlasSource(): AtlasSource {
+  return {
+    identity: `${game.world.seed}:${game.world.generation}`,
+    player: game.player,
+    target: trackedQuest()?.target,
+    waypoint: mapWaypoint ?? undefined,
+    sites: game.discoveredSites,
+    explored: (x, y) => game.explored(x, y),
+    cells: (bounds) => game.exploredCells(bounds),
+    terrain: (x, y) => game.world.tile(x, y).terrain,
+    climate: (x, y) => game.world.climate(x, y),
+  };
+}
 function mapModal() {
+  const places = game.discoveredSites;
   openModal(
     'map',
-    `<span class="s-chapter">Beyond the cathedral</span><h2>A world without an edge in sight.</h2><canvas id="s-large-map" width="640" height="450"></canvas><p>Stone roads continue between settlements. Green marks are botanical terrain; dark blue is water. The gold point is your current body. Scale: three map pixels represent one world tile.</p><button id="s-map-return" class="s-primary">Keep walking</button>`,
+    `<span class="s-chapter">Theo Bishop’s atlas · Stíchos, 3886</span><div class="s-atlas-heading"><h2>The country you remember.</h2><button id="s-map-return" class="s-primary">Keep walking</button></div><div class="s-atlas-toolbar"><div class="s-atlas-zoom"><button id="s-atlas-minus" aria-label="Zoom atlas out">−</button><button id="s-atlas-plus" aria-label="Zoom atlas in">+</button></div><button id="s-atlas-body">My body</button><button id="s-atlas-fit">All explored</button>${trackedQuest()?.target ? '<button id="s-atlas-task">Current thread</button>' : ''}<span id="s-atlas-scale"></span></div><div class="s-atlas-layout"><div class="s-atlas-chart"><canvas id="s-large-map" tabindex="0" width="800" height="500" aria-label="Explored world atlas. Drag or use arrow keys to pan. Scroll or use plus and minus to zoom. Click to mark a destination."></canvas><div class="s-atlas-coordinate-line"><span id="s-atlas-coordinate"></span><span>Dark country is uncharted</span></div></div><aside class="s-atlas-places"><h3>Known places</h3>${places.length ? places.map((site) => `<button data-atlas-site="${esc(site.id)}"><strong>${esc(site.name)}</strong><small>${esc(site.detail)} · ${Math.round(site.x)}, ${Math.round(site.y)}</small></button>`).join('') : '<p>Walk the roads to learn the names of distant places.</p>'}<div class="s-atlas-mark"><h3>Chart mark</h3><p id="s-atlas-mark-label">Click the chart to mark a destination.</p><button id="s-atlas-follow" disabled>Follow this mark</button><button id="s-atlas-clear" ${mapWaypoint ? '' : 'disabled'}>Clear mark</button></div></aside></div><form id="s-atlas-find" class="s-atlas-find"><span>Find coordinates</span><label>East / west <input id="s-atlas-x" type="number" step="1" min="-1000000000" max="1000000000" value="${Math.round(game.player.x)}" required></label><label>North / south <input id="s-atlas-y" type="number" step="1" min="-1000000000" max="1000000000" value="${Math.round(game.player.y)}" required></label><button type="submit">Locate</button></form><p class="s-atlas-hint">Drag to move the chart. Scroll to change scale. Your gold arrow marks the current body; diamonds mark destinations. Only explored terrain is drawn. Looking at the atlas does not move your body or reveal distant country.</p>`,
   );
-  drawMap(el<HTMLCanvasElement>('s-large-map'), 3);
+  const map = el<HTMLCanvasElement>('s-large-map');
+  map.width = Math.max(260, Math.round(map.getBoundingClientRect().width));
+  map.height = Math.min(560, Math.max(290, Math.round(innerHeight * 0.51)));
+  let selection: Point | null = mapWaypoint ? { ...mapWaypoint } : null;
+  const updateMark = () => {
+    const button = el<HTMLButtonElement>('s-atlas-follow');
+    button.disabled = !selection;
+    el<HTMLButtonElement>('s-atlas-clear').disabled = !selection && !mapWaypoint;
+    el('s-atlas-mark-label').textContent = selection
+      ? `${Math.round(selection.x)}, ${Math.round(selection.y)} · ${game.explored(selection.x, selection.y) ? 'explored country' : 'uncharted country'} · ${atlasDistance(Math.hypot(selection.x - game.player.x, selection.y - game.player.y))} from this body`
+      : 'Click the chart to mark a destination.';
+  };
+  chartControl = new AtlasController(
+    map,
+    () => ({ ...atlasSource(), waypoint: selection ?? undefined }),
+    atlasPainter,
+    (view, cursor) => {
+      chartView = { ...view };
+      const at = cursor ?? view;
+      el('s-atlas-coordinate').textContent =
+        `${Math.round(at.x).toLocaleString('en-US')}, ${Math.round(at.y).toLocaleString('en-US')}`;
+      el('s-atlas-scale').textContent = `${atlasDistance(map.width / view.scale)} across`;
+    },
+    (point) => {
+      selection = { x: Math.round(point.x), y: Math.round(point.y) };
+      updateMark();
+      chartControl?.requestDraw();
+    },
+    chartView ?? { x: game.player.x, y: game.player.y, scale: 3 },
+  );
+  el('s-atlas-plus').onclick = () => chartControl?.zoom(2);
+  el('s-atlas-minus').onclick = () => chartControl?.zoom(0.5);
+  el('s-atlas-body').onclick = () => chartControl?.center(game.player);
+  el('s-atlas-fit').onclick = () => chartControl?.fit(game.exploredBounds);
+  const task = document.getElementById('s-atlas-task');
+  if (task)
+    task.onclick = () => {
+      const point = trackedQuest()?.target;
+      if (point) chartControl?.center(point);
+    };
+  document.querySelectorAll<HTMLButtonElement>('[data-atlas-site]').forEach((button) => {
+    button.onclick = () => {
+      const site = game.discoveredSites.find((s) => s.id === button.dataset.atlasSite);
+      if (site) {
+        selection = { x: site.x, y: site.y };
+        chartControl?.center(site);
+        updateMark();
+      }
+    };
+  });
+  el<HTMLFormElement>('s-atlas-find').onsubmit = (event) => {
+    event.preventDefault();
+    const point = {
+      x: Number(el<HTMLInputElement>('s-atlas-x').value),
+      y: Number(el<HTMLInputElement>('s-atlas-y').value),
+    };
+    if (
+      !Number.isFinite(point.x) ||
+      !Number.isFinite(point.y) ||
+      Math.max(Math.abs(point.x), Math.abs(point.y)) > 1e9
+    )
+      return;
+    chartControl?.center(point);
+    selection = point;
+    updateMark();
+  };
+  el('s-atlas-follow').onclick = () => {
+    if (!selection) return;
+    mapWaypoint = { ...selection };
+    trackedQuestId = 'map-waypoint';
+    closeModal();
+    updateUI();
+    drawMap();
+    toast('Follow the atlas bearing in your field notes.');
+  };
+  el('s-atlas-clear').onclick = () => {
+    mapWaypoint = null;
+    selection = null;
+    if (trackedQuestId === 'map-waypoint') trackedQuestId = null;
+    updateMark();
+    chartControl?.requestDraw();
+    updateUI();
+  };
   el('s-map-return').onclick = closeModal;
+  updateMark();
 }
+
 function lost() {
   const anotherMind = game.transferReady && !!game.transferCandidate;
   openModal(
@@ -554,77 +680,9 @@ function updateUI() {
   updateDialogue();
 }
 function drawMap(target = el<HTMLCanvasElement>('s-map'), scale = 5) {
-  const ctx = target.getContext('2d')!;
-  const w = target.width,
-    h = target.height;
-  ctx.fillStyle = '#13212b';
-  ctx.fillRect(0, 0, w, h);
-  const colors: Record<string, string> = {
-    road: '#b5a887',
-    floor: '#a6a7a3',
-    wall: '#667381',
-    bridge: '#9f8662',
-    snow: '#80949d',
-    grass: '#526f67',
-    ice: '#5e8b9c',
-    water: '#254354',
-  };
-  // Sparse sampling keeps the map bounded even while walking across many chunks.
-  const stride = target.id === 's-large-map' ? 2 : 1;
-  for (let y = 0; y < h; y += scale * stride)
-    for (let x = 0; x < w; x += scale * stride) {
-      const t = game.world.tile(
-        game.player.x + (x - w / 2) / scale,
-        game.player.y + (y - h / 2) / scale,
-      );
-      ctx.fillStyle = colors[t.terrain];
-      ctx.fillRect(x, y, scale * stride, scale * stride);
-    }
-  const range = Math.max(w, h) / scale / 2;
-  for (const town of game.world.settlementsAround(game.player.x, game.player.y, range)) {
-    const x = w / 2 + (town.x - game.player.x) * scale,
-      y = h / 2 + (town.y - game.player.y) * scale;
-    ctx.strokeStyle = game.world.clans[town.clan].color;
-    ctx.strokeRect(x - 4, y - 4, 8, 8);
-    if (target.id === 's-large-map') {
-      ctx.font = '12px Georgia';
-      ctx.fillStyle = '#f3dfb2';
-      ctx.fillText(town.name, x + 7, y);
-    }
-  }
-  for (const site of game.world.vaultsAround(game.player.x, game.player.y, range)) {
-    const x = w / 2 + (site.entrance.x - game.player.x) * scale,
-      y = h / 2 + (site.entrance.y - game.player.y) * scale;
-    ctx.fillStyle = '#17232b';
-    ctx.fillRect(x - 4, y - 4, 9, 9);
-    ctx.strokeStyle = '#aec8a0';
-    ctx.strokeRect(x - 4, y - 4, 9, 9);
-    ctx.beginPath();
-    ctx.moveTo(x - 2, y + 2);
-    ctx.lineTo(x, y - 2);
-    ctx.lineTo(x + 2, y + 2);
-    ctx.stroke();
-    if (target.id === 's-large-map') {
-      ctx.font = '12px Georgia';
-      ctx.fillStyle = '#c3d2ac';
-      ctx.fillText(game.opened.has(`${site.id}:cache`) ? 'Searched vault' : 'Seed vault', x + 8, y);
-    }
-  }
-  const q = trackedQuest();
-  if (q?.target) {
-    const x = w / 2 + (q.target.x - game.player.x) * scale,
-      y = h / 2 + (q.target.y - game.player.y) * scale;
-    ctx.fillStyle = '#bfb280';
-    ctx.fillRect(x - 2, y - 2, 5, 5);
-  }
-  ctx.fillStyle = '#f5dda2';
-  ctx.beginPath();
-  ctx.moveTo(w / 2, h / 2 - 5);
-  ctx.lineTo(w / 2 + 4, h / 2 + 3);
-  ctx.lineTo(w / 2 - 4, h / 2 + 3);
-  ctx.closePath();
-  ctx.fill();
+  atlasPainter.draw(target, atlasSource(), { x: game.player.x, y: game.player.y, scale }, false);
 }
+
 function act(command: string) {
   if (!started || paused || transferStarted || game.dialogue || game.phase !== 'playing') return;
   if (command === 'attack') game.attack(pointer ?? undefined);
@@ -1098,6 +1156,11 @@ Object.defineProperty(window, 'stichos', {
         removed: [...game.removed],
         opened: [...game.opened],
         cacheSize: game.world.cacheSize,
+        explorationRevision: game.explorationRevision,
+        exploredBounds: game.exploredBounds,
+        discoveredSites: game.discoveredSites,
+        atlasView: chartControl ? { ...chartControl.view } : chartView,
+        mapWaypoint,
       });
     },
     get fps() {
@@ -1122,6 +1185,9 @@ Object.defineProperty(window, 'stichos', {
     },
     botanicalProfile(prop: Prop) {
       return structuredClone(game.botanicalProfile(prop));
+    },
+    explored(x: number, y: number) {
+      return game.explored(x, y);
     },
     blocked(x: number, y: number) {
       return game.world.blocked(x, y, game.removed);
