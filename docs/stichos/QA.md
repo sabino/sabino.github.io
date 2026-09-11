@@ -68,6 +68,24 @@ The character then walked 207.8 paces south to Calfell, a smaller generated sett
 
 Save/Continue preserved generation 3, the actual destination, explored bounds, discovered places, and both visited and still-unknown cells. No console or runtime errors occurred. Evidence: [atlas results and screenshots](../../.dream-loop/stichos-atlas/), including [new origin](../../.dream-loop/stichos-atlas/03-cathedral-world.png), [Calfell](../../.dream-loop/stichos-atlas/04-first-smaller-settlement.png), and [mobile atlas](../../.dream-loop/stichos-atlas/06-mobile-atlas.png).
 
+## Physical notebook and user-paced introduction
+
+The final notebook pass ran from 04:05:36 to 04:06:18 UTC on 11 September 2026 against `app-axVwoH2K.js`, `app-CAfFo9Z7.css`, and service worker `014e7138aae1bb9a737b` at `http://localhost:4174/`. All thirteen real-input checks passed in a fresh isolated browser context, with zero console or runtime errors.
+
+The six introductory beats stayed on their selected page during 6.2 seconds of waiting, without advancing body time. Back and Continue worked through all six pages and explicitly returned to present-day Vespera. Replaying the introduction from the notebook and skipping back preserved the current body, inventory, simulation time, and selected leaf.
+
+J first presented the physical closed cover. Open notebook unfolded it; Close book returned to the cover; Put away returned to the world. Escape and J performed the full closing sequence. Cancelling an opening and immediately reopening, or reopening during the delayed put-away, preserved the latest action. An actual conversation with the botanist remained visible when the notebook closed, including the normal UI redraw interval. Escape also worked while glossary search owned keyboard focus.
+
+All eighteen dated leaves were selected through real mouse and wheel input. Previous/next boundaries worked, all four botanical sheets supplied accessible ink diagrams, and the plain-type toggle changed the actual rendered font. Accent-folded searches found **Cúpula do Destino** from `cupula` and **Stíchoi** from `stichoi`; empty results and clearing the search worked. Following a current thread updated the real sidebar objective and put the book away.
+
+At 390×844, the cover, diary, botanical page, glossary, and current threads had no horizontal overflow. The native leaf selector, next-leaf control, tabs, search, and both closing controls were usable through real input. The desktop and mobile paper/text screenshots were independently inspected. A screenshot-pixel check now also verifies that visible light paper is actually painted, preventing an opaque decorative overlay from passing merely because underlying DOM controls still respond.
+
+Current-life Save/Continue preserved the physical notebook, exact position, and possessions. The satchel identified and opened the book. Importing the legitimately played older campaign through the native file chooser, then reloading and continuing it, retained story stage four and restored the priest’s physical notebook through the legacy ownership migration. This notebook route did not perform a new possession; that model behavior is covered by the separate body-ledger tests and earlier possession browser route.
+
+Evidence: [structured results](../../.dream-loop/stichos-notebook/results.json), [desktop cover](../../.dream-loop/stichos-notebook/03-closed-notebook.png), [open diary](../../.dream-loop/stichos-notebook/04-open-notebook.png), [botanical sheet](../../.dream-loop/stichos-notebook/05-botanical-sheet.png), [mobile cover](../../.dream-loop/stichos-notebook/06-mobile-cover.png), [mobile diary](../../.dream-loop/stichos-notebook/07-mobile-open-book.png), and [mobile glossary](../../.dream-loop/stichos-notebook/08-mobile-glossary.png).
+
+The pass verified fixes for the two-pixel mobile cover overflow, stale transition callbacks, conversation visibility, and an inherited pseudo-element background that had hidden the pages. No game state or browser storage was injected or cleared; the harness disposed its own context afterward.
+
 ## Findings
 
 The previously reported sidebar tracking issue is fixed and browser-verified. No consequential gameplay findings remain from this bounded route. An initial performance detour clicked a nearby village interaction instead of walking; the harness now uses actual cardinal keys there, and the complete repeat passed.
@@ -87,6 +105,7 @@ node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4
 node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/'
 node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/' --possession
 node scripts/browser-stichos-storage.mjs http://127.0.0.1:PORT 'http://localhost:4174/'
+node scripts/browser-notebook-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/'
 node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4174/' --visual --visual-name=round-05 --mobile --profile
 ```
 
