@@ -1386,6 +1386,17 @@ export class StichosArt {
 
 const humanFrames = new Map<string, Sprite>();
 
+/** Four sprite directions retain continuous north/south depth at diagonal headings. */
+export function humanoidDirection(heading: number) {
+  const north = Math.sin(heading) < -1e-8;
+  const diagonalNorth =
+    north && Math.abs(Math.abs(Math.sin(heading)) - Math.abs(Math.cos(heading))) < 1e-8;
+  return {
+    face: diagonalNorth ? 0 : (((Math.round(heading / (Math.PI / 2)) + 1) % 4) + 4) % 4,
+    weaponBehindBody: north,
+  };
+}
+
 /** Discrete articulated pixel poses are cached; travel selects a gait phase, never a baked actor. */
 export function drawHumanoid(
   ctx: Ctx,
@@ -1398,6 +1409,7 @@ export function drawHumanoid(
   moving: boolean,
   attack = 0,
   player = false,
+  weaponBehindBody = ((Math.round(heading) % 4) + 4) % 4 === 0,
 ) {
   const gait = moving ? ((Math.round((phase / (Math.PI * 2)) * 8) % 8) + 8) % 8 : 0;
   const strike = Math.round(attack * 5);
@@ -1418,6 +1430,7 @@ export function drawHumanoid(
     gait,
     moving,
     strike,
+    weaponBehindBody,
   ].join(':');
   let frame = humanFrames.get(key);
   if (!frame) {
@@ -1436,6 +1449,7 @@ export function drawHumanoid(
           moving,
           strike / 5,
           player,
+          weaponBehindBody,
         ),
       48,
       68,
@@ -1468,6 +1482,7 @@ function drawHumanoidParts(
   moving: boolean,
   attack = 0,
   player = false,
+  weaponBehindBody = false,
 ) {
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
@@ -1479,6 +1494,53 @@ function drawHumanoidParts(
     bob = moving ? Math.abs(Math.sin(phase * 2)) : 0;
   const cloak = color(look.coat, -9),
     coat = look.coat;
+  const arm = (s: number, front: boolean) => {
+    const ax = side ? east * (front ? 5 : -4) : s * 6,
+      sway = moving ? step * s * 2 : 0,
+      lift = attack > 0 && front ? -8 * Math.sin(attack * Math.PI) : 0;
+    line(
+      ctx,
+      ax,
+      -25 - bob,
+      ax + (front ? attack * 5 : 0),
+      -16 + sway + lift,
+      color(coat, front ? 9 : -15),
+      3,
+    );
+    rect(ctx, ax, -15 + sway + lift, 3, 3, look.skin);
+    rect(ctx, ax, -18 + sway + lift, 3, 2, '#9b947d');
+  };
+  const heldArmAndItem = () => {
+    arm(1, true);
+    const wx = side ? east * 7 : 8,
+      hand = -14 + step * 2 - attack * 7;
+    if (look.weapon !== 'none') {
+      const sign = side ? east : 1;
+      const angle =
+        look.weapon === 'sword'
+          ? sign * (0.16 + attack * 1.12)
+          : look.weapon === 'bow'
+            ? sign * attack * 0.3
+            : sign * (0.04 + attack * 0.7);
+      const weaponScale = look.weapon === 'bow' ? 0.62 : 0.68;
+      const bow = look.weapon === 'bow' ? weaponGenome(look.seed, 'bow') : null;
+      ctx.save();
+      ctx.translate(wx + sign * attack * 4, hand);
+      ctx.rotate(angle);
+      if (side && east < 0) ctx.scale(-1, 1);
+      drawWeapon(
+        ctx,
+        look.seed,
+        look.weapon,
+        bow ? -(2 + bow.breadth) * weaponScale : 0,
+        bow ? -(13 - bow.length / 2) * weaponScale : 0,
+        weaponScale,
+      );
+      ctx.restore();
+      // A visible gripping hand belongs to the articulated body, over its generated handle.
+      rect(ctx, wx + sign * attack * 4, hand, 2, 2, look.skin);
+    }
+  };
   // Sole, trouser folds, two distinct feet, and the visible rear hand.
   for (const s of [-1, 1]) {
     const sy = s * step * 2,
@@ -1488,6 +1550,9 @@ function drawHumanoidParts(
     rect(ctx, bx - 2, -3 + sy, 3, 1, '#77818a');
     rect(ctx, bx, -10 + sy, 1, 5, color(look.trousers, 17));
   }
+  // Looking north puts the held arm, grip and item beyond the back of the body.
+  // Paint the complete assembly first so neither a swing nor a bow can cross the hood.
+  if (weaponBehindBody) heldArmAndItem();
   if (look.cloak) {
     poly(
       ctx,
@@ -1516,22 +1581,6 @@ function drawHumanoidParts(
     line(ctx, -4, -25 - bob, -6, -10, color(cloak, 17));
     line(ctx, 1, -24, 3, -9, color(cloak, -12));
   }
-  const arm = (s: number, front: boolean) => {
-    const ax = side ? east * (front ? 5 : -4) : s * 6,
-      sway = moving ? step * s * 2 : 0,
-      lift = attack > 0 && front ? -8 * Math.sin(attack * Math.PI) : 0;
-    line(
-      ctx,
-      ax,
-      -25 - bob,
-      ax + (front ? attack * 5 : 0),
-      -16 + sway + lift,
-      color(coat, front ? 9 : -15),
-      3,
-    );
-    rect(ctx, ax, -15 + sway + lift, 3, 3, look.skin);
-    rect(ctx, ax, -18 + sway + lift, 3, 2, '#9b947d');
-  };
   arm(-1, false);
   poly(
     ctx,
@@ -1622,34 +1671,6 @@ function drawHumanoidParts(
     );
     rect(ctx, -5, -35 - bob, 11, 2, '#bbc7c9');
   }
-  arm(1, true);
-  const wx = side ? east * 7 : 8,
-    hand = -14 + step * 2 - attack * 7;
-  if (look.weapon !== 'none') {
-    const sign = side ? east : 1;
-    const angle =
-      look.weapon === 'sword'
-        ? sign * (0.16 + attack * 1.12)
-        : look.weapon === 'bow'
-          ? sign * attack * 0.3
-          : sign * (0.04 + attack * 0.7);
-    const weaponScale = look.weapon === 'bow' ? 0.62 : 0.68;
-    const bow = look.weapon === 'bow' ? weaponGenome(look.seed, 'bow') : null;
-    ctx.save();
-    ctx.translate(wx + sign * attack * 4, hand);
-    ctx.rotate(angle);
-    if (side && east < 0) ctx.scale(-1, 1);
-    drawWeapon(
-      ctx,
-      look.seed,
-      look.weapon,
-      bow ? -(2 + bow.breadth) * weaponScale : 0,
-      bow ? -(13 - bow.length / 2) * weaponScale : 0,
-      weaponScale,
-    );
-    ctx.restore();
-    // A visible gripping hand belongs to the articulated body, over its generated handle.
-    rect(ctx, wx + sign * attack * 4, hand, 2, 2, look.skin);
-  }
+  if (!weaponBehindBody) heldArmAndItem();
   ctx.restore();
 }

@@ -1,7 +1,16 @@
 import type { Stichos } from './session.ts';
 import type { Effect, Npc, Point, Prop, Tile } from './types.ts';
 import { random, deriveSeed } from '../procedural/random.ts';
-import { StichosArt, color, drawHumanoid, line, makeCivilBuilding, poly, rect } from './art.ts';
+import {
+  StichosArt,
+  color,
+  drawHumanoid,
+  humanoidDirection,
+  line,
+  makeCivilBuilding,
+  poly,
+  rect,
+} from './art.ts';
 import type { CivilBuildingKind, Sprite } from './art.ts';
 
 interface Building {
@@ -22,7 +31,6 @@ interface Roof {
 const TAU = Math.PI * 2;
 const clamp = (x: number, min: number, max: number) => Math.max(min, Math.min(max, x));
 const fract = (x: number) => x - Math.floor(x);
-const cardinal = (angle: number) => (((Math.round(angle / (Math.PI / 2)) + 1) % 4) + 4) % 4;
 const terrainClass = (terrain: Tile['terrain']) =>
   terrain === 'wall' || terrain === 'floor' ? 'road' : terrain;
 
@@ -713,17 +721,19 @@ export class StichosRenderer {
       : (this.npcWalking.get((person as Npc).id) ?? false);
     const cooldown = player ? game.player.attackCooldown : (person as Npc).cooldown;
     const attack = cooldown > 0.25 ? clamp((cooldown - 0.25) / 0.4, 0, 1) : 0;
+    const facing = humanoidDirection(person.heading);
     drawHumanoid(
       ctx,
       person.appearance,
       p.x,
       p.y,
       s,
-      cardinal(person.heading),
+      facing.face,
       person.phase,
       walking,
       attack,
       player,
+      facing.weaponBehindBody,
     );
     const near = Math.hypot(person.x - game.player.x, person.y - game.player.y) < 4;
     if (player || near || (person as Npc).hostile) {
