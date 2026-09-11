@@ -6,6 +6,8 @@
  * Add --smoke for the opening, core controls, screenshots, and saved continuation.
  * Add --visual for an isolated browser-context screenshot/FPS sample with no saved-life changes.
  * Add --possession to Continue a completed QA save and verify actual NPC mind transfer.
+ * Add --atlas for the current generation-three map and smaller-settlement road route.
+ * --expedition exercises the archived generation-two excavation checkpoint.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +20,7 @@ const smoke = process.argv.includes('--smoke');
 const visualOnly = process.argv.includes('--visual');
 const possessionOnly = process.argv.includes('--possession');
 const expeditionOnly = process.argv.includes('--expedition');
+const atlasOnly = process.argv.includes('--atlas');
 const visualName =
   process.argv.find((arg) => arg.startsWith('--visual-name='))?.split('=')[1] ?? 'round-02';
 const profileVisual = process.argv.includes('--profile');
@@ -30,13 +33,15 @@ if (baseUrl.hostname !== 'localhost')
   throw new Error('Use localhost to protect the developer’s 127.0.0.1 save.');
 const out = path.join(
   root,
-  expeditionOnly
-    ? '.dream-loop/stichos-expedition'
-    : possessionOnly
-      ? '.dream-loop/stichos-possession'
-      : visualOnly
-        ? '.dream-loop/stichos'
-        : '.dream-loop/stichos-qa',
+  atlasOnly
+    ? '.dream-loop/stichos-atlas'
+    : expeditionOnly
+      ? '.dream-loop/stichos-expedition'
+      : possessionOnly
+        ? '.dream-loop/stichos-possession'
+        : visualOnly
+          ? '.dream-loop/stichos'
+          : '.dream-loop/stichos-qa',
 );
 fs.mkdirSync(out, { recursive: true });
 const downloadFolder = `verso-stichos-campaign-${Date.now()}`;
@@ -715,6 +720,217 @@ async function expeditionChecks() {
   log('No browser console or runtime errors');
 }
 
+async function fillText(selector, text) {
+  await click(selector);
+  for (const type of ['keyDown', 'keyUp'])
+    await page.send('Input.dispatchKeyEvent', {
+      type,
+      key: 'a',
+      code: 'KeyA',
+      windowsVirtualKeyCode: 65,
+      modifiers: 2,
+    });
+  await page.send('Input.insertText', { text: String(text) });
+}
+
+async function atlasChecks() {
+  assert((await state()).worldGeneration === 3, 'Atlas route requires a new generation-three life');
+  await tap('3');
+  const initial = await state();
+  assert(
+    initial.discoveredSites.some((s) => s.id === 'origin'),
+    'Opening city name should be learned locally',
+  );
+  assert(
+    !initial.discoveredSites.some((s) => s.kind === 'settlement' && s.id !== 'origin'),
+    'Distant settlements were revealed before travel',
+  );
+  await tap('m');
+  await waitFor('window.stichos.state.modal==="map"', 'world atlas');
+  const before = await state(),
+    knowledge = JSON.stringify({
+      revision: before.explorationRevision,
+      bounds: before.exploredBounds,
+      sites: before.discoveredSites,
+    });
+  await screenshot('01-atlas-opening');
+  const box = await read(
+    `(()=>{const r=document.querySelector('#s-large-map').getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`,
+  );
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
+  await page.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    button: 'left',
+    clickCount: 1,
+    x: box.x,
+    y: box.y,
+  });
+  for (let i = 1; i <= 8; i++)
+    await page.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      button: 'left',
+      buttons: 1,
+      x: box.x + i * 18,
+      y: box.y + i * 8,
+    });
+  await page.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    button: 'left',
+    clickCount: 1,
+    x: box.x + 144,
+    y: box.y + 64,
+  });
+  await delay(200);
+  assert(
+    distance((await state()).atlasView, before.atlasView) > 10,
+    'Actual drag did not pan atlas',
+  );
+  const draggedScale = (await state()).atlasView.scale;
+  await page.send('Input.dispatchMouseEvent', {
+    type: 'mouseWheel',
+    x: box.x,
+    y: box.y,
+    deltaX: 0,
+    deltaY: -300,
+  });
+  await delay(200);
+  assert((await state()).atlasView.scale > draggedScale, 'Actual wheel did not zoom atlas');
+  await fillText('#s-atlas-x', 10000);
+  await fillText('#s-atlas-y', 10000);
+  await click('#s-atlas-find button[type=submit]');
+  assert(
+    distance((await state()).atlasView, { x: 10000, y: 10000 }) < 0.01,
+    'Coordinate Locate did not center remote country',
+  );
+  assert(
+    !(await read('window.stichos.explored(10000,10000)')),
+    'Inspecting remote coordinates uncovered the terrain',
+  );
+  await screenshot('02-atlas-uncharted');
+  const inspected = await state();
+  assert(
+    inspected.time === before.time && distance(inspected.player, before.player) === 0,
+    'Atlas inspection advanced time or moved the host',
+  );
+  assert(
+    JSON.stringify(inspected.inventory) === JSON.stringify(before.inventory),
+    'Atlas inspection changed possessions',
+  );
+  assert(
+    JSON.stringify({
+      revision: inspected.explorationRevision,
+      bounds: inspected.exploredBounds,
+      sites: inspected.discoveredSites,
+    }) === knowledge,
+    'Atlas inspection disclosed unvisited country',
+  );
+  await click('#s-atlas-body');
+  assert(
+    distance((await state()).atlasView, before.player) < 0.01,
+    'My body did not return to the actual host',
+  );
+  await click('#s-atlas-fit');
+  assert(
+    Math.abs((await state()).atlasView.x) < 30 && Math.abs((await state()).atlasView.y) < 30,
+    'Fit explored included unknown distant country',
+  );
+  log(
+    'Actual atlas drag, wheel, coordinate locate, body and fit controls work without moving or revealing the world',
+  );
+  await fillText('#s-atlas-x', 0);
+  await fillText('#s-atlas-y', 213);
+  await click('#s-atlas-find button[type=submit]');
+  await click('#s-atlas-follow');
+  await waitFor('!window.stichos.state.paused', 'follow atlas bearing');
+  assert(
+    distance((await state()).mapWaypoint, { x: 0, y: 213 }) === 0,
+    'Follow did not preserve selected map coordinates',
+  );
+  assert(
+    await read('document.querySelector("#s-quest-title").textContent==="Your marked destination"'),
+    'Atlas pin did not become the HUD bearing',
+  );
+  await screenshot('03-atlas-waypoint-hud');
+  await roadAxis('y', 213);
+  const reached = await state(),
+    village = reached.discoveredSites.find((s) => s.kind === 'settlement' && s.id !== 'origin');
+  assert(village, 'Walking beyond200 tiles did not reveal a smaller settlement');
+  assert(
+    reached.distanceTraveled - initial.distanceTraveled > 200,
+    'Route did not cross the intended long wilderness interval',
+  );
+  assert(
+    reached.explorationRevision > initial.explorationRevision,
+    'Actual walking did not grow explored terrain',
+  );
+  assert(await read('window.stichos.explored(0,200)'), 'The walked road remains hidden');
+  assert(
+    !(await read('window.stichos.explored(10000,10000)')),
+    'Unknown country was revealed by unrelated travel',
+  );
+  await screenshot('04-first-smaller-settlement');
+  console.log('SHOT 04-first-smaller-settlement.png');
+  await tap('m');
+  await waitFor('window.stichos.state.modal==="map"', 'atlas after road travel');
+  await click('#s-atlas-fit');
+  assert(
+    await read(`!!document.querySelector('[data-atlas-site="${village.id}"]')`),
+    'New place is missing from known places',
+  );
+  await screenshot('05-atlas-road-discovery');
+  await click(`[data-atlas-site="${village.id}"]`);
+  assert(
+    distance((await state()).atlasView, village) < 0.01,
+    'Known-place control did not center the real settlement',
+  );
+  log(
+    'Actual continuous road travel discovers a smaller settlement and extends only the visited map',
+    `${village.name}: ${reached.distanceTraveled.toFixed(1)} paces`,
+  );
+  await viewport(390, 844, true);
+  await tap('Escape');
+  await tap('m');
+  await waitFor('window.stichos.state.modal==="map"', 'mobile world atlas');
+  assert(
+    await read('document.documentElement.scrollWidth<=innerWidth+1'),
+    'Mobile atlas has horizontal overflow',
+  );
+  await screenshot('06-mobile-atlas');
+  await click('#s-map-return');
+  await waitFor('!window.stichos.state.paused', 'mobile Keep walking');
+  log('390×844 atlas fits without horizontal overflow and its Keep walking control closes it');
+  await viewport(1600, 1000);
+  await tap('Escape');
+  const saved = await state();
+  await page.send('Page.reload', { ignoreCache: true });
+  await waitFor('document.querySelector("#s-continue")&&window.stichos', 'atlas save title');
+  await click('#s-continue');
+  await waitFor('!window.stichos.state.paused', 'atlas saved continuation');
+  const restored = await state();
+  assert(
+    restored.worldGeneration === 3 && distance(restored.player, saved.player) < 0.02,
+    'Save lost generation3 or actual destination',
+  );
+  assert(
+    JSON.stringify(restored.exploredBounds) === JSON.stringify(saved.exploredBounds) &&
+      JSON.stringify(restored.discoveredSites) === JSON.stringify(saved.discoveredSites),
+    'Save lost explored bounds or discovered places',
+  );
+  assert(
+    await read('window.stichos.explored(0,200)&&!window.stichos.explored(10000,10000)'),
+    'Save did not preserve visited and unvisited terrain',
+  );
+  await tap('m');
+  await click('#s-atlas-fit');
+  await screenshot('07-atlas-continued');
+  await tap('Escape');
+  log(
+    'Save/Continue preserves generation3 position, discovered names and visited/unvisited map cells',
+  );
+  assert(errors.length === 0, 'Browser reported runtime or console errors');
+  log('No browser console or runtime errors');
+}
+
 async function possessionChecks() {
   await click('#s-continue');
   await waitFor('!window.stichos.state.paused', 'continue the completed QA life');
@@ -886,9 +1102,9 @@ try {
   browser = await connect(version.webSocketDebuggerUrl, (method, params) => {
     if (method.startsWith('Browser.download')) downloads.push({ method, ...params });
   });
-  if (visualOnly || expeditionOnly)
+  if (visualOnly || expeditionOnly || atlasOnly)
     ({ browserContextId: contextId } = await browser.send('Target.createBrowserContext'));
-  if (!visualOnly && !possessionOnly && !expeditionOnly && !smoke) {
+  if (!visualOnly && !possessionOnly && !expeditionOnly && !atlasOnly && !smoke) {
     fs.mkdirSync(downloadHost, { recursive: true });
     await browser.send('Browser.setDownloadBehavior', {
       behavior: 'allow',
@@ -953,7 +1169,9 @@ try {
     );
     await screenshot('03-cathedral-world');
     log('Seed entry, visible mind-transfer sequence, skip button, and humanoid staff host');
-    if (expeditionOnly) {
+    if (atlasOnly) {
+      await atlasChecks();
+    } else if (expeditionOnly) {
       await expeditionChecks();
     } else if (visualOnly) {
       await delay(3000);
@@ -1245,8 +1463,9 @@ try {
           await closeDialogue();
         }
         await clickWalk({ x: 0, y: 0 }, 0.22, 'join trunk road');
+        const travelDistance = (await state()).worldGeneration === 3 ? 240 : 110;
         const start = (await state()).player,
-          until = Date.now() + 100000;
+          until = Date.now() + 130000;
         let enteredTown = false,
           townShot = false,
           nextLog = 32;
@@ -1264,7 +1483,7 @@ try {
             townShot = true;
             console.log('SHOT 16a-next-settlement.png');
           }
-          if (s.player.x - start.x >= 110) break;
+          if (s.player.x - start.x >= travelDistance) break;
           if (s.player.x - start.x >= nextLog) {
             console.log(`ROAD ${Math.floor(s.player.x - start.x)} tiles`);
             nextLog += 32;
@@ -1274,7 +1493,10 @@ try {
         }
         await setKeys([]);
         const after = await state();
-        assert(after.player.x - start.x >= 110, 'Did not walk 110 continuous tiles');
+        assert(
+          after.player.x - start.x >= travelDistance,
+          `Did not walk ${travelDistance} continuous tiles`,
+        );
         assert(enteredTown, 'Long walk did not pass through another generated settlement');
         assert(after.cacheSize <= 160, 'Chunk cache exceeded bound');
         await screenshot('16-long-road');
@@ -1352,15 +1574,17 @@ try {
   const report = {
     started,
     finished: new Date(),
-    mode: expeditionOnly
-      ? 'expedition'
-      : possessionOnly
-        ? 'possession'
-        : visualOnly
-          ? 'visual'
-          : smoke
-            ? 'smoke'
-            : 'full',
+    mode: atlasOnly
+      ? 'atlas'
+      : expeditionOnly
+        ? 'expedition'
+        : possessionOnly
+          ? 'possession'
+          : visualOnly
+            ? 'visual'
+            : smoke
+              ? 'smoke'
+              : 'full',
     endpoint,
     baseUrl: baseUrl.href,
     targetId,
@@ -1378,7 +1602,7 @@ try {
     path.join(out, visualOnly ? `${visualName}-results.json` : 'results.json'),
     JSON.stringify(report, null, 2),
   );
-  if (!visualOnly && !possessionOnly && !expeditionOnly)
+  if (!visualOnly && !possessionOnly && !expeditionOnly && !atlasOnly)
     fs.writeFileSync(
       path.join(out, 'REPORT.md'),
       `# Stíchos browser QA\n\nRun: ${started.toISOString()}. ${failure ? '**FAIL** — ' + failure.message : findings.length ? '**Checks passed; findings remain.**' : '**PASS**'}. Mode: ${smoke ? 'smoke' : 'full'}.\n\nThe harness uses an isolated Agent Workspace Chromium tab, real CDP keyboard/mouse input, and read-only \`window.stichos\` diagnostics. It does not inject game state or directly write or clear browser storage; save changes come from normal game actions. The game runs on the separate localhost origin.\n\n## Verified\n\n${results.map((r) => '- ' + r.name + (r.details ? ': ' + r.details : '')).join('\n')}\n\n## Findings\n\n${findings.length ? findings.map((f) => '- ' + f).join('\n') : 'None observed.'}\n\n## Evidence and limits\n\nScreenshots and detailed results: [../../.dream-loop/stichos-qa/](../../.dream-loop/stichos-qa/). Browser errors: ${errors.length}. Desktop: 1600×1000. Mobile: 390×844. The FPS observation describes this isolated browser session; it is not a hardware benchmark. Audio quality, prolonged combat balance, death/mind-transfer recovery, and file import/export need separate checks.\n\n## Repeat\n\nDiscover the active workspace-owned endpoint with \`workspace_browser_targets\`, then run:\n\n\`\`\`sh\nnode scripts/browser-stichos-check.mjs http://127.0.0.1:PORT '${baseUrl.href}'${smoke ? ' --smoke' : ''}\n\`\`\`\n\nThe endpoint is ephemeral. The script creates and closes its own tab. Omit \`--smoke\` to include gathering, crafting, trading and 110-tile travel.\n`,
@@ -1389,7 +1613,7 @@ try {
     await browser
       .send('Target.disposeBrowserContext', { browserContextId: contextId })
       .catch(() => {});
-  if (browser && !visualOnly && !possessionOnly && !expeditionOnly && !smoke)
+  if (browser && !visualOnly && !possessionOnly && !expeditionOnly && !atlasOnly && !smoke)
     await browser.send('Browser.setDownloadBehavior', { behavior: 'default' }).catch(() => {});
   page?.close();
   browser?.close();
