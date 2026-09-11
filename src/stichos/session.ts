@@ -1,5 +1,7 @@
-import { InfiniteWorld, appearance, CHUNK_SIZE } from './world.ts';
+import { InfiniteWorld, appearance, CHUNK_SIZE, type WorldGeneration } from './world.ts';
 import { deriveSeed } from '../procedural/random.ts';
+import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
+import { plantProfile, type PlantKind } from './botany.ts';
 import type {
   Dialogue,
   Effect,
@@ -13,6 +15,7 @@ import type {
   Prop,
   Quest,
   Recipe,
+  Settlement,
 } from './types.ts';
 
 export const ITEMS: Record<ItemId, { name: string; description: string; price: number }> = {
@@ -115,6 +118,7 @@ export interface WeaponProfile {
   damage: number;
   range: number;
   cooldown: number;
+  construction?: string;
 }
 type SupplyJob = {
   npcId: string;
@@ -123,6 +127,30 @@ type SupplyJob = {
   number: number;
   active: boolean;
   target: Point;
+};
+type BodyPossessions = {
+  npcId: string;
+  inventory: Partial<Record<ItemId, number>>;
+  coins: number;
+  weapons: Weapon[];
+  equipped: Weapon;
+};
+type CorrespondenceJob = {
+  sourceId: string;
+  sourceName: string;
+  sourceClan: number;
+  sourcePoint: Point;
+  recipientId: string;
+  recipientName: string;
+  recipientClan: number;
+  settlementId: string;
+  settlementName: string;
+  target: Point;
+  number: number;
+  payload: string;
+  omitted: string;
+  reward: number;
+  status: 'active' | 'delivered' | 'revealed' | 'withheld' | 'cancelled';
 };
 type Arrow = {
   effect: Effect;
@@ -161,21 +189,25 @@ export class Stichos {
   phase: 'playing' | 'lost' = 'playing';
   occupiedNpcId: string | null = null;
   private occupiedBody: Npc | null = null;
+  private bodyPossessions = new Map<string, BodyPossessions>();
   private npcMemory = new Map<string, Npc>();
   private npcRuntime = new Map<string, Npc>();
   private supplyJobs = new Map<string, SupplyJob>();
+  private correspondenceJobs = new Map<string, CorrespondenceJob>();
   private arrows: Arrow[] = [];
   private nextEffect = 1;
   private refreshClock = 0;
   private stepClock = 0;
   private lifeCount = 0;
   private restAnchor: Point;
+  private transferDialogTarget: string | null = null;
   private seed: number;
 
-  constructor(seed: number) {
+  constructor(seed: number, generation: WorldGeneration = 2) {
     if (!Number.isSafeInteger(seed)) throw new Error('A world seed must be a safe integer.');
+    if (generation !== 1 && generation !== 2) throw new Error('Unknown world generation.');
     this.seed = seed >>> 0;
-    this.world = new InfiniteWorld(this.seed);
+    this.world = new InfiniteWorld(this.seed, generation);
     this.restAnchor = { ...this.world.spawn };
     this.player = {
       ...this.world.spawn,
@@ -225,7 +257,13 @@ export class Stichos {
     return this.storyStage >= 4;
   }
   get transferCandidate(): Npc | null {
-    if (!this.transferReady) return null;
+    return this.transferCandidates[0] ?? null;
+  }
+  get dispatches() {
+    return [...this.correspondenceJobs.values()].map((job) => clone(job));
+  }
+  get transferCandidates(): Npc[] {
+    if (!this.transferReady) return [];
     const center = this.phase === 'lost' ? this.restAnchor : this.player;
     const candidates = new Map<string, Npc>();
     for (const original of this.world.npcsAround(center.x, center.y, 14)) {
@@ -234,7 +272,7 @@ export class Stichos {
     }
     for (const npc of [...this.npcMemory.values(), ...this.npcs]) candidates.set(npc.id, npc);
     const priority = (npc: Npc) => (npc.role === 'pilgrim' ? 0 : npc.role === 'refugee' ? 1 : 2);
-    const target = [...candidates.values()]
+    return [...candidates.values()]
       .filter(
         (npc) =>
           npc.id !== this.occupiedNpcId &&
@@ -246,8 +284,9 @@ export class Stichos {
           distance(npc, center) <= 14 &&
           this.clear(npc),
       )
-      .sort((a, b) => priority(a) - priority(b) || distance(a, center) - distance(b, center))[0];
-    return target ? clone(target) : null;
+      .sort((a, b) => priority(a) - priority(b) || distance(a, center) - distance(b, center))
+      .slice(0, 3)
+      .map((npc) => clone(npc));
   }
   get capacity() {
     return CAPACITY;
@@ -257,40 +296,7 @@ export class Stichos {
   }
 
   weaponProfile(kind: Weapon): WeaponProfile {
-    const seed = deriveSeed(this.seed, 'theo-weapon', kind);
-    const effect = (['stagger', 'breath', 'warmth'] as const)[seed % 3];
-    const material = (
-      kind === 'sword'
-        ? ['blue steel', 'tempered iron', 'Sallas alloy']
-        : ['frostwood', 'ironbark', 'silver birch']
-    )[(seed >>> 4) % 3];
-    const effectDescription = {
-      stagger: 'Successful hits delay the target’s next attack.',
-      breath: 'Successful hits restore two breath.',
-      warmth: 'Successful hits restore three warmth.',
-    }[effect];
-    const prefix = { stagger: 'Steadfast', breath: 'Breathkeeper', warmth: 'Emberbound' }[effect];
-    return {
-      name: `${prefix} ${material} ${kind}`,
-      material,
-      effect,
-      effectDescription,
-      color: { stagger: '#d9e2ee', breath: '#a8d8d1', warmth: '#e2b088' }[effect],
-      damage:
-        (kind === 'sword' ? 25 : kind === 'bow' ? 16 : 17) +
-        ((seed >>> 8) % 5) +
-        this.player.level * 2,
-      range:
-        kind === 'bow'
-          ? 8.5 + ((seed >>> 12) % 5) * 0.4
-          : (kind === 'sword' ? 1.65 : 1.5) + ((seed >>> 12) % 4) * 0.04,
-      cooldown: Number(
-        (
-          (kind === 'sword' ? 0.46 : kind === 'bow' ? 0.63 : 0.58) +
-          ((seed >>> 16) % 5) * 0.01
-        ).toFixed(2),
-      ),
-    };
+    return generatedWeaponProfile(this.player.appearance.seed, kind, this.player.level);
   }
 
   update(dt: number, input: Input) {
@@ -479,10 +485,33 @@ export class Stichos {
         this.event('dialogue', 'Already searched.');
         return;
       }
-      if (!this.gain({ wood: 2, rations: 1 })) return;
+      const vault = prop.id.startsWith('vault:');
+      const archiveHerb = (['cequin', 'heartleaf', 'emberroot'] as const)[prop.seed % 3];
+      if (!this.gain(vault ? { [archiveHerb]: 3, ore: 2, rations: 1 } : { wood: 2, rations: 1 }))
+        return;
       this.opened.add(prop.id);
-      this.player.coins += 5;
-      this.event('harvest', 'Recovered two timber, plant rations, and five coins.');
+      this.player.coins += vault ? 12 : 5;
+      if (vault) {
+        const quest = this.quests.find((q) => q.id === prop.id.replace(/:cache$/, ':survey'));
+        if (quest)
+          Object.assign(quest, {
+            complete: true,
+            stage: 1,
+            objective: 'The botanical archive has been recovered.',
+          });
+        this.entry(
+          'A record beneath the frost',
+          [
+            'These seed records predate Brown’s factories. A Sallas annotation describes cequin sustaining more than breath: a living body may hold an echo after the mind has left. It is a lead, not an explanation.',
+            'The vault’s catalogue records plants exchanged between rival families before the first industrial trials. Someone has struck the original recipients from the ledger. Sallas appears in the surviving margin.',
+            'A preserved botanical drawing shows root systems connected beneath separate beds. The accompanying Sallas note compares their shared signal to a memory carried between living hosts.',
+          ][prop.seed % 3]!,
+        );
+        this.event(
+          'harvest',
+          `Recovered three ${ITEMS[archiveHerb].name.toLowerCase()}, two ore, rations, twelve coins, and an archive note.`,
+        );
+      } else this.event('harvest', 'Recovered two timber, plant rations, and five coins.');
       return;
     }
     if (prop.kind === 'door') {
@@ -526,7 +555,9 @@ export class Stichos {
             ],
       };
     } else if (prop.kind === 'bench' || prop.kind === 'shrine') {
-      const candidate = prop.kind === 'shrine' ? this.transferCandidate : null;
+      const candidates = prop.kind === 'shrine' ? this.transferCandidates : [];
+      const candidate = candidates[0];
+      this.transferDialogTarget = candidate?.id ?? null;
       this.dialogue = {
         speaker: prop.kind === 'shrine' ? 'Quiet concentration' : 'A sheltered rest',
         role: 'Rest',
@@ -534,24 +565,36 @@ export class Stichos {
         text:
           prop.kind === 'shrine'
             ? candidate
-              ? `Beyond the stained glass, ${candidate.name} breathes in another human body. The signal can carry Theo into that person at their present location. This body will remain here when the mind leaves.`
+              ? `Beyond the stained glass, ${candidate.name} breathes in another human body. The signal can carry Theo into that person at their present location. This body keeps its pack, coins and equipment here; the other person has their own belongings. Memories and promises travel with the mind.`
               : 'Prometheus watches in colored glass. Quiet concentration steadies this borrowed body. No eligible living mind is within reach yet.'
             : 'The wind is gentler here. Rest replenishes health, breath, warmth, and stamina.',
         choices: [
           { id: 'rest', label: 'Rest and remember this place' },
           ...(prop.kind === 'shrine' && this.transferReady
-            ? [
-                {
-                  id: 'transfer',
-                  label: candidate
-                    ? `Enter ${candidate.name}’s body`
-                    : 'No living mind within reach',
-                  disabled: !candidate,
-                  detail: candidate
-                    ? `A ${candidate.role} ${distance(candidate, this.player).toFixed(1)} tiles away. Your mind enters their actual body.`
-                    : 'Keep exploring for inhabited shrines.',
-                },
-              ]
+            ? candidates.length
+              ? candidates.map((person, i) => {
+                  const kit =
+                    this.bodyPossessions.get(person.id) ?? this.initialPossessions(person);
+                  return {
+                    id: i === 0 ? 'transfer' : `transfer:${person.id}`,
+                    label: `Enter ${person.name}’s body`,
+                    detail: `${person.role} · ${this.world.clans[person.clan].name} · ${Math.ceil(person.hp)}/${person.maxHp} health · ${kit.weapons.join('/')} · ${kit.coins} coins · ${Object.entries(
+                      kit.inventory,
+                    )
+                      .map(
+                        ([item, amount]) => `${amount} ${ITEMS[item as ItemId].name.toLowerCase()}`,
+                      )
+                      .join(', ')}`,
+                  };
+                })
+              : [
+                  {
+                    id: 'transfer',
+                    label: 'No living mind within reach',
+                    disabled: true,
+                    detail: 'Keep exploring for inhabited shrines.',
+                  },
+                ]
             : []),
           { id: 'close', label: 'Continue walking' },
         ],
@@ -579,14 +622,37 @@ export class Stichos {
         npcId: prop.id,
         text:
           prop.kind === 'notice'
-            ? 'The botanical clinics need supplies. Speak with local botanists for paid work. Brown factories promise abundance; the other families fear what that promise will cost.'
+            ? prop.id.startsWith('vault:')
+              ? 'An old botanical seed vault lies north along this path. Raiders have entered its chambers. The archive deep inside may preserve plants and records from before Brown’s industrial trials. Recovering it could reveal another trace of Sallas.'
+              : 'The botanical clinics need supplies. Speak with local botanists for paid work. Brown factories promise abundance; the other families fear what that promise will cost.'
             : prop.kind === 'grave'
               ? 'A human name, worn by cold. The six families do not own every memory.'
               : 'Cold blue country continues beyond the settlement. Roads connect inhabited places; wild plants grow off the paths.',
         choices: [{ id: 'close', label: 'Continue' }],
       };
     }
+    if (prop.kind === 'notice') {
+      if (prop.id.startsWith('vault:'))
+        this.dialogue!.choices.unshift({
+          id: 'vault:survey',
+          label: 'Mark the vault in my journal',
+        });
+      else this.addDispatchChoices(prop);
+    }
     this.event('dialogue');
+  }
+
+  botanicalProfile(prop: Prop) {
+    if (!['cequin', 'heartleaf', 'emberroot', 'mushroom'].includes(prop.kind)) return null;
+    const profile = plantProfile(prop.seed, prop.kind as PlantKind);
+    // The teaching garden has a known harvest; old lives keep their established yields.
+    if (this.world.generation === 1 || prop.id.startsWith('origin:'))
+      return {
+        ...profile,
+        yield: prop.kind === 'cequin' ? 3 : 2,
+        description: `${profile.description} Cultivated harvest.`,
+      };
+    return profile;
   }
 
   private harvest(prop: Prop) {
@@ -605,11 +671,15 @@ export class Stichos {
           : prop.kind === 'mushroom'
             ? 'rations'
             : (prop.kind as ItemId);
-    const amount = item === 'cequin' ? 3 : 2;
+    const botanical = this.botanicalProfile(prop);
+    const amount = botanical?.yield ?? (item === 'cequin' ? 3 : 2);
     if (!this.gain({ [item]: amount })) return;
     this.removed.add(prop.id);
     this.effect('harvest', prop, '#d2efa8');
-    this.event('harvest', `Gathered ${amount} ${ITEMS[item].name.toLowerCase()}.`);
+    this.event(
+      'harvest',
+      `Gathered ${amount} ${ITEMS[item].name.toLowerCase()}${botanical ? ` from ${botanical.name.toLowerCase()}` : ''}.`,
+    );
   }
 
   private talk(npc: Npc) {
@@ -653,6 +723,7 @@ export class Stichos {
     } else if (npc.role === 'guard')
       text = `I serve ${this.world.clans[npc.clan]?.name ?? 'this family'}. Keep your weapons away from our people. Reputation travels farther than footsteps.`;
     this.dialogue = { speaker: npc.name, role: npc.role, npcId: npc.id, text, choices };
+    this.addDispatchChoices(npc);
     this.event('dialogue');
   }
 
@@ -705,6 +776,71 @@ export class Stichos {
     if (!npc && !prop) {
       this.dialogue = null;
       this.event('dialogue', 'Move closer to continue.');
+      return;
+    }
+    if (choiceId === 'vault:survey' && prop?.kind === 'notice' && prop.id.startsWith('vault:')) {
+      const siteId = prop.id.replace(/:notice$/, '');
+      const site = this.world.vaultsAround(prop.x, prop.y, 80).find((v) => v.id === siteId);
+      if (site && !this.quests.some((q) => q.id === `${siteId}:survey`)) {
+        const complete = this.opened.has(`${siteId}:cache`);
+        this.quests.push({
+          id: `${siteId}:survey`,
+          title: 'Beneath the frost',
+          description:
+            'An abandoned seed vault preserves a botanical archive. Its chambers are occupied by raiders.',
+          stage: complete ? 1 : 0,
+          complete,
+          target: site.reward,
+          objective: complete
+            ? 'The botanical archive has been recovered.'
+            : 'Follow the path north. Search the archive in the deepest chamber.',
+        });
+      }
+      this.dialogue = null;
+      this.event('dialogue', 'The seed vault is recorded in your journal.');
+      return;
+    }
+    if (
+      choiceId === 'dispatch:request' &&
+      (npc?.role === 'archivist' || npc?.role === 'engineer' || prop?.kind === 'notice')
+    ) {
+      this.acceptDispatch(npc ?? prop!);
+      return;
+    }
+    if (choiceId.startsWith('dispatch:cancel:')) {
+      const job = this.correspondenceJobs.get(choiceId.slice('dispatch:cancel:'.length));
+      if (
+        job?.status === 'active' &&
+        (npc?.id === job.sourceId ||
+          (prop?.kind === 'notice' && distance(prop, job.sourcePoint) < 32))
+      ) {
+        job.status = 'cancelled';
+        const quest = this.quests.find((q) => q.id === this.dispatchQuestId(job));
+        if (quest)
+          Object.assign(quest, {
+            complete: true,
+            stage: 1,
+            objective: 'Dispatch withdrawn. No payment was claimed.',
+          });
+        this.entry(
+          'A dispatch withdrawn',
+          `Theo withdrew the memorized dispatch for ${job.recipientName} in ${job.settlementName}. No payment or experience was claimed.`,
+        );
+        this.reply('The dispatch is withdrawn. You can ask for another route when ready.');
+        this.event('quest', 'Dispatch withdrawn.');
+      }
+      return;
+    }
+    const dispatchChoice = /^dispatch:(deliver|reveal|withhold):(.+)$/.exec(choiceId);
+    if (dispatchChoice && npc) {
+      const job = this.correspondenceJobs.get(dispatchChoice[2]);
+      if (
+        job?.status === 'active' &&
+        job.recipientId === npc.id &&
+        !this.removed.has(npc.id) &&
+        this.clear(npc)
+      )
+        this.deliverDispatch(job, dispatchChoice[1] as 'deliver' | 'reveal' | 'withhold');
       return;
     }
     if (choiceId.startsWith('buy:') || choiceId.startsWith('sell:')) {
@@ -902,9 +1038,17 @@ export class Stichos {
       this.rest();
       return;
     }
-    if (choiceId === 'transfer' && prop?.kind === 'shrine' && this.transferReady) {
+    if (
+      (choiceId === 'transfer' || choiceId.startsWith('transfer:')) &&
+      prop?.kind === 'shrine' &&
+      this.transferReady
+    ) {
       this.dialogue = null;
-      this.reincarnate();
+      this.reincarnate(
+        choiceId === 'transfer'
+          ? (this.transferDialogTarget ?? undefined)
+          : choiceId.slice('transfer:'.length),
+      );
     }
   }
 
@@ -971,6 +1115,238 @@ export class Stichos {
     this.complete(`supply:${npc.id}:${job.number}`);
     this.reply(
       'The clinic can prepare these immediately. Fourteen coins, with our thanks. There will be more work when you are ready.',
+    );
+  }
+
+  private dispatchQuestId(job: CorrespondenceJob) {
+    return `correspondence:${job.sourceId}:${job.number}`;
+  }
+
+  private addDispatchChoices(source: Npc | Prop) {
+    if (!this.dialogue) return;
+    const canOffer =
+      'role' in source
+        ? source.role === 'archivist' || source.role === 'engineer'
+        : source.kind === 'notice';
+    const own = this.correspondenceJobs.get(source.id);
+    if (canOffer)
+      this.dialogue.choices.unshift({
+        id: 'dispatch:request',
+        label:
+          own?.status === 'active'
+            ? `Review the dispatch to ${own.settlementName}`
+            : 'Carry a memorized dispatch to another settlement',
+      });
+    for (const job of this.correspondenceJobs.values()) {
+      if (job.status !== 'active') continue;
+      if (source.id === job.recipientId) {
+        this.dialogue.text = `${job.sourceName} asked you to carry this account: “${job.payload}” The omitted witness note says: “${job.omitted}” ${source.name} waits to hear what you will say.`;
+        this.dialogue.choices.unshift(
+          {
+            id: `dispatch:deliver:${job.sourceId}`,
+            label: `Give the authorized account · ${job.reward} coins`,
+            detail: 'Source trust +7 · recipient trust +2',
+          },
+          {
+            id: `dispatch:reveal:${job.sourceId}`,
+            label: `Disclose the omitted witness note · ${Math.floor(job.reward * 0.6)} coins`,
+            detail: 'Source trust −6 · recipient trust +8',
+          },
+          {
+            id: `dispatch:withhold:${job.sourceId}`,
+            label: 'Withhold the account and warn its sender',
+            detail: 'Source trust +3 · recipient trust −5 · no payment',
+          },
+        );
+      }
+      if (
+        source.id === job.sourceId ||
+        (!('role' in source) && source.kind === 'notice' && distance(source, job.sourcePoint) < 32)
+      ) {
+        const unavailable =
+          this.removed.has(job.recipientId) || this.npcMemory.get(job.recipientId)?.hostile;
+        this.dialogue.choices.unshift({
+          id: `dispatch:cancel:${job.sourceId}`,
+          label: unavailable
+            ? `Withdraw dispatch: ${job.recipientName} cannot receive it`
+            : `Withdraw the dispatch to ${job.recipientName}`,
+        });
+      }
+    }
+  }
+
+  private hasRoadAccess(npc: Npc, town: Settlement) {
+    const queue: Point[] = [{ x: Math.round(npc.x), y: Math.round(npc.y) }];
+    const visited = new Set<string>([`${queue[0].x},${queue[0].y}`]);
+    for (let i = 0; i < queue.length && i < 2600; i++) {
+      const point = queue[i];
+      const tile = this.world.tile(point.x, point.y);
+      if (
+        (Math.abs(point.x - town.x) > town.radius || Math.abs(point.y - town.y) > town.radius) &&
+        ['road', 'bridge'].includes(tile.terrain)
+      )
+        return true;
+      for (const [dx, dy] of [
+        [0, 1],
+        [1, 0],
+        [0, -1],
+        [-1, 0],
+      ]) {
+        const next = { x: point.x + dx, y: point.y + dy };
+        const key = `${next.x},${next.y}`;
+        if (
+          visited.has(key) ||
+          Math.abs(next.x - town.x) > town.radius + 5 ||
+          Math.abs(next.y - town.y) > town.radius + 5 ||
+          !this.clear(next)
+        )
+          continue;
+        visited.add(key);
+        queue.push(next);
+      }
+    }
+    return false;
+  }
+
+  private acceptDispatch(source: Npc | Prop) {
+    const existing = this.correspondenceJobs.get(source.id);
+    if (existing?.status === 'active') {
+      this.reply(
+        `Your memorized dispatch is for ${existing.recipientName} in ${existing.settlementName}. Give the authorized account, disclose its omitted witness note, or withhold it when you reach that person. You may withdraw the work here or at this settlement’s noticeboard.`,
+      );
+      this.addDispatchChoices(source);
+      return;
+    }
+    const number = (existing?.number ?? 0) + 1;
+    const nearby = this.world.settlementsAround(source.x, source.y, 112);
+    const home = [...nearby].sort((a, b) => distance(a, source) - distance(b, source))[0];
+    if (!home || distance(home, source) > 32) return;
+    const sourceClan = source.clan ?? home.clan;
+    const destinations = nearby
+      .filter((town) => town.id !== home.id)
+      .sort(
+        (a, b) =>
+          Number(a.clan === sourceClan) - Number(b.clan === sourceClan) ||
+          deriveSeed(this.seed, source.id, number, a.id) -
+            deriveSeed(this.seed, source.id, number, b.id),
+      );
+    let recipient: Npc | undefined;
+    let destination: Settlement | undefined;
+    for (const town of destinations) {
+      const residents = this.world
+        .npcsAround(town.x, town.y, town.radius + 2)
+        .map((n) => this.npcMemory.get(n.id) ?? n)
+        .filter(
+          (n) =>
+            ['archivist', 'engineer', 'botanist'].includes(n.role) &&
+            n.id !== source.id &&
+            n.id !== this.occupiedNpcId &&
+            !this.removed.has(n.id) &&
+            n.hp > 0 &&
+            !n.hostile &&
+            this.clear(n),
+        )
+        .sort(
+          (a, b) =>
+            deriveSeed(this.seed, source.id, number, a.id) -
+            deriveSeed(this.seed, source.id, number, b.id),
+        );
+      recipient = residents.find((n) => this.hasRoadAccess(n, town));
+      if (recipient) {
+        destination = town;
+        break;
+      }
+    }
+    if (!recipient || !destination) {
+      this.reply(
+        'No living recipient with an open road is available nearby. Other settlements may have correspondence to carry.',
+      );
+      return;
+    }
+    const seed = deriveSeed(this.seed, source.id, 'dispatch', number);
+    const reports = [
+      [
+        'A trial furnace met its quota without delaying the clinic’s cequin allotment.',
+        'The gardener counted three missing breath jars after the same trial.',
+      ],
+      [
+        'The last winter convoy arrived with its botanical medicines intact.',
+        'A refugee says the family seal was replaced before the medicine was counted.',
+      ],
+      [
+        'A copied radio log contains only routine weather reports.',
+        'The copyist heard an unregistered voice between the weather intervals.',
+      ],
+      [
+        'The seed archive is being moved for protection from frost.',
+        'A botanist was refused access to the oldest cequin cultivation records.',
+      ],
+    ];
+    const [payload, omitted] = reports[seed % reports.length];
+    const job: CorrespondenceJob = {
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceClan,
+      sourcePoint: { x: source.x, y: source.y },
+      recipientId: recipient.id,
+      recipientName: recipient.name,
+      recipientClan: recipient.clan,
+      settlementId: destination.id,
+      settlementName: destination.name,
+      target: { x: recipient.x, y: recipient.y },
+      number,
+      payload,
+      omitted,
+      reward: 16 + (seed % 13) + Math.floor(distance(source, recipient) / 20),
+      status: 'active',
+    };
+    this.correspondenceJobs.set(source.id, job);
+    this.addQuest({
+      id: this.dispatchQuestId(job),
+      title: `A dispatch for ${destination.name}`,
+      description: `Memorize ${source.name}’s account: “${payload}” The omitted note says: “${omitted}” This message is knowledge, so it remains with Theo through a body change.`,
+      objective: `Speak to ${recipient.name} in ${destination.name}. Choose what to disclose. Authorized delivery pays ${job.reward} coins.`,
+      stage: 0,
+      complete: false,
+      target: { ...job.target },
+    });
+    this.entry(
+      'Words for another settlement',
+      `${source.name} entrusted Theo with a memorized dispatch for ${recipient.name} in ${destination.name}. Its authorized account and omitted witness note are recorded in the journal. Neither account has been independently verified.`,
+    );
+    this.reply(
+      `Follow the roads to ${destination.name} and speak with ${recipient.name}. Memorize this account: “${payload}” An omitted witness note says: “${omitted}” Decide what they should hear when you arrive. The authorized payment is ${job.reward} coins.`,
+    );
+  }
+
+  private deliverDispatch(job: CorrespondenceJob, choice: 'deliver' | 'reveal' | 'withhold') {
+    job.status = choice === 'deliver' ? 'delivered' : choice === 'reveal' ? 'revealed' : 'withheld';
+    this.player.coins +=
+      choice === 'deliver' ? job.reward : choice === 'reveal' ? Math.floor(job.reward * 0.6) : 0;
+    this.changeReputation(job.sourceClan, choice === 'deliver' ? 7 : choice === 'reveal' ? -6 : 3);
+    this.changeReputation(
+      job.recipientClan,
+      choice === 'deliver' ? 2 : choice === 'reveal' ? 8 : -5,
+    );
+    this.complete(this.dispatchQuestId(job));
+    const decision =
+      choice === 'deliver'
+        ? 'gave the authorized account'
+        : choice === 'reveal'
+          ? 'disclosed the omitted witness note'
+          : 'withheld the account and warned its sender';
+    const quest = this.quests.find((q) => q.id === this.dispatchQuestId(job));
+    if (quest) quest.objective = `In ${job.settlementName}, Theo ${decision}.`;
+    this.entry(
+      'What the next settlement heard',
+      `Before ${job.recipientName} in ${job.settlementName}, Theo ${decision}. The families’ trust changed; the underlying report remains a disputed account, not a solution to the Sallas mystery.`,
+    );
+    this.reply(
+      choice === 'deliver'
+        ? 'The authorized account is received. Your sender will know it arrived, and the agreed coins are yours.'
+        : choice === 'reveal'
+          ? 'That missing detail changes what we were told. Take this smaller payment for speaking plainly; your sender may resent the disclosure.'
+          : 'Then this conversation will be remembered for what you refused to say. The sender receives your warning; this family offers no payment.',
     );
   }
 
@@ -1190,7 +1566,7 @@ export class Stichos {
     this.event('heal', 'Rested. This place will anchor a return.');
   }
 
-  reincarnate() {
+  reincarnate(targetId?: string) {
     const lost = this.phase === 'lost';
     if (!lost && (!this.transferReady || !this.nearProp('shrine'))) {
       this.event(
@@ -1203,8 +1579,13 @@ export class Stichos {
       this.event('dialogue', 'An attacker breaks your concentration.');
       return;
     }
-    const target = this.transferReady ? this.transferCandidate : null;
-    if (this.transferReady && !target) {
+    const candidates = this.transferCandidates;
+    const target = targetId ? candidates.find((npc) => npc.id === targetId) : candidates[0];
+    if (targetId && !target) {
+      this.event('dialogue', 'That person’s living mind is no longer within reach.');
+      return;
+    }
+    if (this.transferReady && !target && !lost) {
       this.event('dialogue', 'No living human mind answers near this place of rest.');
       return;
     }
@@ -1240,32 +1621,45 @@ export class Stichos {
       this.npcMemory.set(previous.id, previous);
       this.npcRuntime.set(previous.id, clone(previous));
       if (previous.hp <= 0) this.removed.add(previous.id);
+      this.bodyPossessions.set(previous.id, {
+        npcId: previous.id,
+        inventory: clone(this.inventory),
+        coins: this.player.coins,
+        weapons: [...this.weapons],
+        equipped:
+          this.player.appearance.weapon === 'none' ? 'staff' : this.player.appearance.weapon,
+      });
+      const belongings = this.bodyPossessions.get(target.id) ?? this.initialPossessions(target);
+      this.bodyPossessions.delete(target.id);
+      this.inventory = clone(belongings.inventory);
+      this.player.coins = belongings.coins;
+      this.weapons.clear();
+      for (const weapon of belongings.weapons) this.weapons.add(weapon);
       this.occupiedBody = clone(target);
       this.occupiedNpcId = target.id;
       this.lifeCount++;
-      const weapon = this.player.appearance.weapon;
       this.player.x = target.x;
       this.player.y = target.y;
       this.player.bodyName = target.name;
       this.player.clan = target.clan;
       this.player.appearance = clone(target.appearance);
-      // Equipment belongs to the retained inventory; the host supplies the body and clothing.
-      this.player.appearance.weapon = weapon;
+      this.player.appearance.weapon = belongings.equipped;
+      this.player.cequinTime = 0;
       this.player.maxHp = target.maxHp;
       this.player.hp = target.hp;
       this.player.heading = target.heading;
       this.player.phase = 0;
       this.entry(
         'Another person’s breath',
-        `Theo’s mind entered ${target.name}, a living ${target.role}, at (${target.x.toFixed(1)}, ${target.y.toFixed(1)}). ${previous.name}’s body remained at (${previousPosition.x.toFixed(1)}, ${previousPosition.y.toFixed(1)}). The world and unfinished promises remain.`,
+        `Theo’s mind entered ${target.name}, a living ${target.role}, at (${target.x.toFixed(1)}, ${target.y.toFixed(1)}). ${previous.name}’s body and belongings remained at (${previousPosition.x.toFixed(1)}, ${previousPosition.y.toFixed(1)}). This host carries their own pack, coins and equipment. Theo’s memories and unfinished promises remain.`,
       );
     } else {
-      // Before the recovered signal, the clinic treats the original priest; this is not possession.
+      // Without an answering mind, the clinic revives the current body at its rest anchor.
       this.player.x = this.restAnchor.x;
       this.player.y = this.restAnchor.y;
       this.player.hp = this.player.maxHp;
     }
-    if (lost) this.player.coins = Math.floor(this.player.coins * 0.8);
+    if (lost && !target) this.player.coins = Math.floor(this.player.coins * 0.8);
     this.player.breath = 100;
     this.player.warmth = 100;
     this.player.stamina = 100;
@@ -1283,8 +1677,30 @@ export class Stichos {
       'transfer',
       target
         ? `Theo now breathes through ${target.name}’s body.`
-        : 'The clinic restores the priest’s breath.',
+        : `The clinic restores ${this.player.bodyName}’s breath.`,
     );
+  }
+
+  private initialPossessions(npc: Npc): BodyPossessions {
+    const seed = deriveSeed(this.seed, `body:${npc.id}:belongings`);
+    const equipped =
+      npc.role === 'guard'
+        ? 'sword'
+        : npc.appearance.weapon === 'none'
+          ? 'staff'
+          : npc.appearance.weapon;
+    return {
+      npcId: npc.id,
+      inventory:
+        npc.role === 'guard'
+          ? { cequin: 2, rations: 2, bandage: 1 }
+          : npc.role === 'refugee'
+            ? { cequin: 2, heartleaf: 1, rations: 1 }
+            : { cequin: 3, rations: 1, tonic: 1 },
+      coins: (npc.role === 'guard' ? 12 : npc.role === 'refugee' ? 2 : 5) + (seed % 8),
+      weapons: equipped === 'staff' ? ['staff'] : ['staff', equipped],
+      equipped,
+    };
   }
 
   private has(cost: Partial<Record<ItemId, number>>) {
@@ -1410,6 +1826,8 @@ export class Stichos {
     for (const npc of this.npcs) this.rememberNpc(npc);
     return clone({
       version: 1,
+      terrainRevision: 3,
+      worldGeneration: this.world.generation,
       seed: this.seed,
       player: this.player,
       inventory: this.inventory,
@@ -1429,13 +1847,15 @@ export class Stichos {
       lifeCount: this.lifeCount,
       occupiedNpcId: this.occupiedNpcId,
       occupiedBody: this.occupiedBody,
+      bodyPossessions: [...this.bodyPossessions.values()],
       supplyJobs: [...this.supplyJobs.values()],
+      correspondenceJobs: [...this.correspondenceJobs.values()],
     });
   }
 
   static restore(value: unknown): Stichos {
     const data = validateSave(value);
-    const game = new Stichos(data.seed);
+    const game = new Stichos(data.seed, data.worldGeneration ?? 1);
     game.player = clone(data.player);
     game.inventory = { ...data.inventory };
     for (const id of data.removed) game.removed.add(id);
@@ -1457,7 +1877,48 @@ export class Stichos {
     game.lifeCount = data.lifeCount;
     game.occupiedNpcId = data.occupiedNpcId ?? null;
     game.occupiedBody = data.occupiedBody ? clone(data.occupiedBody) : null;
+    game.bodyPossessions = new Map(
+      (data.bodyPossessions ?? []).map((body) => [body.npcId, clone(body)]),
+    );
     game.supplyJobs = new Map(data.supplyJobs.map((job) => [job.npcId, clone(job)]));
+    game.correspondenceJobs = new Map(
+      (data.correspondenceJobs ?? []).map((job) => [job.sourceId, clone(job)]),
+    );
+    if ((data.terrainRevision ?? 1) < 3) {
+      // Revisions 2 and 3 widen only the origin cathedral and move its houses.
+      // Preserve exact positions everywhere else and every already-clear legacy position.
+      const relocate = (point: Point) => {
+        if (game.clear(point) || Math.abs(point.x) > 26 || Math.abs(point.y) > 26) return false;
+        let nearest: Point | undefined;
+        let nearestDistance = 4.01;
+        for (let y = Math.round(point.y) - 4; y <= Math.round(point.y) + 4; y++) {
+          for (let x = Math.round(point.x) - 4; x <= Math.round(point.x) + 4; x++) {
+            const candidate = { x, y };
+            const offset = distance(candidate, point);
+            if (offset < nearestDistance && game.clear(candidate)) {
+              nearest = candidate;
+              nearestDistance = offset;
+            }
+          }
+        }
+        if (!nearest) return false;
+        Object.assign(point, nearest);
+        return true;
+      };
+      const playerMoved = relocate(game.player);
+      const anchorMoved = relocate(game.restAnchor);
+      for (const npc of game.npcMemory.values()) {
+        if (npc.hp > 0 && !game.removed.has(npc.id)) {
+          relocate(npc);
+          relocate(npc.home);
+        }
+      }
+      if (playerMoved || anchorMoved)
+        game.entry(
+          'Familiar ground',
+          'Your footing was restored beside the expanded cathedral. Your belongings, body and unfinished promises remain.',
+        );
+    }
     if (!game.clear(game.player) || !game.clear(game.restAnchor))
       throw new Error('Saved position is inside blocked terrain.');
     game.refreshNpcs();
@@ -1494,6 +1955,10 @@ function validateSave(value: unknown): SaveData {
     typeof v.cloak === 'boolean' &&
     ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
   if (!object(value) || value.version !== 1 || !number(value.seed, 0, 0xffffffff, true))
+    return fail();
+  if (value.terrainRevision !== undefined && ![1, 2, 3].includes(value.terrainRevision as number))
+    return fail();
+  if (value.worldGeneration !== undefined && ![1, 2].includes(value.worldGeneration as number))
     return fail();
   const p = value.player;
   if (
@@ -1592,6 +2057,33 @@ function validateSave(value: unknown): SaveData {
     )
       return fail();
   } else if (value.occupiedBody !== undefined && value.occupiedBody !== null) return fail();
+  if (value.bodyPossessions !== undefined) {
+    const currentBodyId = value.occupiedNpcId ?? `body:theo-priest:${value.seed}`;
+    if (
+      !Array.isArray(value.bodyPossessions) ||
+      !value.bodyPossessions.every(
+        (body) =>
+          object(body) &&
+          text(body.npcId, 160) &&
+          body.npcId !== currentBodyId &&
+          (value.npcs as Npc[]).some((n) => n.id === body.npcId) &&
+          object(body.inventory) &&
+          Object.entries(body.inventory).every(
+            ([k, v]) => isItem(k) && number(v, 0, CAPACITY, true),
+          ) &&
+          Object.values(body.inventory).reduce<number>((sum, n) => sum + (n as number), 0) <=
+            CAPACITY &&
+          number(body.coins, 0, Number.MAX_SAFE_INTEGER, true) &&
+          Array.isArray(body.weapons) &&
+          body.weapons.length > 0 &&
+          body.weapons.every((w) => ['staff', 'sword', 'bow'].includes(w)) &&
+          new Set(body.weapons).size === body.weapons.length &&
+          body.weapons.includes(body.equipped),
+      ) ||
+      new Set(value.bodyPossessions.map((body) => body.npcId)).size !== value.bodyPossessions.length
+    )
+      return fail();
+  }
   if (
     !Array.isArray(value.quests) ||
     !value.quests.every(
@@ -1634,5 +2126,36 @@ function validateSave(value: unknown): SaveData {
     )
   )
     return fail();
+  if (value.correspondenceJobs !== undefined) {
+    if (
+      !Array.isArray(value.correspondenceJobs) ||
+      !value.correspondenceJobs.every(
+        (job) =>
+          object(job) &&
+          ['sourceId', 'recipientId', 'settlementId'].every((k) => text(job[k], 160)) &&
+          ['sourceName', 'recipientName', 'settlementName'].every((k) => text(job[k], 200)) &&
+          job.sourceId !== job.recipientId &&
+          number(job.sourceClan, 0, 5, true) &&
+          number(job.recipientClan, 0, 5, true) &&
+          point(job.sourcePoint) &&
+          point(job.target) &&
+          number(job.number, 1, Number.MAX_SAFE_INTEGER, true) &&
+          text(job.payload, 1000) &&
+          text(job.omitted, 1000) &&
+          number(job.reward, 1, 100, true) &&
+          ['active', 'delivered', 'revealed', 'withheld', 'cancelled'].includes(
+            job.status as string,
+          ) &&
+          (value.quests as Quest[]).some(
+            (q) =>
+              q.id === `correspondence:${job.sourceId}:${job.number}` &&
+              q.complete === (job.status !== 'active'),
+          ),
+      ) ||
+      new Set(value.correspondenceJobs.map((job) => job.sourceId)).size !==
+        value.correspondenceJobs.length
+    )
+      return fail();
+  }
   return value as unknown as SaveData;
 }

@@ -14,6 +14,14 @@ The second rendering pass adds a tall Gothic cathedral façade with stained-glas
 
 The third pass uses the revised real cathedral footprint for a stepped central nave and lower side aisles, flying buttresses, rose glass, deep concentric portal masonry and broad stairs. Roads use a narrower tonal range, while tree spread, tier spacing and snow loading vary independently. Humanoids are composed into a bounded384-frame pose cache from their actual appearance, heading, gait and attack state; the renderer also caches building lists for128 chunks,16 lamp gradient textures and a viewport-sized atmospheric overlay. Dynamic snow, contact shadows, names, effects and occlusion remain evaluated during drawing. The reference's degree of illustrative material detail remains a visual target, not a claim about the current implementation.
 
+Round03 measured59.0 foreground RAF FPS at1600×1000 after three seconds of warm-up. Its two-second CPU profile attributed about14.7% of sampled time to `renderer.draw` and descendants. This is an observed workspace result, not a guarantee for other hardware.
+
+The fourth pass changes the material construction: individual stepped chapels around a central nave, shallow pointed stone arches over vertical botanical stained glass, a twelve-petal rose and secondary panes, clustered wear on blue-black masonry, carved doors, new irregular conifer branch assemblies with windward snow loads and tangled roots, raised stone garden rims, fuller herbs and a botanical workbench awning. Humanoid world sprites use1.35× scale with their feet fixed to ground coordinates. `draw(..., {pointer})` accepts a destination in **world tile coordinates**, consistent with player/NPC positions; canvas events must use `screenToWorld` before supplying it.
+
+Open generated sites use `Tile.site` plus actual `wall`/`floor` terrain. They receive exposed frost-split stone walls and darker floor slabs, with no invented building roof. Wall faces follow adjacent floor/edge cells; nearby foreground walls lower and fade around a player in the same site. Site rendering keeps256 wall sprites and4096 topology records, with wall lists sharing the128-chunk visibility cache. All world-dependent caches reset when either the seed or `world.generation` changes, preserving legacy/new generation compatibility.
+
+The humanoid pose builder calls `equipment.drawWeapon` with the actor's actual appearance seed and equipped kind. Construction parameters therefore determine the in-world weapon as well as its handling and UI depiction. Bow grip alignment and west-facing mirroring happen inside the cached pose composition; no complete humanoid asset is substituted. The user explicitly approved this art style; external RPG references inform gameplay only.
+
 Original tool output: `/home/sabino/.codex/generated_images/01a08d5c-e5f4-7903-b93d-a687f2208046/exec-af0190be-36b0-4694-91fd-ced7222ecd88.png`.
 
 ## Generation prompt

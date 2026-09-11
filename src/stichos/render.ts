@@ -37,10 +37,15 @@ export class StichosRenderer {
   private roofs = new Map<string, Roof>();
   private buildingBounds = new Map<string, Building>();
   private chunkBuildings = new Map<string, Building[]>();
+  private chunkSiteWalls = new Map<string, Tile[]>();
+  private siteWalls = new Map<string, Sprite>();
+  private siteTopology = new Map<string, [number, number]>();
+  private playerSite: string | undefined;
   private lightSprites = new Map<string, HTMLCanvasElement>();
   private atmosphereLayer: HTMLCanvasElement | null = null;
   private grounds = new Map<string, HTMLCanvasElement>();
   private worldSeed = -1;
+  private worldGeneration = -1;
   private lastTime = -1;
   private npcPrevious = new Map<string, Point>();
   private npcWalking = new Map<string, boolean>();
@@ -85,6 +90,7 @@ export class StichosRenderer {
 
   draw(
     game: Stichos,
+    // pointer is an optional destination in world tile coordinates, like player/NPC positions.
     options: { reducedMotion?: boolean; transfer?: number; pointer?: Point | null } = {},
   ) {
     const ctx = this.ctx,
@@ -92,22 +98,29 @@ export class StichosRenderer {
       scale = unit / 32;
     const dt = this.lastTime < 0 ? 0 : clamp(game.time - this.lastTime, 0, 0.05);
     this.lastTime = game.time;
-    if (this.worldSeed !== game.world.seed) {
+    if (this.worldSeed !== game.world.seed || this.worldGeneration !== game.world.generation) {
       this.worldSeed = game.world.seed;
+      this.worldGeneration = game.world.generation;
       this.camera = { x: game.player.x, y: game.player.y };
       this.roofs.clear();
       this.buildingBounds.clear();
       this.chunkBuildings.clear();
+      this.chunkSiteWalls.clear();
+      this.siteWalls.clear();
+      this.siteTopology.clear();
+      this.art = new StichosArt();
       this.grounds.clear();
       this.footsteps = [];
       this.previousPlayer = null;
       this.npcPrevious.clear();
+      this.npcWalking.clear();
     }
     const follow = options.reducedMotion
       ? 1
       : this.previousPlayer === null
         ? 1
         : 1 - Math.exp(-Math.max(dt, 0.016) * 12);
+    this.playerSite = game.world.tile(game.player.x, game.player.y).site;
     this.camera.x += (game.player.x - this.camera.x) * follow;
     this.camera.y += (game.player.y - this.camera.y) * follow;
     // Quantized camera preserves crisp pixel clusters without resampling the art.
@@ -123,7 +136,8 @@ export class StichosRenderer {
       right = Math.ceil(this.camera.x + this.width / unit / 2) + 2;
     const top = Math.floor(this.camera.y - (this.height * 0.53) / unit) - 8,
       bottom = Math.ceil(this.camera.y + (this.height * 0.47) / unit) + 7;
-    const buildings = new Map<string, Building>();
+    const buildings = new Map<string, Building>(),
+      siteWalls: Tile[] = [];
     this.drawGround(game);
     for (let cy = Math.floor(top / 16); cy <= Math.floor(bottom / 16); cy++)
       for (let cx = Math.floor(left / 16); cx <= Math.floor(right / 16); cx++) {
@@ -131,11 +145,14 @@ export class StichosRenderer {
         const cached = this.chunkBuildings.get(chunkKey);
         if (cached) {
           for (const building of cached) buildings.set(building.id, building);
+          siteWalls.push(...(this.chunkSiteWalls.get(chunkKey) ?? []));
           continue;
         }
-        const inChunk = new Map<string, Building>();
+        const inChunk = new Map<string, Building>(),
+          walls: Tile[] = [];
         for (const tile of game.world.chunk(cx, cy).tiles) {
           const { x, y } = tile;
+          if (tile.site && tile.terrain === 'wall' && !tile.building) walls.push(tile);
           if (tile.building && !buildings.has(tile.building)) {
             let b = this.buildingBounds.get(tile.building);
             if (!b) {
@@ -164,8 +181,13 @@ export class StichosRenderer {
             inChunk.set(tile.building, buildings.get(tile.building)!);
         }
         this.chunkBuildings.set(chunkKey, [...inChunk.values()]);
-        while (this.chunkBuildings.size > 128)
-          this.chunkBuildings.delete(this.chunkBuildings.keys().next().value!);
+        this.chunkSiteWalls.set(chunkKey, walls);
+        siteWalls.push(...walls);
+        while (this.chunkBuildings.size > 128) {
+          const old = this.chunkBuildings.keys().next().value!;
+          this.chunkBuildings.delete(old);
+          this.chunkSiteWalls.delete(old);
+        }
       }
     this.drawFootprints(game, dt);
     const radius = Math.hypot(this.width / unit / 2, this.height / unit / 2) + 10;
@@ -191,17 +213,17 @@ export class StichosRenderer {
           prop.kind === 'heartleaf' ? '#a79de5' : prop.kind === 'emberroot' ? '#da967a' : '#84c7bd',
           0.13,
         );
-      if (prop.kind === 'pine' || prop.kind === 'rock')
-        this.shadow(
-          p,
-          (prop.kind === 'pine' ? 28 : 18) * scale,
-          (prop.kind === 'pine' ? 12 : 7) * scale,
-          0.12,
-        );
+      if (prop.kind === 'rock') this.shadow(p, 18 * scale, 7 * scale, 0.12);
     }
     const drawables: { depth: number; draw: () => void }[] = [];
     for (const b of buildings.values())
       drawables.push({ depth: b.maxY + 0.38, draw: () => this.building(game, b) });
+    for (const tile of siteWalls) {
+      const p = this.worldToScreen(tile);
+      if (p.x < -unit || p.x > this.width + unit || p.y < -unit || p.y > this.height + unit * 2)
+        continue;
+      drawables.push({ depth: tile.y + 0.42, draw: () => this.siteWall(game, tile) });
+    }
     for (const prop of props)
       drawables.push({
         depth: prop.y + (prop.kind === 'door' ? 0.45 : 0),
@@ -342,9 +364,38 @@ export class StichosRenderer {
     u = this.unit,
     p = this.worldToScreen(tile),
   ) {
-    const s = u / 32;
-    for (let i = -10; i <= 10; i += 7)
-      line(ctx, p.x - u * 0.4, p.y + i * s, p.x + u * 0.4, p.y + i * s, '#354f56', Math.max(1, s));
+    const s = u / 32,
+      rng = random(deriveSeed(tile.seed, 'cultivation'));
+    rect(ctx, p.x - u / 2, p.y - u / 2, u, u, '#344f57');
+    for (let i = -10; i <= 10; i += 7) {
+      line(
+        ctx,
+        p.x - u * 0.4,
+        p.y + i * s,
+        p.x + u * 0.4,
+        p.y + i * s,
+        '#213a45',
+        Math.max(1, s * 2),
+      );
+      line(
+        ctx,
+        p.x - u * 0.4,
+        p.y + (i - 2) * s,
+        p.x + u * 0.4,
+        p.y + (i - 2) * s,
+        '#556a68',
+        Math.max(1, s),
+      );
+    }
+    for (let clod = 0; clod < 23; clod++) {
+      const x = p.x + (rng() - 0.5) * u * 0.88,
+        y = p.y + (rng() - 0.5) * u * 0.87;
+      rect(ctx, x, y, (1 + rng() * 2) * s, s, rng() > 0.5 ? '#647a72' : '#2a424b');
+      if (rng() > 0.84) {
+        line(ctx, x, y, x - 2 * s, y - 3 * s, '#75a48b');
+        line(ctx, x, y, x + 3 * s, y - 4 * s, '#92b398');
+      }
+    }
     for (const [dx, dy] of [
       [0, -1],
       [1, 0],
@@ -358,19 +409,155 @@ export class StichosRenderer {
           ctx,
           dx ? x - 2 * s : p.x - u / 2,
           dy ? y - 4 * s : p.y - u / 2,
-          dx ? 4 * s : u,
-          dy ? 5 * s : u,
-          '#685f4f',
+          dx ? 6 * s : u,
+          dy ? 9 * s : u,
+          '#344b60',
         );
         rect(
           ctx,
           dx ? x - s : p.x - u / 2,
           dy ? y - 5 * s : p.y - u / 2,
-          dx ? 2 * s : u,
-          dy ? 2 * s : u,
-          '#c6d6e4',
+          dx ? 4 * s : u,
+          dy ? 3 * s : u,
+          '#94adc5',
         );
+        for (let stone = 0; stone < 4; stone++) {
+          const offset = (-16 + stone * 8) * s;
+          if (dy) {
+            rect(ctx, p.x + offset, y - 2 * s, 7 * s, 4 * s, stone % 2 ? '#566f83' : '#627b8d');
+            rect(ctx, p.x + offset, y - 4 * s, (5 + rng() * 2) * s, 2 * s, '#d0deea');
+          } else {
+            rect(ctx, x - 2 * s, p.y + offset, 4 * s, 7 * s, '#637c8d');
+            rect(ctx, x - 3 * s, p.y + offset, 2 * s, 6 * s, '#c8d8e5');
+          }
+        }
       }
+  }
+
+  private siteWall(game: Stichos, tile: Tile) {
+    const address = `${tile.x},${tile.y}`;
+    let topology = this.siteTopology.get(address);
+    if (!topology) {
+      let floor = 0,
+        edge = 0;
+      const offsets = [
+        [0, -1],
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+      ];
+      for (let i = 0; i < offsets.length; i++) {
+        const n = game.world.tile(tile.x + offsets[i][0], tile.y + offsets[i][1]);
+        if (n.terrain === 'floor' && n.site === tile.site) floor |= 1 << i;
+        if (n.terrain !== 'wall' || n.site !== tile.site) edge |= 1 << i;
+      }
+      topology = [floor, edge];
+      this.siteTopology.set(address, topology);
+      while (this.siteTopology.size > 4096)
+        this.siteTopology.delete(this.siteTopology.keys().next().value!);
+    }
+    const [floor, edge] = topology;
+    const cutaway =
+      this.playerSite === tile.site &&
+      tile.y > game.player.y &&
+      tile.y - game.player.y < 2.5 &&
+      Math.abs(tile.x - game.player.x) < 1.45;
+    const variant = tile.seed % 8,
+      key = `${floor}:${edge}:${variant}:${cutaway}`;
+    let sprite = this.siteWalls.get(key);
+    if (!sprite) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 40;
+      canvas.height = 84;
+      const ctx = canvas.getContext('2d')!,
+        rng = random(deriveSeed(variant, floor, edge, 'exposed-vault'));
+      const height = cutaway ? 10 : 31,
+        top = 48 - height,
+        front = 80 - height;
+      // Warm-weather erosion is absent here: frost splits broad blue stone faces.
+      if (edge & 4) {
+        rect(ctx, 4, front, 32, height, '#213b53');
+        for (let row = 0; row < height / 8; row++)
+          for (let col = 0; col < 3; col++) {
+            const x = 4 + col * 11 + (row % 2 ? 4 : 0),
+              y = front + row * 8;
+            if (x >= 36) continue;
+            rect(
+              ctx,
+              x + 1,
+              y + 1,
+              Math.min(9, 35 - x),
+              Math.min(7, 80 - y),
+              row % 2 ? '#3e5a73' : '#47637b',
+            );
+            rect(ctx, x + 1, y + 1, Math.min(8, 35 - x), 1, '#627e95');
+            if (rng() > 0.6) rect(ctx, x + 2, y + 4, 3, 1, '#2a455f');
+          }
+        rect(ctx, 4, 79, 32, 2, '#162e46');
+      }
+      rect(ctx, 4, top, 32, 32, '#536f89');
+      for (let i = 0; i < 25; i++) {
+        const x = 5 + rng() * 28,
+          y = top + 1 + rng() * 28;
+        rect(ctx, x, y, 2 + rng() * 5, 1 + rng() * 3, rng() > 0.45 ? '#6e88a0' : '#3f5c78');
+      }
+      for (let crack = 0; crack < 2; crack++) {
+        const x = 9 + rng() * 20,
+          y = top + 3 + rng() * 10;
+        line(ctx, x, y, x - 3, y + 8, '#324d69');
+        line(ctx, x - 3, y + 8, x + 2, y + 13, '#3e5974');
+      }
+      if (edge & 1) {
+        rect(ctx, 4, top, 32, 2, '#bacde0');
+        rect(ctx, 4, top + 2, 32, 1, '#819db8');
+      }
+      if (edge & 2) {
+        rect(ctx, 32, top, 4, 32, '#344f6b');
+        rect(ctx, 35, top, 1, 32, '#a4bfd4');
+      }
+      if (edge & 8) {
+        rect(ctx, 4, top, 3, 32, '#9ab3cb');
+        rect(ctx, 7, top, 1, 32, '#6f8da7');
+      }
+      if (edge & 4) {
+        rect(ctx, 4, front - 3, 32, 3, '#b5cbe0');
+        for (let i = 0; i < 6; i++)
+          rect(ctx, 4 + i * 5, front - 5 + rng() * 2, 4 + rng() * 2, 3, '#d2e1ed');
+        if (floor & 4 && variant % 3 === 0 && !cutaway) {
+          line(ctx, 20, front + 6, 20, front + 19, '#89b7b1');
+          line(ctx, 20, front + 11, 15, front + 7, '#799fad');
+          line(ctx, 20, front + 15, 25, front + 10, '#7aa6ae');
+        }
+      }
+      if (variant % 3 === 0) {
+        poly(
+          ctx,
+          [
+            [7, top + 5],
+            [18, top + 2],
+            [31, top + 8],
+            [27, top + 12],
+            [13, top + 10],
+          ],
+          '#b6cce2',
+        );
+        rect(ctx, 10, top + 4, 8, 2, '#d6e3ee');
+      }
+      sprite = { image: canvas, x: 20, y: 64 };
+      this.siteWalls.set(key, sprite);
+      while (this.siteWalls.size > 256) this.siteWalls.delete(this.siteWalls.keys().next().value!);
+    }
+    const p = this.worldToScreen(tile),
+      s = this.unit / 32;
+    this.ctx.globalAlpha = cutaway ? 0.58 : 1;
+    this.ctx.drawImage(
+      sprite.image,
+      Math.round(p.x - sprite.x * s),
+      Math.round(p.y - sprite.y * s),
+      Math.round(sprite.image.width * s),
+      Math.round(sprite.image.height * s),
+    );
+    this.ctx.globalAlpha = 1;
   }
 
   private drawFootprints(game: Stichos, dt: number) {
@@ -461,7 +648,7 @@ export class StichosRenderer {
   }
   private person(game: Stichos, person: Npc | Stichos['player'], player: boolean) {
     const p = this.worldToScreen(person),
-      s = this.unit / 32,
+      s = (this.unit / 32) * 1.35,
       ctx = this.ctx;
     if (person.hp <= 0) {
       ctx.save();
@@ -669,66 +856,136 @@ export class StichosRenderer {
     seed: number,
   ) {
     const rng = random(seed),
-      s = width / 12;
-    ctx.save();
-    const warmth = ctx.createRadialGradient(
-      cx,
-      bottom - height * 0.4,
-      width * 0.1,
-      cx,
-      bottom - height * 0.4,
-      height * 0.6,
-    );
-    warmth.addColorStop(0, '#efbd693c');
-    warmth.addColorStop(1, '#efbd6900');
-    ctx.fillStyle = warmth;
-    ctx.fillRect(cx - height * 0.6, bottom - height * 1.1, height * 1.2, height * 1.2);
-    ctx.restore();
-    const points = [
-      [cx - width / 2, bottom],
-      [cx - width / 2, bottom - height * 0.65],
-      [cx, bottom - height],
-      [cx + width / 2, bottom - height * 0.65],
-      [cx + width / 2, bottom],
-    ];
-    poly(ctx, points, '#233b4e');
+      top = bottom - height;
+    const arch = (grow: number) => {
+      const half = width / 2 + grow,
+        peak = top - grow,
+        rise = Math.min(height * 0.35, width * 0.86 + grow);
+      const pts: number[][] = [
+        [cx - half, bottom + grow],
+        [cx - half, peak + rise],
+      ];
+      for (let i = 1; i <= 8; i++) {
+        const t = i / 8;
+        pts.push([cx - half + half * t * t, peak + rise * (1 - 1.5 * t + 0.5 * t * t)]);
+      }
+      for (let i = 7; i >= 0; i--) {
+        const t = i / 8;
+        pts.push([cx + half - half * t * t, peak + rise * (1 - 1.5 * t + 0.5 * t * t)]);
+      }
+      pts.push([cx + half, bottom + grow]);
+      return pts;
+    };
+    const outer = arch(7),
+      inner = arch(3),
+      glass = arch(0);
+    poly(ctx, arch(9), '#172e43');
+    poly(ctx, outer, '#70869c');
+    poly(ctx, inner, '#29445b');
+    // Individual wedged arch stones follow the curve; no giant triangular window cap.
+    for (let i = 1; i < outer.length - 2; i++) {
+      poly(
+        ctx,
+        [outer[i], outer[i + 1], inner[i + 1], inner[i]],
+        ['#8095a8', '#657f96', '#91a4b4'][i % 3],
+      );
+      line(ctx, outer[i][0], outer[i][1], inner[i][0], inner[i][1], '#304b64');
+    }
+    for (const side of [-1, 1])
+      for (let yy = bottom - 8; yy > top + width; yy -= 15) {
+        rect(ctx, cx + side * (width / 2 + 5) - 2, yy, 4, 12, side < 0 ? '#6c879d' : '#415e79');
+        rect(ctx, cx + side * (width / 2 + 5) - 3, yy, 6, 1, '#879faf');
+      }
     ctx.save();
     ctx.beginPath();
-    points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    glass.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
     ctx.closePath();
     ctx.clip();
-    for (let y = bottom - height; y < bottom; y += 3 * s)
-      for (let x = cx - width / 2; x < cx + width / 2; x += 3 * s)
-        rect(
-          ctx,
-          x + s,
-          y + s,
-          2 * s,
-          2 * s,
-          ['#e9bd6b', '#ffe0a0', '#dca664', '#b98c64', '#ebc184'][Math.floor(rng() * 5)],
-        );
-    line(ctx, cx, bottom - height + 4 * s, cx, bottom, '#b3a079', s);
-    line(
-      ctx,
-      cx - width / 2,
-      bottom - height / 3,
-      cx + width / 2,
-      bottom - height / 3,
-      '#b3a079',
-      s,
-    );
-    ctx.restore();
-    for (let i = 1; i < points.length; i++)
-      line(
+    const light = ctx.createLinearGradient(0, top, 0, bottom);
+    light.addColorStop(0, '#d8a35e');
+    light.addColorStop(0.36, '#f4cc7a');
+    light.addColorStop(1, '#9f6c47');
+    ctx.fillStyle = light;
+    ctx.fillRect(cx - width / 2, top, width, height);
+    for (let i = 0; i < (height * width) / 32; i++)
+      rect(
         ctx,
-        points[i - 1][0],
-        points[i - 1][1],
-        points[i][0],
-        points[i][1],
-        '#aeb9ba',
-        Math.max(1, s),
+        cx - width / 2 + rng() * width,
+        top + rng() * height,
+        1 + rng() * 2,
+        1,
+        rng() > 0.5 ? '#f9dda075' : '#7c5f454a',
       );
-    rect(ctx, cx - width * 0.65, bottom, width * 1.3, 3 * s, '#cad5df');
+    // Two living stems replace checkerboard glass: leaf-shaped panes and thin lead veins.
+    for (const column of [-1, 1]) {
+      const stem = cx + column * width * 0.22;
+      line(ctx, stem, bottom - 2, stem, top + width * 0.6, '#694f38');
+      for (let yy = bottom - 7; yy > top + width * 0.6; yy -= Math.max(11, width * 0.44))
+        for (const side of [-1, 1]) {
+          const leaf = width * 0.18,
+            peak = yy - width * 0.33;
+          const leafPoints = [
+            [stem, yy],
+            [stem + side * leaf, yy - width * 0.19],
+            [stem + side * leaf * 0.77, peak],
+            [stem + side * leaf * 0.18, peak + 1],
+          ];
+          poly(
+            ctx,
+            leafPoints,
+            Math.floor(yy) % 3 === 0 ? '#ffe4a6' : column === side ? '#d8955f' : '#e6bd70',
+          );
+          for (let j = 0; j < leafPoints.length; j++) {
+            const a = leafPoints[j],
+              b = leafPoints[(j + 1) % leafPoints.length];
+            line(ctx, a[0], a[1], b[0], b[1], '#77553c');
+          }
+          line(ctx, stem, yy, stem + side * leaf * 0.77, peak, '#fff0b477');
+        }
+    }
+    line(ctx, cx, bottom, cx, top + width * 0.7, '#31475a', Math.max(1, width / 19));
+    for (let yy = bottom - 25; yy > top + width; yy -= 41)
+      line(ctx, cx - width / 2, yy, cx + width / 2, yy, '#8b7952');
+    const budY = top + width * 0.42;
+    for (const side of [-1, 1])
+      poly(
+        ctx,
+        [
+          [cx, budY + width * 0.2],
+          [cx + side * width * 0.22, budY],
+          [cx + side * width * 0.06, budY - width * 0.17],
+        ],
+        '#ffe5a6',
+      );
+    ctx.restore();
+    for (let i = 1; i < glass.length; i++)
+      line(ctx, glass[i - 1][0], glass[i - 1][1], glass[i][0], glass[i][1], '#b2a879');
+    rect(ctx, cx - width * 0.69, bottom + 3, width * 1.38, 5, '#3e5a74');
+    rect(ctx, cx - width * 0.7, bottom + 2, width * 1.4, 2, '#bacfe0');
+    for (let i = 0; i < width / 4; i++)
+      rect(
+        ctx,
+        cx - width * 0.6 + rng() * width * 1.2,
+        bottom + rng() * 2,
+        2 + rng() * 4,
+        2,
+        '#d8e6ef',
+      );
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const warmth = ctx.createRadialGradient(
+      cx,
+      bottom - height * 0.42,
+      width * 0.1,
+      cx,
+      bottom - height * 0.42,
+      height * 0.48,
+    );
+    warmth.addColorStop(0, '#efb86325');
+    warmth.addColorStop(1, '#efb86300');
+    ctx.fillStyle = warmth;
+    ctx.fillRect(cx - height * 0.48, bottom - height * 0.9, height * 0.96, height * 0.96);
+    ctx.restore();
   }
 
   private makeCathedral(b: Building, worldSeed: number): Roof {
@@ -743,10 +1000,10 @@ export class StichosRenderer {
       top = 320,
       front = top + h,
       mid = x + w / 2;
-    const naveWidth = Math.min(232, w * 0.54),
+    const naveWidth = Math.min(288, w * 0.54),
       naveX = mid - naveWidth / 2;
     const wall = (left: number, foot: number, width: number, height: number) => {
-      rect(ctx, left, foot - height, width, height, '#263e52');
+      rect(ctx, left, foot - height, width, height, '#1b334b');
       for (let row = 0; row < height / 9; row++)
         for (let col = -1; col < width / 17; col++) {
           const bx = left + col * 17 + (row % 2) * 8,
@@ -754,13 +1011,35 @@ export class StichosRenderer {
           const clippedX = Math.max(left, bx + 1),
             end = Math.min(left + width, bx + 16);
           if (end <= clippedX) continue;
-          const c = ['#485f74', '#50677c', '#3f586e', '#536b7f', '#455e73'][Math.floor(rng() * 5)];
+          const c = ['#344e67', '#3c576e', '#2e4862', '#405b73', '#36526b'][Math.floor(rng() * 5)];
           rect(ctx, clippedX, by + 1, end - clippedX, 8, c);
           if (rng() > 0.32)
             rect(ctx, clippedX + 1, by + 1, Math.max(1, end - clippedX - 3), 1, color(c, 9));
           if (rng() > 0.8) rect(ctx, clippedX + 2, by + 5, 3, 1, color(c, -9));
+          if (rng() > 0.45) {
+            const xx = clippedX + rng() * Math.max(1, end - clippedX - 4);
+            rect(ctx, xx, by + 3, 2 + rng() * 4, 2, color(c, rng() > 0.5 ? 5 : -8));
+            rect(ctx, xx + 1, by + 5, 2, 1, color(c, -6));
+          }
+          if (rng() > 0.98) {
+            line(ctx, clippedX + 6, by + 1, clippedX + 8, by + 3, '#172f48');
+            line(ctx, clippedX + 8, by + 3, clippedX + 6, by + 7, '#1d3851');
+          }
         }
-      rect(ctx, left, foot - 9, width, 9, '#334d63');
+      for (let patch = 0; patch < width / 10; patch++) {
+        const px = left + rng() * width,
+          py = foot - rng() * height;
+        for (let chip = 0; chip < 6; chip++)
+          rect(
+            ctx,
+            Math.min(left + width - 2, px + rng() * 5),
+            py + rng() * 9,
+            1 + rng() * 2,
+            1,
+            rng() > 0.5 ? '#71838e55' : '#1a354a55',
+          );
+      }
+      rect(ctx, left, foot - 9, width, 9, '#283f58');
       rect(ctx, left - 2, foot - height - 3, width + 4, 5, '#adc2d7');
       for (let i = 0; i < width / 9; i++) {
         const bx = left + rng() * width;
@@ -770,8 +1049,13 @@ export class StichosRenderer {
     };
     const buttress = (bx: number, height: number, width = 16) => {
       rect(ctx, bx - width / 2 - 4, front - height, width + 8, height, '#1e3549');
-      rect(ctx, bx - width / 2, front - height, width, height, '#61798d');
-      rect(ctx, bx + 2, front - height, width / 2 - 2, height, '#344f67');
+      rect(ctx, bx - width / 2, front - height, width, height, '#566e84');
+      rect(ctx, bx + 2, front - height, width / 2 - 2, height, '#2c465f');
+      for (let i = 0; i < height / 10; i++) {
+        const yy = front - height + i * 10;
+        rect(ctx, bx - width / 2 + 1, yy, Math.max(1, width / 2 - 2), 1, '#728b9d');
+        if (rng() > 0.7) rect(ctx, bx - width / 2 + 2, yy + 2, 3, 4, '#3e5870');
+      }
       for (let yy = front - 4; yy > front - height; yy -= 34) {
         rect(ctx, bx - width / 2 - 2, yy, width + 4, 4, '#8198aa');
         rect(ctx, bx - width / 2 - 2, yy, width + 3, 1, '#a6bccd');
@@ -789,61 +1073,143 @@ export class StichosRenderer {
       rect(ctx, bx - 1, front - height - 40, 2, 12, '#a3ac9d');
       rect(ctx, bx - 5, front - height - 36, 10, 2, '#a3ac9d');
     };
-    // The side aisles retain a lower roof and wall; the center rises as a separate nave.
-    wall(x, front, w, 168);
+    // Attached chapels rise in steps toward the nave. Each has its own roof depth,
+    // stone gable, lancet glass, rain-shadow and snow-loaded connecting buttress.
+    wall(x, front, w, 142);
     for (const side of [-1, 1]) {
-      const a = side < 0 ? x : naveX + naveWidth,
-        end = side < 0 ? naveX : x + w;
-      poly(
-        ctx,
-        [
-          [a - 4, top - 18],
-          [end + 4, top - 18],
-          [end + 4, front - 169],
-          [a - 4, front - 169],
-        ],
-        '#29485f',
-      );
-      for (let yy = top - 14; yy < front - 176; yy += 8)
-        for (let xx = a; xx < end; xx += 13) {
-          rect(ctx, xx, yy, 12, 6, rng() > 0.5 ? '#385971' : '#315169');
-        }
-      for (let i = 0; i < 5; i++) {
-        const xx = a + rng() * (end - a),
-          yy = top + rng() * (front - 178 - top);
+      const wingLeft = side < 0 ? x : naveX + naveWidth,
+        wingRight = side < 0 ? naveX : x + w;
+      const count = Math.max(1, Math.floor((wingRight - wingLeft) / 70)),
+        bay = (wingRight - wingLeft) / count;
+      for (let chapel = 0; chapel < count; chapel++) {
+        const left = wingLeft + chapel * bay,
+          right = left + bay,
+          middle = (left + right) / 2;
+        const towardNave = side < 0 ? chapel : count - chapel - 1,
+          height = 145 + towardNave * 18;
+        const roofFront = front - height,
+          roofBack = top - 24;
         poly(
           ctx,
           [
-            [xx - 7, yy],
-            [xx + 20, yy - 4],
-            [xx + 38, yy + 2],
-            [xx + 31, yy + 8],
-            [xx - 4, yy + 6],
+            [left - 5, roofBack + 8],
+            [middle, roofBack - 12],
+            [right + 5, roofBack + 8],
+            [right + 5, roofFront],
+            [middle, roofFront - 29],
+            [left - 5, roofFront],
           ],
-          '#bccfe2',
+          '#1e3952',
         );
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(left - 5, roofBack + 8);
+        ctx.lineTo(middle, roofBack - 12);
+        ctx.lineTo(right + 5, roofBack + 8);
+        ctx.lineTo(right + 5, roofFront);
+        ctx.lineTo(middle, roofFront - 29);
+        ctx.lineTo(left - 5, roofFront);
+        ctx.closePath();
+        ctx.clip();
+        for (let yy = roofBack - 12; yy < roofFront; yy += 7)
+          for (let xx = left - 7; xx < right + 7; xx += 9) {
+            poly(
+              ctx,
+              [
+                [xx, yy],
+                [xx + 8, yy],
+                [xx + 8, yy + 4],
+                [xx + 4, yy + 7],
+                [xx, yy + 4],
+              ],
+              rng() > 0.5 ? '#2a485f' : '#304f66',
+            );
+            line(ctx, xx + 1, yy, xx + 7, yy, '#456278');
+          }
+        poly(
+          ctx,
+          [
+            [middle, roofBack - 12],
+            [right + 5, roofBack + 8],
+            [right + 5, roofFront],
+            [middle, roofFront - 29],
+          ],
+          '#102c432a',
+        );
+        for (let load = 0; load < 5; load++) {
+          const xx = left + rng() * bay,
+            yy = roofBack + rng() * (roofFront - roofBack),
+            span = 13 + rng() * 25;
+          poly(
+            ctx,
+            [
+              [xx - 3, yy + 3],
+              [xx + 5, yy - 1],
+              [xx + span * 0.7, yy + 1],
+              [xx + span, yy - 2],
+              [xx + span + 3, yy + 5],
+              [xx + 6, yy + 8],
+            ],
+            '#93afcb',
+          );
+          poly(
+            ctx,
+            [
+              [xx - 2, yy + 1],
+              [xx + 6, yy - 3],
+              [xx + span * 0.7, yy - 1],
+              [xx + span, yy - 3],
+              [xx + span, yy + 2],
+              [xx + 6, yy + 5],
+            ],
+            '#ccdeed',
+          );
+        }
+        ctx.restore();
+        wall(left, front, bay, height);
+        poly(
+          ctx,
+          [
+            [left - 3, roofFront],
+            [middle, roofFront - 34],
+            [right + 3, roofFront],
+          ],
+          '#314c65',
+        );
+        for (let yy = roofFront - 26; yy < roofFront; yy += 7) {
+          const half = (((yy - (roofFront - 34)) / 34) * bay) / 2;
+          line(ctx, middle - half + 3, yy, middle + half - 3, yy, '#567084');
+        }
+        line(ctx, left - 5, roofFront, middle, roofFront - 36, '#c5d8e8', 4);
+        line(ctx, middle, roofFront - 36, right + 5, roofFront, '#819fba', 4);
+        const windowWidth = Math.min(35, bay * 0.41);
+        this.window(
+          ctx,
+          middle,
+          front - 25,
+          windowWidth,
+          height - 44,
+          deriveSeed(worldSeed, b.id, 'chapel', side, chapel),
+        );
+        buttress(left + 3, height + 7, 11);
+        for (let icicle = 0; icicle < 4; icicle++)
+          rect(ctx, left + 10 + rng() * (bay - 20), roofFront + 1, 1, 4 + rng() * 7, '#a9c6de');
       }
-      line(ctx, a - 5, front - 172, end + 4, front - 172, '#c9d9e7', 5);
-      const bayCount = Math.max(1, Math.floor((end - a) / 52));
-      for (let i = 0; i < bayCount; i++) {
-        const bx = a + ((i + 0.5) * (end - a)) / bayCount;
-        this.window(ctx, bx, front - 25, 25, 113, deriveSeed(worldSeed, b.id, side, i));
-      }
-      buttress(side < 0 ? x + 3 : x + w - 3, 199, 21);
-      // Flying arches connect the lower outer aisle to the taller central structure.
-      const outer = side < 0 ? x + 21 : x + w - 21,
-        inner = mid + side * (naveWidth / 2 - 4);
+      buttress(side < 0 ? x + 3 : x + w - 3, 188, 21);
+      const outer = side < 0 ? x + 18 : x + w - 18,
+        inner = mid + side * (naveWidth / 2 - 3);
       poly(
         ctx,
         [
-          [outer, front - 172],
-          [outer, front - 191],
+          [outer, front - 175],
+          [outer, front - 194],
           [inner, front - 249],
-          [inner, front - 228],
+          [inner, front - 230],
         ],
-        '#607b91',
+        '#4f6c84',
       );
-      line(ctx, outer, front - 191, inner, front - 249, '#c5d7e7', 4);
+      line(ctx, outer, front - 194, inner, front - 249, '#bbd0e1', 4);
+      line(ctx, outer, front - 175, inner, front - 230, '#1a344b', 3);
     }
     wall(naveX, front, naveWidth, 259);
     poly(
@@ -867,35 +1233,97 @@ export class StichosRenderer {
     for (const side of [-1, 1])
       this.window(
         ctx,
-        mid + side * 70,
+        mid + side * naveWidth * 0.34,
         front - 24,
-        25,
-        187,
+        Math.min(37, naveWidth * 0.14),
+        191,
         deriveSeed(worldSeed, b.id, 'nave', side),
       );
-    // Rose glass, lead tracery and a botanical rosette above the recessed portal.
-    const roseY = front - 213;
-    ctx.fillStyle = '#263b50';
+    // Concentric stone voussoirs, a leaded floral wheel and smaller petal panes.
+    const roseY = front - 215,
+      roseR = Math.min(40, naveWidth * 0.23);
+    ctx.fillStyle = '#1b3047';
     ctx.beginPath();
-    ctx.arc(mid, roseY, 31, 0, TAU);
+    ctx.arc(mid, roseY, roseR + 8, 0, TAU);
     ctx.fill();
-    ctx.strokeStyle = '#8da3b5';
-    ctx.lineWidth = 5;
-    ctx.stroke();
-    for (let petal = 0; petal < 8; petal++) {
-      const a = (petal / 8) * TAU;
+    for (let stone = 0; stone < 24; stone++) {
+      const a = (stone / 24) * TAU,
+        b = ((stone + 0.88) / 24) * TAU;
       poly(
         ctx,
         [
-          [mid + Math.cos(a) * 6, roseY + Math.sin(a) * 6],
-          [mid + Math.cos(a - 0.22) * 23, roseY + Math.sin(a - 0.22) * 23],
-          [mid + Math.cos(a) * 27, roseY + Math.sin(a) * 27],
-          [mid + Math.cos(a + 0.22) * 23, roseY + Math.sin(a + 0.22) * 23],
+          [mid + Math.cos(a) * (roseR + 7), roseY + Math.sin(a) * (roseR + 7)],
+          [mid + Math.cos(b) * (roseR + 7), roseY + Math.sin(b) * (roseR + 7)],
+          [mid + Math.cos(b) * (roseR + 2), roseY + Math.sin(b) * (roseR + 2)],
+          [mid + Math.cos(a) * (roseR + 2), roseY + Math.sin(a) * (roseR + 2)],
         ],
-        petal % 2 ? '#eac074' : '#c68d64',
+        stone % 3 ? '#6f879d' : '#8da2b4',
       );
     }
-    rect(ctx, mid - 3, roseY - 3, 6, 6, '#ffe5a2');
+    ctx.strokeStyle = '#a7a078';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(mid, roseY, roseR, 0, TAU);
+    ctx.stroke();
+    for (let petal = 0; petal < 12; petal++) {
+      const a = (petal / 12) * TAU,
+        r = roseR;
+      const points = [
+        [0.28, 0],
+        [0.59, -0.14],
+        [0.86, -0.1],
+        [0.96, 0],
+        [0.86, 0.1],
+        [0.59, 0.14],
+      ].map(([radius, offset]) => [
+        mid + Math.cos(a + offset) * r * radius,
+        roseY + Math.sin(a + offset) * r * radius,
+      ]);
+      poly(ctx, points, petal % 3 ? '#e9ba70' : '#f2d292');
+      for (let j = 0; j < points.length; j++) {
+        const u = points[j],
+          v = points[(j + 1) % points.length];
+        line(ctx, u[0], u[1], v[0], v[1], '#a18151');
+      }
+      line(
+        ctx,
+        mid + Math.cos(a) * r * 0.36,
+        roseY + Math.sin(a) * r * 0.36,
+        mid + Math.cos(a) * r * 0.86,
+        roseY + Math.sin(a) * r * 0.86,
+        '#ffe2a0',
+      );
+      const c = a + Math.PI / 12;
+      poly(
+        ctx,
+        [
+          [mid + Math.cos(c) * r * 0.64, roseY + Math.sin(c) * r * 0.64],
+          [mid + Math.cos(c - 0.065) * r * 0.83, roseY + Math.sin(c - 0.065) * r * 0.83],
+          [mid + Math.cos(c) * r * 0.91, roseY + Math.sin(c) * r * 0.91],
+          [mid + Math.cos(c + 0.065) * r * 0.83, roseY + Math.sin(c + 0.065) * r * 0.83],
+        ],
+        '#b58258',
+      );
+    }
+    ctx.strokeStyle = '#bc9c63';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(mid, roseY, roseR * 0.3, 0, TAU);
+    ctx.stroke();
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * TAU;
+      poly(
+        ctx,
+        [
+          [mid, roseY],
+          [mid + Math.cos(a - 0.3) * 9, roseY + Math.sin(a - 0.3) * 9],
+          [mid + Math.cos(a) * 12, roseY + Math.sin(a) * 12],
+          [mid + Math.cos(a + 0.3) * 9, roseY + Math.sin(a + 0.3) * 9],
+        ],
+        '#ffe5a4',
+      );
+    }
+    rect(ctx, mid - 2, roseY - 2, 4, 4, '#fff2bd');
     this.window(ctx, mid, front - 273, 25, 48, deriveSeed(worldSeed, b.id, 'upper'));
     // Concentric stone archivolts give the entrance visible thickness and shadow.
     for (let layer = 0; layer < 5; layer++) {
@@ -1372,7 +1800,7 @@ export class StichosRenderer {
   }
 
   private pointer(game: Stichos, pointer: Point) {
-    const world = this.screenToWorld(pointer),
+    const world = pointer,
       tile = game.world.tile(world.x, world.y),
       p = this.worldToScreen(tile),
       u = this.unit;

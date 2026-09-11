@@ -1,7 +1,190 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { InfiniteWorld, CHUNK_SIZE, appearance } from '../src/stichos/world.ts';
 import type { Point, Tile } from '../src/stichos/types.ts';
+
+test('generation one preserves existing wilderness terrain, obstacles, residents and resources byte-for-byte', () => {
+  const fixtures = [
+    [0, 2, 2, '4585711e4601c50a90f245e7c93447e3a7fe7b2f9d6d0d5079de59d5649a141e'],
+    [0, -3, -3, '8a9822b2cbeccd9eeb388b816426f5ec0673f8cce2bd6d73140d4778693c24fd'],
+    [703, 2, 2, 'fa249150b08eb8ff9ec32e4bb9b18c446ad3942433287ad142ba96ae07630b0a'],
+    [703, -3, -3, 'f1f0211f5e7e7dc13660f58f722101c712741115bd87d8762da2114a57243717'],
+    [903, 2, 2, 'a349f253f21bef26208a47bd0b1fdb50ff179780781dc0af58223aaa2f8a2a6b'],
+    [903, -3, -3, '5dfd403edfc9948ba6f72e99ab38f1ae74e06221c9ffa442d53bdd96783f6d28'],
+  ] as const;
+  for (const [seed, x, y, expected] of fixtures) {
+    const world = new InfiniteWorld(seed, 1);
+    assert.equal(
+      createHash('sha256')
+        .update(JSON.stringify(world.chunk(x, y)))
+        .digest('hex'),
+      expected,
+    );
+  }
+  assert.equal(new InfiniteWorld(2).generation, 2);
+  assert.notDeepEqual(new InfiniteWorld(2, 1).chunk(2, 2), new InfiniteWorld(2, 2).chunk(2, 2));
+  assert.throws(() => new InfiniteWorld(2, 3 as 2), /Unsupported/);
+});
+
+test('warped climate is continuous across positive, negative and distant chunk seams', () => {
+  const world = new InfiniteWorld(71, 2);
+  for (const [x, y] of [
+    [16, -16],
+    [-32, 48],
+    [1_000_000, -999_984],
+    [-1_000_000, 999_984],
+  ]) {
+    const left = world.climate(x - 0.00001, y - 0.00001),
+      right = world.climate(x + 0.00001, y + 0.00001);
+    for (const field of ['elevation', 'moisture', 'regionalCold', 'coldness'] as const)
+      assert.ok(Math.abs(left[field] - right[field]) < 0.00001, `${x},${y}: ${field}`);
+    for (const biome of ['frostwood', 'tundra', 'marsh', 'highlands'] as const)
+      assert.ok(
+        Math.abs(left.weights[biome] - right.weights[biome]) < 0.0001,
+        `${x},${y}: ${biome}`,
+      );
+    assert.deepEqual(world.climate(x, y), new InfiniteWorld(71, 2).climate(x, y));
+  }
+});
+
+test('regional climate gives coherent ice-age biome transitions and colder highlands', () => {
+  const world = new InfiniteWorld(903, 2),
+    samples = [],
+    biomes = new Set<string>();
+  let mixed = 0;
+  for (let i = 0; i < 1600; i++) {
+    const c = world.climate(((i * 137) % 4001) - 2000, ((i * 193) % 4003) - 2000);
+    samples.push(c);
+    biomes.add(c.biome);
+    assert.ok(c.temperature < -5 && c.temperature > -35);
+    assert.ok(Object.values(c.weights).every((w) => Number.isFinite(w) && w >= 0 && w <= 1));
+    assert.ok(Math.abs(Object.values(c.weights).reduce((a, b) => a + b, 0) - 1) < 1e-12);
+    if (Object.values(c.weights).filter((w) => w > 0.15).length >= 2) mixed++;
+  }
+  assert.deepEqual([...biomes].sort(), ['frostwood', 'highlands', 'marsh', 'tundra']);
+  assert.ok(
+    mixed > 200,
+    'ecotones should contain meaningful blended suitability, not abrupt exclusive thresholds',
+  );
+  let comparable = 0;
+  for (let i = 0; i < samples.length; i++)
+    for (let j = i + 1; j < samples.length; j++) {
+      const a = samples[i],
+        b = samples[j];
+      if (
+        Math.abs(a.regionalCold - b.regionalCold) < 0.02 &&
+        Math.abs(a.moisture - b.moisture) < 0.06 &&
+        a.elevation > b.elevation + 0.35
+      ) {
+        assert.ok(
+          a.temperature < b.temperature - 1,
+          'higher ground must be colder at comparable regional climate and moisture',
+        );
+        comparable++;
+      }
+    }
+  assert.ok(comparable > 20, 'sample enough independent altitude/climate combinations');
+});
+
+test('settlement discovery does not generate or evict terrain chunks', () => {
+  const world = new InfiniteWorld(703, 2);
+  const towns = world.settlementsAround(0, 0, 112);
+  assert.ok(towns.length >= 5);
+  assert.equal(world.cacheSize, 0);
+  assert.ok(towns.every((t) => Math.hypot(t.x, t.y) <= 112));
+  assert.equal(new Set(towns.map((t) => t.id)).size, towns.length);
+  for (const t of towns)
+    assert.ok(
+      world
+        .chunk(Math.floor(t.x / 16), Math.floor(t.y / 16))
+        .settlements.some((s) => s.id === t.id),
+    );
+  const before = world.cacheSize;
+  assert.deepEqual(world.settlementsAround(0, 0, 112), towns);
+  assert.equal(world.cacheSize, before);
+});
+
+test('open-roof vaults have an uninterrupted road approach, connected rooms, deep loot and actual guards', () => {
+  for (let seed = 0; seed < 24; seed++) {
+    const world = new InfiniteWorld(seed, 2);
+    const site = world.vaultsAround(40, 40, 1)[0];
+    assert.ok(site, 'the first excavation is always discoverable southeast of the cathedral');
+    assert.equal(world.cacheSize, 0, 'site discovery should not build terrain chunks');
+    const start = { x: site.entrance.x, y: 80 };
+    const queue = [start],
+      seen = new Set([`${start.x},${start.y}`]);
+    for (let i = 0; i < queue.length; i++)
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        const p = { x: queue[i].x + dx, y: queue[i].y + dy },
+          id = `${p.x},${p.y}`,
+          t = world.tile(p.x, p.y);
+        if (seen.has(id) || t.site !== site.id || world.blocked(p.x, p.y)) continue;
+        seen.add(id);
+        queue.push(p);
+      }
+    assert.ok(
+      seen.has(`${site.reward.x},${site.reward.y}`),
+      `${seed}: loot unreachable from road approach`,
+    );
+    assert.ok(seen.size > 100, 'vault must contain connected rooms rather than one short passage');
+    let walls = 0;
+    for (let y = 24; y < 56; y++)
+      for (let x = 24; x < 56; x++) {
+        const tile = world.tile(x, y);
+        if (tile.site !== site.id) continue;
+        assert.equal(tile.building, undefined, 'excavations must remain open roof');
+        if (tile.terrain === 'wall') {
+          walls++;
+          assert.ok(world.blocked(x, y));
+        } else assert.ok(seen.has(`${x},${y}`), `${seed}: isolated excavation floor ${x},${y}`);
+      }
+    assert.ok(walls > 50, 'generated rooms need substantial real collision boundaries');
+    const props = world
+      .propsAround(site.x, site.y, 48)
+      .filter((p) => p.id.startsWith(site.id + ':'));
+    assert.ok(
+      props.some(
+        (p) =>
+          p.id === `${site.id}:cache` &&
+          p.kind === 'chest' &&
+          p.x === site.reward.x &&
+          p.y === site.reward.y,
+      ),
+    );
+    assert.ok(props.some((p) => p.id === `${site.id}:notice` && !world.blocked(p.x, p.y)));
+    const guards = world
+      .npcsAround(site.x, site.y, 24)
+      .filter((n) => n.id.startsWith(site.id + ':guard:'));
+    assert.equal(guards.length, 2);
+    for (const guard of guards) {
+      assert.ok(guard.hostile);
+      assert.ok(seen.has(`${guard.x},${guard.y}`));
+      assert.ok(Math.hypot(guard.x - site.entrance.x, guard.y - site.entrance.y) > 10);
+    }
+  }
+});
+
+test('vault occurrence and placement are deterministic in negative districts and absent from legacy worlds', () => {
+  const a = new InfiniteWorld(703, 2),
+    b = new InfiniteWorld(703, 2);
+  const expected = a.vaultsAround(-80, -80, 128);
+  assert.ok(expected.some((v) => v.x < 0 && v.y < 0));
+  for (let x = 0; x < 40; x++) b.vaultsAround(x * 80, 160, 100);
+  assert.deepEqual(b.vaultsAround(-80, -80, 128), expected);
+  for (const site of expected) {
+    assert.deepEqual(a.tile(site.reward.x, site.reward.y), b.tile(site.reward.x, site.reward.y));
+    assert.equal(a.blocked(site.entrance.x, site.entrance.y), false);
+  }
+  const legacy = new InfiniteWorld(703, 1);
+  assert.deepEqual(legacy.vaultsAround(40, 40, 128), []);
+  assert.ok(!legacy.propsAround(40, 40, 40).some((p) => p.id.startsWith('vault:')));
+});
 
 test('chunk seams and content are independent of load order including negative and far coordinates', () => {
   const a = new InfiniteWorld(703),
@@ -159,8 +342,10 @@ test('coherent wilderness varies four biomes, resources and terrain rather than 
     shapes = new Set<string>();
   let neighbors = 0,
     matching = 0;
-  for (let cy = -8; cy <= 8; cy += 2)
-    for (let cx = -8; cx <= 8; cx += 2) {
+  // Regional climate spans farther than the old local-only noise. Keep the same
+  // 81 sampled chunks while covering multiple complete climate regions.
+  for (let cy = -16; cy <= 16; cy += 4)
+    for (let cx = -16; cx <= 16; cx += 4) {
       const chunk = world.chunk(cx, cy);
       shapes.add(JSON.stringify(chunk.tiles.map((t) => t.terrain)));
       for (const tile of chunk.tiles) {

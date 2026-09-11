@@ -25,6 +25,7 @@ export interface Tile extends Point {
   temperature: number;
   detail: number;
   building?: string;
+  site?: string;
   clan?: number;
 }
 export type PropKind =

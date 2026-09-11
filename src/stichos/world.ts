@@ -1,4 +1,5 @@
 import { deriveSeed, random, mix } from '../procedural/random.ts';
+import { generateVault, VAULT_SIZE, type VaultLayout } from './vault.ts';
 import type {
   Appearance,
   Biome,
@@ -14,6 +15,31 @@ import type {
 } from './types.ts';
 
 export const CHUNK_SIZE = 16;
+export type WorldGeneration = 1 | 2;
+export type WildernessBiome = Exclude<Biome, 'settlement'>;
+export interface WorldClimate {
+  elevation: number;
+  moisture: number;
+  regionalCold: number;
+  coldness: number;
+  temperature: number;
+  biome: WildernessBiome;
+  weights: Record<WildernessBiome, number>;
+}
+export interface VaultSite extends Point {
+  id: string;
+  seed: number;
+  radius: number;
+  entrance: Point;
+  reward: Point;
+}
+interface PlacedVault {
+  site: VaultSite;
+  layout: VaultLayout;
+  origin: Point;
+  roadY: number;
+  guards: Point[];
+}
 const CACHE_LIMIT = 160;
 const TOWN_SPACING = 80;
 const CLANS: Clan[] = [
@@ -60,6 +86,8 @@ const squareDistance = (a: Point, b: Point) => (a.x - b.x) ** 2 + (a.y - b.y) **
 const key = (x: number, y: number) => `${x},${y}`;
 const integer = (v: number) => (Number.isFinite(v) ? Math.round(v) : 0);
 const smooth = (t: number) => t * t * (3 - 2 * t);
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const ramp = (a: number, b: number, v: number) => smooth(clamp01((v - a) / (b - a)));
 
 export function appearance(seed: number, role: NpcRole = 'pilgrim', clan = 0): Appearance {
   const rng = random(deriveSeed(seed, 'humanoid-appearance'));
@@ -101,11 +129,16 @@ interface TownLayout {
 /** Addressed coordinate generation makes eviction, travel direction, and load order irrelevant. */
 export class InfiniteWorld {
   readonly seed: number;
+  readonly generation: WorldGeneration;
   readonly spawn: Point = { x: 0, y: 5 };
   readonly clans: Clan[] = CLANS.map((clan) => ({ ...clan }));
   private cache = new Map<string, Chunk>();
-  constructor(seed: number) {
+  private lattice = new Map<string, number>();
+  private vaultCache = new Map<string, PlacedVault>();
+  constructor(seed: number, generation: WorldGeneration = 2) {
+    if (generation !== 1 && generation !== 2) throw new RangeError('Unsupported world generation');
     this.seed = Number.isFinite(seed) ? seed >>> 0 : 0;
+    this.generation = generation;
   }
   get cacheSize() {
     return this.cache.size;
@@ -116,13 +149,170 @@ export class InfiniteWorld {
       py = y / scale,
       ix = Math.floor(px),
       iy = Math.floor(py);
-    const value = (dx: number, dy: number) =>
-      deriveSeed(this.seed, address, ix + dx, iy + dy) / 0xffffffff;
+    const value = (dx: number, dy: number) => {
+      if (this.generation === 1)
+        return deriveSeed(this.seed, address, ix + dx, iy + dy) / 0xffffffff;
+      const id = `${address}:${ix + dx}:${iy + dy}`;
+      const cached = this.lattice.get(id);
+      if (cached !== undefined) return cached;
+      const sample = deriveSeed(this.seed, address, ix + dx, iy + dy) / 0xffffffff;
+      this.lattice.set(id, sample);
+      if (this.lattice.size > 8192) this.lattice.delete(this.lattice.keys().next().value!);
+      return sample;
+    };
     return mix(
       mix(value(0, 0), value(1, 0), smooth(px - ix)),
       mix(value(0, 1), value(1, 1), smooth(px - ix)),
       smooth(py - iy),
     );
+  }
+
+  /** Continuous, coordinate-addressed climate; independent of chunk boundaries and load order. */
+  climate(x: number, y: number): WorldClimate {
+    x = Number.isFinite(x) ? x : 0;
+    y = Number.isFinite(y) ? y : 0;
+    if (this.generation === 1) {
+      const elevation =
+        this.noise(x, y, 29, 'elevation') * 0.7 + this.noise(x, y, 11, 'folds') * 0.3;
+      const moisture = this.noise(x, y, 43, 'moisture');
+      const coldness = this.noise(x, y, 61, 'cold');
+      const biome =
+        elevation > 0.66
+          ? 'highlands'
+          : moisture > 0.6
+            ? 'marsh'
+            : coldness > 0.52
+              ? 'tundra'
+              : 'frostwood';
+      return {
+        elevation,
+        moisture,
+        regionalCold: coldness,
+        coldness,
+        temperature: Number((-19 + coldness * 11 + moisture * 2).toFixed(2)),
+        biome,
+        weights: {
+          frostwood: Number(biome === 'frostwood'),
+          tundra: Number(biome === 'tundra'),
+          marsh: Number(biome === 'marsh'),
+          highlands: Number(biome === 'highlands'),
+        },
+      };
+    }
+    // Broad independent displacement fields bend regional contours without any
+    // per-chunk reseeding. Smaller octaves add terrain folds inside those regions.
+    const wx = x + (this.noise(x, y, 173, 'climate-warp-x') - 0.5) * 72;
+    const wy = y + (this.noise(x, y, 211, 'climate-warp-y') - 0.5) * 72;
+    const elevation = smooth(
+      this.noise(wx, wy, 87, 'altitude-region') * 0.62 +
+        this.noise(wx, wy, 31, 'altitude-folds') * 0.26 +
+        this.noise(wx, wy, 11, 'altitude-detail') * 0.12,
+    );
+    const moisture = smooth(
+      this.noise(wx + 91, wy - 53, 117, 'moisture-region') * 0.74 +
+        this.noise(wx + 91, wy - 53, 38, 'moisture-local') * 0.26,
+    );
+    const regionalCold = smooth(
+      this.noise(wx - 87, wy + 47, 151, 'temperature-region') * 0.8 +
+        this.noise(wx - 87, wy + 47, 61, 'temperature-local') * 0.2,
+    );
+    const coldness = clamp01(regionalCold * 0.7 + elevation * 0.3);
+    const high = ramp(0.53, 0.73, elevation),
+      wet = ramp(0.43, 0.74, moisture),
+      frozen = ramp(0.39, 0.68, coldness);
+    const raw: Record<WildernessBiome, number> = {
+      highlands: high,
+      marsh: (1 - high) * wet * (1 - frozen * 0.6),
+      frostwood: (1 - high) * (1 - wet * 0.5) * (1 - frozen),
+      tundra: (1 - high) * (0.2 + frozen) * (1 - wet * 0.35),
+    };
+    const total = Object.values(raw).reduce((sum, value) => sum + value, 0);
+    const weights = Object.fromEntries(
+      Object.entries(raw).map(([biome, weight]) => [biome, weight / total]),
+    ) as Record<WildernessBiome, number>;
+    const biome = (Object.keys(weights) as WildernessBiome[]).reduce(
+      (best, candidate) => (weights[candidate] > weights[best] ? candidate : best),
+      'frostwood',
+    );
+    return {
+      elevation,
+      moisture,
+      regionalCold,
+      coldness,
+      temperature: Number((-9 - regionalCold * 14 - elevation * 7 + moisture * 2).toFixed(2)),
+      biome,
+      weights,
+    };
+  }
+
+  private vault(gx: number, gy: number): PlacedVault | null {
+    if (
+      this.generation === 1 ||
+      ((gx !== 0 || gy !== 0) && deriveSeed(this.seed, 'vault-presence', gx, gy) % 3 !== 0)
+    )
+      return null;
+    const id = `vault:${gx}:${gy}`;
+    const cached = this.vaultCache.get(id);
+    if (cached) {
+      this.vaultCache.delete(id);
+      this.vaultCache.set(id, cached);
+      return cached;
+    }
+    const seed = deriveSeed(this.seed, 'botanical-vault', gx, gy);
+    const layout = generateVault(seed);
+    const x = gx * TOWN_SPACING + 40,
+      y = gy * TOWN_SPACING + 40;
+    const origin = { x: x - VAULT_SIZE / 2, y: y - VAULT_SIZE / 2 };
+    const worldPoint = (p: Point) => ({ x: origin.x + p.x, y: origin.y + p.y });
+    const site: VaultSite = {
+      id,
+      seed,
+      x,
+      y,
+      radius: VAULT_SIZE / 2,
+      entrance: worldPoint(layout.entrance),
+      reward: worldPoint(layout.reward),
+    };
+    const floor = [...layout.floor.entries()]
+      .filter(([, open]) => open)
+      .map(([i]) => worldPoint({ x: i % VAULT_SIZE, y: Math.floor(i / VAULT_SIZE) }));
+    const deep = floor
+      .filter((p) => squareDistance(p, site.entrance) > 100 && squareDistance(p, site.reward) >= 4)
+      .sort(
+        (a, b) =>
+          squareDistance(a, site.reward) - squareDistance(b, site.reward) || a.y - b.y || a.x - b.x,
+      );
+    const guards: Point[] = [];
+    for (const p of deep)
+      if (guards.every((g) => squareDistance(g, p) >= 9)) {
+        guards.push(p);
+        if (guards.length === 2) break;
+      }
+    const placed: PlacedVault = { site, layout, origin, roadY: (gy + 1) * TOWN_SPACING, guards };
+    this.vaultCache.set(id, placed);
+    while (this.vaultCache.size > 32) this.vaultCache.delete(this.vaultCache.keys().next().value!);
+    return placed;
+  }
+
+  private vaultsForChunk(x0: number, y0: number): PlacedVault[] {
+    if (this.generation === 1) return [];
+    const result: PlacedVault[] = [];
+    // Excavations occupy x24..55 and y24..55 in their 80-tile district;
+    // the south approach continues to y80. No settlement lies on that approach.
+    for (
+      let gy = Math.ceil((y0 - 80) / 80);
+      gy <= Math.floor((y0 + CHUNK_SIZE - 1 - 24) / 80);
+      gy++
+    )
+      for (
+        let gx = Math.ceil((x0 - 55) / 80);
+        gx <= Math.floor((x0 + CHUNK_SIZE - 1 - 24) / 80);
+        gx++
+      ) {
+        const vault = this.vault(gx, gy);
+        if (vault) result.push(vault);
+      }
+    return result;
   }
   private town(gx: number, gy: number): TownLayout {
     const seed = deriveSeed(this.seed, 'settlement', gx, gy),
@@ -142,14 +332,14 @@ export class InfiniteWorld {
       name,
       clan,
       kind: origin ? 'cathedral' : pick(['village', 'foundry', 'cathedral'] as const, rng),
-      radius: origin ? 19 : 16 + Math.floor(rng() * 3),
+      radius: origin ? 21 : 16 + Math.floor(rng() * 3),
     };
     const buildings: Building[] = [
       {
         id: `${settlement.id}:hall`,
         x,
         y: y - (origin ? 5 : 9),
-        halfX: origin ? 7 : 3 + Math.floor(rng() * 2),
+        halfX: origin ? 11 : 3 + Math.floor(rng() * 2),
         halfY: origin ? 4 : 3,
         name: settlement.kind === 'cathedral' ? 'Winter cathedral' : 'Assembly hall',
       },
@@ -162,7 +352,7 @@ export class InfiniteWorld {
     ])
       buildings.push({
         id: `${settlement.id}:house:${side}:${row}`,
-        x: x + side * (origin ? 13 : 9),
+        x: x + side * (origin ? (row < 0 ? 16 : 13) : 9),
         y: y + (origin ? (row < 0 ? -8 : 10) : row * 7),
         halfX: origin ? 2 : 2 + Math.floor(rng() * 2),
         halfY: origin ? 2 : 2 + Math.floor(rng() * 2),
@@ -196,24 +386,16 @@ export class InfiniteWorld {
       }
     return result;
   }
-  private terrain(x: number, y: number, layouts: TownLayout[]): Tile {
+  private terrain(x: number, y: number, layouts: TownLayout[], vaults: PlacedVault[]): Tile {
     const seed = deriveSeed(this.seed, 'tile', x, y),
       detail = seed / 0xffffffff;
-    const elevation = this.noise(x, y, 29, 'elevation') * 0.7 + this.noise(x, y, 11, 'folds') * 0.3;
-    const moisture = this.noise(x, y, 43, 'moisture'),
-      cold = this.noise(x, y, 61, 'cold');
-    let biome: Biome =
-      elevation > 0.66
-        ? 'highlands'
-        : moisture > 0.6
-          ? 'marsh'
-          : cold > 0.52
-            ? 'tundra'
-            : 'frostwood';
+    const climate = this.climate(x, y);
+    const { elevation, moisture, coldness: cold } = climate;
+    let biome: Biome = climate.biome;
     let terrain: Tile['terrain'] =
-      elevation < 0.32 && moisture > 0.48
+      elevation < (this.generation === 1 ? 0.32 : 0.34) && moisture > 0.48
         ? 'water'
-        : cold > 0.69 && moisture > 0.54
+        : cold > (this.generation === 1 ? 0.69 : 0.6) && moisture > 0.54
           ? 'ice'
           : biome === 'frostwood' || biome === 'marsh'
             ? 'grass'
@@ -225,7 +407,7 @@ export class InfiniteWorld {
       terrain,
       biome,
       height: Math.round(elevation * 3) / 3,
-      temperature: Number((-19 + cold * 11 + moisture * 2).toFixed(2)),
+      temperature: climate.temperature,
       detail,
     };
     const highway =
@@ -254,6 +436,28 @@ export class InfiniteWorld {
     // Buildings that meet a trunk road form an arcade instead of sealing the
     // route. This preserves both interior rooms and an uninterrupted road grid.
     if (highway && tile.terrain === 'wall') tile.terrain = 'floor';
+    if (tile.biome !== 'settlement')
+      for (const vault of vaults) {
+        const localX = x - vault.origin.x,
+          localY = y - vault.origin.y;
+        if (localX >= 0 && localX < VAULT_SIZE && localY >= 0 && localY < VAULT_SIZE) {
+          const i = localY * VAULT_SIZE + localX;
+          if (vault.layout.floor[i] || vault.layout.walls[i]) {
+            tile.terrain = vault.layout.floor[i] ? 'floor' : 'wall';
+            tile.site = vault.site.id;
+            tile.height = 0;
+          }
+        }
+        if (
+          y >= vault.site.entrance.y &&
+          y <= vault.roadY &&
+          Math.abs(x - vault.site.entrance.x) <= 1
+        ) {
+          tile.terrain = tile.terrain === 'water' || tile.terrain === 'ice' ? 'bridge' : 'road';
+          tile.site = vault.site.id;
+          tile.height = 0;
+        }
+      }
     return tile;
   }
   private prop(
@@ -320,7 +524,8 @@ export class InfiniteWorld {
     }
     const x0 = cx * CHUNK_SIZE,
       y0 = cy * CHUNK_SIZE,
-      layouts = this.layouts(x0 + 7.5, y0 + 7.5, 12);
+      layouts = this.layouts(x0 + 7.5, y0 + 7.5, 12),
+      vaults = this.vaultsForChunk(x0, y0);
     const chunk: Chunk = { cx, cy, tiles: [], props: [], npcs: [], settlements: [] };
     const contains = (p: Point) =>
       p.x >= x0 && p.x < x0 + CHUNK_SIZE && p.y >= y0 && p.y < y0 + CHUNK_SIZE;
@@ -336,9 +541,10 @@ export class InfiniteWorld {
     };
     for (let y = y0; y < y0 + CHUNK_SIZE; y++)
       for (let x = x0; x < x0 + CHUNK_SIZE; x++) {
-        const tile = this.terrain(x, y, layouts);
+        const tile = this.terrain(x, y, layouts, vaults);
         chunk.tiles.push(tile);
         const roll = deriveSeed(this.seed, 'ecology', x, y) / 0xffffffff;
+        if (tile.site) continue;
         if (tile.biome === 'settlement') {
           const town = layouts.find(
             (l) =>
@@ -426,6 +632,37 @@ export class InfiniteWorld {
           );
         }
       }
+    for (const vault of vaults) {
+      const s = vault.site;
+      add(this.prop('chest', s.reward.x, s.reward.y, 'Sealed botanical archive', `${s.id}:cache`));
+      add(this.prop('lamp', s.entrance.x + 1, s.entrance.y, 'Excavation lantern', `${s.id}:lamp`));
+      add(
+        this.prop(
+          'notice',
+          s.entrance.x + 1,
+          vault.roadY - 1,
+          'Seed vault — follow this path north',
+          `${s.id}:notice`,
+        ),
+      );
+      const settlement = this.town(
+        Math.floor(s.x / TOWN_SPACING),
+        Math.floor(s.y / TOWN_SPACING),
+      ).settlement;
+      vault.guards.forEach((p, i) => {
+        if (contains(p))
+          chunk.npcs.push(
+            this.resident(
+              settlement,
+              'raider',
+              p.x,
+              p.y,
+              deriveSeed(s.seed, 'guard', i),
+              `${s.id}:guard:${i}`,
+            ),
+          );
+      });
+    }
     for (const { settlement: s, buildings } of layouts) {
       if (contains(s)) chunk.settlements.push(s);
       add(this.prop('notice', s.x - 2, s.y + 1, `${s.name} noticeboard`, `${s.id}:notice`, s.clan));
@@ -595,7 +832,30 @@ export class InfiniteWorld {
     return this.around<Npc>(x, y, radius, 'npcs');
   }
   settlementsAround(x: number, y: number, radius: number): Settlement[] {
-    return this.around<Settlement>(x, y, radius, 'settlements');
+    x = integer(x);
+    y = integer(y);
+    radius = Math.min(128, Math.max(0, Number.isFinite(radius) ? radius : 0));
+    return this.layouts(x, y, radius)
+      .map((layout) => layout.settlement)
+      .filter((settlement) => squareDistance(settlement, { x, y }) <= radius * radius);
+  }
+  vaultsAround(x: number, y: number, radius: number): VaultSite[] {
+    if (this.generation === 1) return [];
+    x = integer(x);
+    y = integer(y);
+    radius = Math.min(128, Math.max(0, Number.isFinite(radius) ? radius : 0));
+    const result: VaultSite[] = [];
+    for (let gy = Math.ceil((y - radius - 40) / 80); gy <= Math.floor((y + radius - 40) / 80); gy++)
+      for (
+        let gx = Math.ceil((x - radius - 40) / 80);
+        gx <= Math.floor((x + radius - 40) / 80);
+        gx++
+      ) {
+        const vault = this.vault(gx, gy);
+        if (vault && squareDistance(vault.site, { x, y }) <= radius * radius)
+          result.push(vault.site);
+      }
+    return result;
   }
   blocked(x: number, y: number, removed: Set<string> = new Set()): boolean {
     x = integer(x);

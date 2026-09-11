@@ -1,5 +1,8 @@
 import { random, deriveSeed } from '../procedural/random.ts';
 import type { Appearance, PropKind, Terrain, Tile } from './types.ts';
+import { drawWeapon, weaponGenome } from './equipment.ts';
+import { drawPlant } from './botany.ts';
+import type { PlantKind } from './botany.ts';
 
 export interface Sprite {
   image: HTMLCanvasElement;
@@ -96,7 +99,7 @@ export class StichosArt {
   ground(tile: Tile): Sprite {
     const terrain = tile.terrain === 'wall' ? 'floor' : tile.terrain;
     const variant = tile.seed % 16;
-    return this.get(`ground:${terrain}:${variant}:${!!tile.building}`, () =>
+    return this.get(`ground:${terrain}:${variant}:${!!tile.building}:${!!tile.site}`, () =>
       image(
         32,
         32,
@@ -114,7 +117,45 @@ export class StichosArt {
             bridge: '#635e59',
           };
           rect(ctx, 0, 0, 32, 32, base[terrain]);
-          if (terrain === 'road' || terrain === 'floor') {
+          if (tile.site && terrain === 'floor') {
+            rect(ctx, 0, 0, 32, 32, '#283e53');
+            for (let row = 0; row < 2; row++)
+              for (let col = 0; col < 2; col++) {
+                const x = col * 16,
+                  y = row * 16,
+                  c = ['#4c6173', '#526879', '#455e73'][Math.floor(rng() * 3)];
+                poly(
+                  ctx,
+                  [
+                    [x + 1, y + 2],
+                    [x + 13, y + 1],
+                    [x + 15, y + 4],
+                    [x + 14, y + 14],
+                    [x + 3, y + 15],
+                    [x + 1, y + 11],
+                  ],
+                  c,
+                );
+                line(ctx, x + 3, y + 2, x + 12, y + 2, color(c, 10));
+                for (let i = 0; i < 7; i++)
+                  rect(
+                    ctx,
+                    x + 2 + rng() * 10,
+                    y + 3 + rng() * 10,
+                    1 + rng() * 2,
+                    1,
+                    rng() > 0.5 ? color(c, 7) : color(c, -8),
+                  );
+              }
+            if (variant % 4 === 0) {
+              line(ctx, 7, 24, 14, 18, '#2c4a61');
+              line(ctx, 14, 18, 18, 20, '#29465e');
+            }
+            if (variant % 5 === 0) {
+              rect(ctx, 6, 7, 2, 1, '#789a90');
+              rect(ctx, 8, 9, 1, 2, '#80a499');
+            }
+          } else if (terrain === 'road' || terrain === 'floor') {
             for (let row = -1; row < 6; row++)
               for (let col = -1; col < 5; col++) {
                 const x = col * 9 + (row % 2) * 4,
@@ -264,13 +305,13 @@ export class StichosArt {
   }
 
   prop(kind: PropKind, seed: number, opened = false, tint = '#687e80'): Sprite {
+    if (kind === 'cequin' || kind === 'heartleaf' || kind === 'emberroot' || kind === 'mushroom')
+      return this.get(`plant:${kind}:${seed >>> 0}`, () => this.herb(kind, seed));
     const variant = seed % (kind === 'pine' ? 24 : 12);
     return this.get(`prop:${kind}:${variant}:${opened}:${tint}`, () => {
       const rng = random(deriveSeed(variant, kind));
       if (kind === 'pine') return this.pine(rng);
       if (kind === 'rock') return this.rock(rng);
-      if (['cequin', 'heartleaf', 'emberroot', 'mushroom'].includes(kind))
-        return this.herb(kind, rng);
       return image(
         64,
         96,
@@ -320,17 +361,38 @@ export class StichosArt {
                 ],
                 '#202d37',
               );
-              for (let x = 22; x < 44; x += 4) {
-                rect(ctx, x, 58, 2, 28, '#40505a');
-                rect(ctx, x, 60, 1, 24, '#5b6665');
+              for (let x = 21; x < 44; x += 3) {
+                rect(ctx, x, 57, 2, 29, x % 2 ? '#2b3e48' : '#32454e');
+                rect(ctx, x, 58, 1, 28, '#4b5b5b');
+              }
+              for (const side of [-1, 1]) {
+                const px = 32 + side * 6;
+                poly(
+                  ctx,
+                  [
+                    [px - 4, 81],
+                    [px - 4, 57],
+                    [px, 49],
+                    [px + 4, 57],
+                    [px + 4, 81],
+                  ],
+                  '#172c38',
+                );
+                line(ctx, px - 4, 57, px, 49, '#65716a');
+                line(ctx, px, 49, px + 4, 57, '#4e635f');
+                line(ctx, px, 54, px, 79, '#6a7668');
+                for (let yy = 59; yy < 78; yy += 5)
+                  for (const s of [-1, 1]) line(ctx, px, yy + 2, px + s * 3, yy - 1, '#77816d');
               }
               rect(ctx, 31, 49, 2, 38, '#101e29');
               for (let y = 65; y < 86; y += 12) {
-                rect(ctx, 22, y, 20, 2, '#748278');
-                rect(ctx, 24, y, 1, 1, '#c2bc9a');
-                rect(ctx, 39, y, 1, 1, '#c2bc9a');
+                rect(ctx, 21, y, 23, 1, '#263b43');
+                for (let x = 22; x < 44; x += 3) rect(ctx, x, y, 1, 1, '#aba582');
               }
-              rect(ctx, 34, 73, 2, 3, '#d0af64');
+              for (const side of [-1, 1]) {
+                rect(ctx, 32 + side * 3, 72, 2, 3, '#a99664');
+                rect(ctx, 32 + side * 3, 73, 1, 1, '#283e45');
+              }
             } else {
               poly(
                 ctx,
@@ -438,6 +500,70 @@ export class StichosArt {
           } else {
             const bench = kind === 'workbench',
               h = bench ? 17 : kind === 'crate' ? 22 : 17;
+            if (bench) {
+              for (const x of [10, 52]) {
+                rect(ctx, x, foot - 62, 2, 58, '#4d5148');
+                rect(ctx, x, foot - 60, 1, 53, '#b2a37c');
+              }
+              rect(ctx, 9, foot - 57, 47, 2, '#605c49');
+              poly(
+                ctx,
+                [
+                  [7, foot - 57],
+                  [17, foot - 72],
+                  [47, foot - 69],
+                  [57, foot - 55],
+                  [51, foot - 49],
+                  [41, foot - 53],
+                  [29, foot - 49],
+                  [18, foot - 53],
+                  [9, foot - 49],
+                ],
+                '#536569',
+              );
+              poly(
+                ctx,
+                [
+                  [7, foot - 57],
+                  [17, foot - 72],
+                  [47, foot - 69],
+                  [57, foot - 55],
+                  [48, foot - 54],
+                  [39, foot - 58],
+                  [28, foot - 54],
+                  [18, foot - 59],
+                ],
+                '#758685',
+              );
+              for (let x = 17; x < 52; x += 9) line(ctx, x, foot - 67, x - 6, foot - 54, '#b0b8a7');
+              line(ctx, 8, foot - 58, 17, foot - 73, '#d4e0e4', 2);
+              line(ctx, 17, foot - 73, 47, foot - 70, '#dce4e9', 3);
+              for (let i = 0; i < 6; i++)
+                rect(ctx, 18 + i * 5, foot - 72 + rng() * 2, 5, 2, '#e2e8eb');
+              for (const px of [16, 47]) {
+                line(ctx, px, foot - 54, px, foot - 40, '#9b9f83');
+                poly(
+                  ctx,
+                  [
+                    [px - 4, foot - 40],
+                    [px + 4, foot - 40],
+                    [px + 3, foot - 34],
+                    [px - 2, foot - 34],
+                  ],
+                  '#77736b',
+                );
+                for (let i = 0; i < 4; i++)
+                  line(
+                    ctx,
+                    px,
+                    foot - 40,
+                    px + (rng() - 0.5) * 9,
+                    foot - 46 - rng() * 3,
+                    '#81b2a0',
+                  );
+              }
+              rect(ctx, 11, foot - 26, 43, 3, '#233d4a');
+            }
             rect(ctx, 13, foot - h, 38, h, '#4e4d44');
             for (let i = 0; i < 5; i++) {
               rect(ctx, 15 + i * 7, foot - h + 2, 6, h - 4, i % 2 ? '#766b54' : '#89785b');
@@ -493,78 +619,116 @@ export class StichosArt {
 
   private pine(rng: () => number): Sprite {
     return image(
-      112,
-      160,
+      128,
+      180,
       (ctx) => {
-        const cx = 56 + (rng() - 0.5) * 5,
-          foot = 148,
-          top = 10 + rng() * 15,
-          lean = (rng() - 0.5) * 15,
-          spread = 0.78 + rng() * 0.3,
-          tierSpacing = 12 + rng() * 3;
-        rect(ctx, cx - 5, foot - 68, 11, 67, '#253942');
-        for (let i = 0; i < 20; i++)
+        const foot = 168,
+          cx = 64 + (rng() - 0.5) * 8,
+          lean = (rng() - 0.5) * 17,
+          type = Math.floor(rng() * 3);
+        const spread = type === 0 ? 0.8 : type === 1 ? 1 : 1.08,
+          spacing = 14 + rng() * 2,
+          snowBias = rng() > 0.5 ? 1 : -1;
+        ctx.save();
+        ctx.globalAlpha = 0.17;
+        for (let i = 0; i < 6; i++)
+          blob(
+            ctx,
+            cx + (rng() - 0.5) * 32,
+            foot + 1 + rng() * 3,
+            15 + rng() * 15,
+            3 + rng() * 4,
+            '#264663',
+            rng,
+          );
+        ctx.restore();
+        // Tangled roots, fallen branchlets and low surviving needles bind the tree to the snow.
+        for (let i = 0; i < 15; i++) {
+          const bx = cx + (rng() - 0.5) * 54,
+            by = foot - 3 + rng() * 9;
+          line(ctx, bx - 3, by + 2, bx + 3, by - 3, '#617583');
+          for (let j = 0; j < 3; j++)
+            line(ctx, bx, by - j, bx + (j % 2 ? 1 : -1) * (3 + rng() * 3), by - j - 2, '#416677');
+          if (rng() > 0.3) blob(ctx, bx, by, 4 + rng() * 4, 2, '#b7cce0', rng);
+        }
+        rect(ctx, cx - 5, foot - 87, 10, 87, '#203340');
+        rect(ctx, cx - 3, foot - 78, 3, 75, '#536363');
+        for (let i = 0; i < 24; i++)
           rect(
             ctx,
             cx - 4 + rng() * 8,
-            foot - 65 + rng() * 63,
-            1 + rng() * 2,
-            3 + rng() * 8,
-            rng() > 0.6 ? '#7b827a' : '#4e5c5d',
+            foot - rng() * 80,
+            1,
+            2 + rng() * 6,
+            rng() > 0.5 ? '#7c8071' : '#273f4d',
           );
-        for (const side of [-1, 1])
-          line(ctx, cx, foot - 8, cx + side * (10 + rng() * 6), foot, '#53686d', 3);
-        for (let tier = 0; tier < 8; tier++) {
-          const y = foot - 25 - tier * tierSpacing + (rng() - 0.5) * 7,
-            half = (45 - tier * 4.6) * spread * (0.86 + rng() * 0.2),
-            offset = (lean * tier) / 8;
-          const pts: number[][] = [[cx + offset, y - 40]];
-          for (let j = 0; j <= 12; j++) {
-            const x = -half + (j / 12) * half * 2;
-            pts.push([cx + offset + x, y + Math.sin(j * 2.4) * 3 + rng() * 7 - Math.abs(x) * 0.09]);
+        for (let tier = 0; tier < 9; tier++) {
+          const y = foot - 15 - tier * spacing + (rng() - 0.5) * 7,
+            half = (49 - tier * 4.9) * spread * (0.9 + rng() * 0.17),
+            shift = (lean * tier) / 9;
+          const silhouette: number[][] = [[cx + shift, y - 35]];
+          for (let j = 0; j <= 16; j++) {
+            const xx = -half + (j / 16) * half * 2;
+            silhouette.push([cx + shift + xx, y + (rng() - 0.3) * 8 - Math.abs(xx) * 0.1]);
           }
-          poly(ctx, pts, tier % 2 ? '#213e50' : '#294b5b');
-          // Feathered branch tips, grouped needles and irregular loads of snow.
-          for (let branch = 0; branch < 9; branch++) {
-            const a = (branch / 8 - 0.5) * 2,
-              x = cx + offset + a * half,
-              by = y - 3 - (1 - Math.abs(a)) * 12;
-            line(ctx, cx + offset, y - 22, x, by, '#4a6972', 2);
-            for (let n = 0; n < 10; n++) {
-              const bx = x + (rng() - 0.5) * 12,
-                yy = by - rng() * 8;
-              line(
+          poly(ctx, silhouette, tier % 2 ? '#19384d' : '#213e52');
+          const branches = 7 + (tier < 3 ? 2 : 0);
+          for (let branch = 0; branch < branches; branch++) {
+            const direction = (branch / (branches - 1) - 0.5) * 2,
+              bx = cx + shift + direction * half,
+              by = y - 4 - (1 - Math.abs(direction)) * 14;
+            line(ctx, cx + shift, y - 20, bx, by, '#4a626a', 2);
+            for (let needle = 0; needle < 16; needle++) {
+              const px = bx + (rng() - 0.5) * 15,
+                py = by - rng() * 9,
+                length = 3 + rng() * 5;
+              poly(
                 ctx,
-                bx,
-                yy,
-                bx + (rng() - 0.5) * 6,
-                yy + 3 + rng() * 4,
-                rng() > 0.65 ? '#6b8990' : '#315867',
+                [
+                  [px - 3, py - 2],
+                  [px + 1, py - 5],
+                  [px + 3, py],
+                  [px + 5, py + length],
+                  [px, py + 2],
+                  [px - 4, py + length - 1],
+                ],
+                ['#18374d', '#2a4b5e', '#3c6070', '#25495f'][Math.floor(rng() * 4)],
               );
+              if (rng() > 0.65) line(ctx, px, py - 2, px + 1, py + 3, '#63838d');
             }
-            if (rng() > 0.31) {
-              const sw = 4 + rng() * 8;
-              blob(ctx, x, by - 3, sw, 3 + rng() * 3, '#a6bad4', rng);
-              blob(ctx, x - 1, by - 6, sw * 0.9, 3 + rng() * 2, '#cad9e9', rng);
-              if (rng() > 0.4) rect(ctx, x - sw * 0.5, by - 8, sw * 0.7, 1, '#e6eef5');
-              if (rng() > 0.5) rect(ctx, x + sw * 0.5, by - 2, 1, 3 + rng() * 4, '#c5d7e6');
+            // Windward branches carry linked lumpy snow masses; lee branches expose needles.
+            if (rng() > (direction * snowBias > 0 ? 0.22 : 0.48)) {
+              const snowWidth = 5 + rng() * 9;
+              blob(ctx, bx + 1, by - 1, snowWidth + 2, 4 + rng() * 3, '#7e9abc', rng);
+              blob(ctx, bx, by - 4, snowWidth, 4 + rng() * 2, '#b5c9e0', rng);
+              for (let lobe = 0; lobe < 3; lobe++) {
+                const px = bx + (lobe - 1) * snowWidth * 0.5,
+                  py = by - 6 + (rng() - 0.5) * 3;
+                blob(ctx, px, py, snowWidth * 0.53, 2 + rng() * 2, '#d6e2f0', rng);
+                if (rng() > 0.5) rect(ctx, px - 2, py - 2, 3, 1, '#f0eff4');
+              }
+              for (let chip = 0; chip < 5; chip++)
+                rect(
+                  ctx,
+                  bx + (rng() - 0.5) * snowWidth * 1.7,
+                  by - 2 + rng() * 3,
+                  1 + rng() * 2,
+                  1,
+                  '#9bb5d3',
+                );
+              if (rng() > 0.55)
+                rect(ctx, bx + snowWidth * 0.6, by + 1, 1, 3 + rng() * 4, '#acc6dd');
             }
           }
         }
-        line(ctx, cx + lean, top + 14, cx + lean, top - 2, '#527983', 2);
-        rect(ctx, cx + lean - 1, top, 3, 7, '#dce7ef');
-        for (let i = 0; i < 22; i++)
-          rect(
-            ctx,
-            cx + (rng() - 0.5) * 25,
-            foot - 5 + rng() * 10,
-            2 + rng() * 4,
-            1,
-            rng() > 0.5 ? '#d8e2eb' : '#879db8',
-          );
+        const apexX = cx + lean,
+          apexY = foot - 15 - 8 * spacing - 22;
+        line(ctx, apexX, apexY + 17, apexX, apexY, '#587788', 2);
+        line(ctx, apexX, apexY + 7, apexX - 4, apexY + 12, '#adc5df', 2);
+        rect(ctx, apexX - 1, apexY, 2, 7, '#e0e9f2');
       },
-      56,
-      148,
+      64,
+      168,
     );
   }
 
@@ -644,66 +808,23 @@ export class StichosArt {
     );
   }
 
-  private herb(kind: PropKind, rng: () => number): Sprite {
+  private herb(kind: PlantKind, seed: number): Sprite {
     return image(
-      40,
-      42,
+      64,
+      72,
       (ctx) => {
-        const cx = 20,
-          base = 35;
-        blob(ctx, cx, base, 12, 4, '#6b8190', rng);
-        blob(ctx, cx, base + 1, 10, 2, '#425e69', rng);
-        if (kind === 'mushroom') {
-          for (let i = 0; i < 5; i++) {
-            const x = 11 + rng() * 18,
-              y = 25 + rng() * 9;
-            rect(ctx, x, y - 4, 2, 7, '#b2c6bc');
-            blob(ctx, x + 1, y - 5, 4 + rng() * 2, 3, '#99bbc6', rng);
-            rect(ctx, x, y - 7, 2, 1, '#e0e8da');
-          }
-        } else {
-          for (let stem = 0; stem < 7; stem++) {
-            const x = cx + (rng() - 0.5) * 19,
-              h = 10 + rng() * 19,
-              tip = x + (rng() - 0.5) * 9;
-            line(ctx, cx, base, tip, base - h, '#657f78');
-            for (let j = 0; j < 7; j++) {
-              const t = j / 8,
-                sx = cx + (tip - cx) * t,
-                sy = base - h * t;
-              const c =
-                kind === 'heartleaf'
-                  ? ['#5faaa9', '#a1cbb9', '#7fb7b0'][j % 3]
-                  : kind === 'emberroot'
-                    ? ['#768a70', '#b5a475', '#798e78'][j % 3]
-                    : ['#9fbeb4', '#6da798', '#bed4c1'][j % 3];
-              for (const side of [-1, 1]) {
-                if (kind === 'heartleaf')
-                  poly(
-                    ctx,
-                    [
-                      [sx, sy],
-                      [sx + side * 6, sy - 5],
-                      [sx + side * 7, sy - 2],
-                      [sx + side * 3, sy + 1],
-                    ],
-                    c,
-                  );
-                else line(ctx, sx, sy, sx + side * (2 + rng() * 3), sy - 2, c);
-              }
-            }
-            if (kind !== 'cequin' || stem % 3 === 0) {
-              const c = kind === 'emberroot' ? '#dc9b79' : '#b6a4e2';
-              for (let j = 0; j < 3; j++) {
-                rect(ctx, tip - 2 + rng() * 3, base - h + j * 3, 3, 2, c);
-                rect(ctx, tip, base - h + j * 3, 1, 1, '#e5d9ed');
-              }
-            }
-          }
-        }
+        const rng = random(deriveSeed(seed, 'plant-soil'));
+        ctx.save();
+        ctx.globalAlpha = 0.2;
+        blob(ctx, 33, 62, 14, 4, '#27455d', rng);
+        ctx.restore();
+        blob(ctx, 32, 60, 11, 3, '#3b5964', rng);
+        for (let i = 0; i < 7; i++)
+          rect(ctx, 22 + rng() * 20, 58 + rng() * 5, 2, 1, rng() > 0.5 ? '#75877e' : '#2e4a5a');
+        drawPlant(ctx, seed, kind, 32, 60);
       },
-      20,
-      35,
+      32,
+      60,
     );
   }
 }
@@ -896,11 +1017,20 @@ function drawHumanoidParts(
   rect(ctx, -4, -34 - bob, 8, 6, face === 0 ? look.hair : look.skin);
   rect(ctx, -3, -36 - bob, 6, 2, look.hair);
   if (face !== 0) {
+    rect(ctx, -4, -34 - bob, 2, 5, color(look.skin, -27));
+    rect(ctx, 2, -33 - bob, 2, 3, color(look.skin, 13));
+    if (look.hairStyle % 3 === 0) rect(ctx, -3, -35 - bob, 2, 3, look.hair);
+    if (look.hairStyle % 3 === 1) rect(ctx, 2, -35 - bob, 2, 3, look.hair);
     const eyesX = side ? east * 2 : -2;
+    rect(ctx, eyesX - 1, -33 - bob, 2, 1, color(look.hair, -8));
     rect(ctx, eyesX, -32 - bob, 1, 1, '#223441');
     if (!side) rect(ctx, 2, -32 - bob, 1, 1, '#223441');
     rect(ctx, side ? east * 3 : 0, -30 - bob, 1, 1, '#eed7b6');
     rect(ctx, -2, -28 - bob, 5, 1, color(look.skin, -26));
+    if (look.hairStyle === 4) {
+      rect(ctx, -3, -29 - bob, 6, 2, color(look.hair, 8));
+      rect(ctx, -1, -27 - bob, 3, 1, look.hair);
+    }
   }
   if (look.hat === 1 || look.hat === 3) {
     poly(
@@ -940,30 +1070,31 @@ function drawHumanoidParts(
   arm(1, true);
   const wx = side ? east * 7 : 8,
     hand = -14 + step * 2 - attack * 7;
-  if (look.weapon === 'staff') {
-    line(ctx, wx, -3, wx + attack * 10, -36 + attack * 5, '#8c7755', 2);
-    rect(ctx, wx, -34, 1, 27, '#c1ac7e');
-    poly(
+  if (look.weapon !== 'none') {
+    const sign = side ? east : 1;
+    const angle =
+      look.weapon === 'sword'
+        ? sign * (0.16 + attack * 1.12)
+        : look.weapon === 'bow'
+          ? sign * attack * 0.3
+          : sign * (0.04 + attack * 0.7);
+    const weaponScale = look.weapon === 'bow' ? 0.62 : 0.68;
+    const bow = look.weapon === 'bow' ? weaponGenome(look.seed, 'bow') : null;
+    ctx.save();
+    ctx.translate(wx + sign * attack * 4, hand);
+    ctx.rotate(angle);
+    if (side && east < 0) ctx.scale(-1, 1);
+    drawWeapon(
       ctx,
-      [
-        [wx - 2, -35],
-        [wx + 1, -40],
-        [wx + 4, -35],
-        [wx + 1, -31],
-      ],
-      '#adc7b5',
+      look.seed,
+      look.weapon,
+      bow ? -(2 + bow.breadth) * weaponScale : 0,
+      bow ? -(13 - bow.length / 2) * weaponScale : 0,
+      weaponScale,
     );
-    rect(ctx, wx, -38, 2, 3, '#d6e7c5');
-  } else if (look.weapon === 'sword') {
-    const tx = wx + attack * 17,
-      ty = hand - 15 + attack * 4;
-    line(ctx, wx, hand, tx, ty, '#758d9c', 3);
-    line(ctx, wx, hand, tx, ty, '#d4e4e8');
-    line(ctx, wx - 3, hand - 1, wx + 4, hand + 1, '#c2a56b', 2);
-  } else if (look.weapon === 'bow') {
-    line(ctx, wx, -28, wx + 5, -19, '#b29a76', 2);
-    line(ctx, wx + 5, -19, wx, -8, '#b29a76', 2);
-    line(ctx, wx, -28, wx, -8, '#c1c3b0');
+    ctx.restore();
+    // A visible gripping hand belongs to the articulated body, over its generated handle.
+    rect(ctx, wx + sign * attack * 4, hand, 2, 2, look.skin);
   }
   ctx.restore();
 }

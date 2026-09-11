@@ -473,7 +473,7 @@ function updateUI() {
     .settlementsAround(p.x, p.y, 28)
     .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
   el('s-place').textContent =
-    closest?.name ??
+    (tile.site ? 'Botanical seed vault' : closest?.name) ??
     {
       frostwood: 'The frostwood',
       tundra: 'Open tundra',
@@ -541,6 +541,11 @@ function updateUI() {
   context.hidden = !near || !!game.dialogue || !!modal || !!transferStarted;
   if (near)
     context.textContent = `E · ${'role' in near ? 'Speak to ' + near.name : (({ cequin: 'Gather cequin', heartleaf: 'Gather heartleaf', emberroot: 'Gather emberroot', pine: 'Gather wood', rock: 'Mine stone', chest: 'Open chest', radio: 'Listen to the radio', workbench: 'Use workbench', shrine: 'Rest and remember', notice: 'Read the notice', door: game.opened.has(near.id) ? 'Close door' : 'Open door', bench: 'Rest here', crate: 'Search crate' } as Record<string, string>)[near.kind] ?? near.name)}`;
+  if (near && !('role' in near)) {
+    const plant = game.botanicalProfile(near);
+    if (plant)
+      context.textContent = `E · Gather ${plant.name.toLowerCase()} · ${plant.yield} portions`;
+  }
   updatePack();
   updateDialogue();
 }
@@ -581,6 +586,24 @@ function drawMap(target = el<HTMLCanvasElement>('s-map'), scale = 5) {
       ctx.font = '12px Georgia';
       ctx.fillStyle = '#f3dfb2';
       ctx.fillText(town.name, x + 7, y);
+    }
+  }
+  for (const site of game.world.vaultsAround(game.player.x, game.player.y, range)) {
+    const x = w / 2 + (site.entrance.x - game.player.x) * scale,
+      y = h / 2 + (site.entrance.y - game.player.y) * scale;
+    ctx.fillStyle = '#17232b';
+    ctx.fillRect(x - 4, y - 4, 9, 9);
+    ctx.strokeStyle = '#aec8a0';
+    ctx.strokeRect(x - 4, y - 4, 9, 9);
+    ctx.beginPath();
+    ctx.moveTo(x - 2, y + 2);
+    ctx.lineTo(x, y - 2);
+    ctx.lineTo(x + 2, y + 2);
+    ctx.stroke();
+    if (target.id === 's-large-map') {
+      ctx.font = '12px Georgia';
+      ctx.fillStyle = '#c3d2ac';
+      ctx.fillText(game.opened.has(`${site.id}:cache`) ? 'Searched vault' : 'Seed vault', x + 8, y);
     }
   }
   const q = trackedQuest();
@@ -696,9 +719,12 @@ canvas.addEventListener('pointermove', (event) => {
   const label = el('s-hover');
   label.hidden = !hover || paused || !!game.dialogue;
   if (hover) {
-    label.textContent = hover.name + ('role' in hover ? ` · ${hover.role}` : '');
-    label.style.left = `${Math.min(bounds.width - 200, Math.max(8, event.clientX - bounds.left + 14))}px`;
-    label.style.top = `${Math.max(10, event.clientY - bounds.top - 40)}px`;
+    const plant = 'role' in hover ? null : game.botanicalProfile(hover);
+    label.textContent = plant
+      ? `${plant.name} · ${plant.yield} portions · ${plant.construction}`
+      : hover.name + ('role' in hover ? ` · ${hover.role}` : '');
+    label.style.left = `${Math.max(8, Math.min(bounds.width - label.offsetWidth - 8, event.clientX - bounds.left + 14))}px`;
+    label.style.top = `${Math.max(10, Math.min(bounds.height - label.offsetHeight - 8, event.clientY - bounds.top - label.offsetHeight - 10))}px`;
   }
 });
 canvas.addEventListener('pointerleave', () => {
@@ -1030,6 +1056,7 @@ Object.defineProperty(window, 'stichos', {
     get state() {
       return structuredClone({
         seed: game.world.seed,
+        worldGeneration: game.world.generation,
         player: game.player,
         phase: game.phase,
         time: game.time,
@@ -1042,6 +1069,8 @@ Object.defineProperty(window, 'stichos', {
         transferReady: game.transferReady,
         occupiedNpcId: game.occupiedNpcId,
         transferCandidate: game.transferCandidate,
+        transferCandidates: game.transferCandidates,
+        correspondenceJobs: game.dispatches,
         weapons: [...game.weapons],
         weaponProfile: game.weaponProfile(
           game.player.appearance.weapon === 'none' ? 'staff' : game.player.appearance.weapon,
@@ -1072,6 +1101,9 @@ Object.defineProperty(window, 'stichos', {
       return structuredClone(
         game.world.propsAround(x, y, radius).filter((p) => !game.removed.has(p.id)),
       );
+    },
+    vaults(x: number, y: number, radius = 100) {
+      return structuredClone(game.world.vaultsAround(x, y, radius));
     },
     blocked(x: number, y: number) {
       return game.world.blocked(x, y, game.removed);

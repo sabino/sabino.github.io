@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Stichos, ITEMS } from '../src/stichos/session.ts';
 import { appearance } from '../src/stichos/world.ts';
-import type { Npc, Point, Prop } from '../src/stichos/types.ts';
+import type { ItemId, Npc, Point, Prop } from '../src/stichos/types.ts';
 
 const still = { x: 0, y: 0, run: false };
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -93,6 +93,388 @@ function opening(game: Stichos, choice: 'aid-clinic' | 'aid-brown' = 'aid-clinic
   assert.equal(game.storyStage, 3);
 }
 
+function travelRoads(game: Stichos, target: Point) {
+  game.dialogue = null;
+  const roadX = Math.round(game.player.x / 80) * 80;
+  const roadY = Math.round(game.player.y / 80) * 80;
+  walkTo(game, { x: roadX, y: roadY });
+  const targetX = Math.round(target.x / 80) * 80;
+  const targetY = Math.round(target.y / 80) * 80;
+  for (const end of [
+    { x: targetX, y: roadY },
+    { x: targetX, y: targetY },
+  ]) {
+    for (let step = 0; dist(game.player, end) > 1.4 && step < 40; step++) {
+      walkTo(game, {
+        x: game.player.x + Math.max(-20, Math.min(20, end.x - game.player.x)),
+        y: game.player.y + Math.max(-20, Math.min(20, end.y - game.player.y)),
+      });
+    }
+    assert.ok(dist(game.player, end) <= 1.4, 'the road journey must make forward progress');
+  }
+  walkTo(game, target);
+}
+
+function vaultFixture(game: Stichos) {
+  const site = game.world.vaultsAround(40, 40, 1).find((v) => v.id === 'vault:0:0');
+  assert.ok(site, 'the guaranteed first excavation exists in generation two');
+  const notice = game.world
+    .propsAround(site.entrance.x, 80, 3)
+    .find((p) => p.id === `${site.id}:notice`);
+  const chest = game.world
+    .propsAround(site.reward.x, site.reward.y, 1)
+    .find((p) => p.id === `${site.id}:cache`);
+  assert.ok(notice && chest);
+  return { site, notice, chest };
+}
+
+test('a reachable vault notice marks the actual deep archive, whose reward is persistent and paid once', () => {
+  const game = new Stichos(3886);
+  const { site, notice, chest } = vaultFixture(game);
+  Object.assign(game.player, { x: site.entrance.x, y: 80 });
+  walkTo(game, notice);
+  game.interact(notice.id);
+  assert.equal(game.dialogue?.npcId, notice.id);
+  assert.ok(game.dialogue?.choices.some((choice) => choice.id === 'vault:survey'));
+  game.choose('vault:survey');
+  const quest = game.quests.find((q) => q.id === `${site.id}:survey`)!;
+  assert.ok(quest && !quest.complete);
+  assert.deepEqual(quest.target, { x: chest.x, y: chest.y });
+  game.interact(notice.id);
+  game.choose('vault:survey');
+  assert.equal(game.quests.filter((q) => q.id === quest.id).length, 1);
+
+  // Check the actual world collision route, including the approach, rather than the generator's mask.
+  const key = (p: Point) => `${p.x},${p.y}`;
+  const start = { x: Math.round(game.player.x), y: Math.round(game.player.y) };
+  const queue = [start],
+    visited = new Set([key(start)]);
+  for (let head = 0; head < queue.length; head++) {
+    const point = queue[head];
+    for (const [dx, dy] of [
+      [0, -1],
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+    ]) {
+      const next = { x: point.x + dx, y: point.y + dy };
+      if (
+        visited.has(key(next)) ||
+        Math.abs(next.x - site.x) > 18 ||
+        next.y < site.y - 18 ||
+        next.y > 80 ||
+        game.world.blocked(next.x, next.y, game.removed)
+      )
+        continue;
+      visited.add(key(next));
+      queue.push(next);
+    }
+  }
+  assert.ok(
+    visited.has(key(site.entrance)),
+    'the notice approach reaches the actual south doorway',
+  );
+  assert.ok(visited.has(key(chest)), 'the journal target is reachable through world collision');
+  assert.ok(
+    dist(chest, site.entrance) > 15,
+    'the archive is inside the excavation, not beside the notice',
+  );
+
+  // Isolate archive transaction semantics from the separate combat playtest.
+  Object.assign(game.player, { x: chest.x, y: chest.y });
+  const before = game.save();
+  game.interact(chest.id);
+  assert.ok(game.opened.has(chest.id));
+  assert.equal(game.player.coins, before.player.coins + 12);
+  assert.equal(
+    game.carried,
+    Object.values(before.inventory).reduce((sum, n) => sum + (n ?? 0), 0) + 6,
+  );
+  assert.equal(game.inventory.ore, (before.inventory.ore ?? 0) + 2);
+  assert.equal(game.inventory.rations, (before.inventory.rations ?? 0) + 1);
+  const herbDeltas = (['cequin', 'heartleaf', 'emberroot'] as const).map(
+    (item) => (game.inventory[item] ?? 0) - (before.inventory[item] ?? 0),
+  );
+  assert.deepEqual(
+    herbDeltas.sort(),
+    [0, 0, 3],
+    'exactly one seeded botanical supply is recovered',
+  );
+  assert.equal(quest.complete, true);
+  assert.equal(quest.stage, 1);
+  const archiveEntry = game.journal.find((entry) => entry.title === 'A record beneath the frost');
+  assert.match(archiveEntry?.text ?? '', /Sallas/);
+  const recovered = game.save();
+  const restored = Stichos.restore(JSON.parse(JSON.stringify(recovered)));
+  restored.interact(chest.id);
+  restored.interact(chest.id);
+  assert.deepEqual(restored.inventory, recovered.inventory);
+  assert.equal(restored.player.coins, recovered.player.coins);
+  assert.deepEqual(restored.journal, recovered.journal);
+  assert.ok(restored.quests.find((q) => q.id === quest.id)?.complete);
+});
+
+test('an archive with insufficient pack space remains closed and incomplete until the whole reward fits', () => {
+  const game = new Stichos(104);
+  const { site, notice, chest } = vaultFixture(game);
+  Object.assign(game.player, { x: notice.x, y: notice.y });
+  game.interact(notice.id);
+  game.choose('vault:survey');
+  Object.assign(game.player, { x: chest.x, y: chest.y });
+  game.inventory = { cequin: 55 }; // Five free slots; the complete archive package needs six.
+  const before = game.save();
+  game.interact(chest.id);
+  assert.equal(game.opened.has(chest.id), false);
+  assert.deepEqual(game.inventory, before.inventory);
+  assert.equal(game.player.coins, before.player.coins);
+  assert.deepEqual(game.quests, before.quests);
+  assert.deepEqual(game.journal, before.journal);
+  const restored = Stichos.restore(game.save());
+  assert.equal(restored.opened.has(chest.id), false);
+  restored.player.breath = 60;
+  restored.use('cequin');
+  assert.equal(restored.carried, 54, 'using one carried leaf creates exactly enough space');
+  restored.interact(chest.id);
+  assert.equal(restored.carried, 60);
+  assert.equal(restored.player.coins, before.player.coins + 12);
+  assert.ok(restored.opened.has(chest.id));
+  assert.ok(restored.quests.find((q) => q.id === `${site.id}:survey`)?.complete);
+});
+
+test('finding the vault notice after looting its archive records an already-complete survey', () => {
+  const game = new Stichos(19);
+  const { site, notice, chest } = vaultFixture(game);
+  Object.assign(game.player, { x: chest.x, y: chest.y });
+  game.interact(chest.id);
+  assert.ok(game.opened.has(chest.id));
+  assert.ok(!game.quests.some((q) => q.id === `${site.id}:survey`));
+  const restored = Stichos.restore(game.save());
+  const inventory = structuredClone(restored.inventory),
+    coins = restored.player.coins;
+  Object.assign(restored.player, { x: notice.x, y: notice.y });
+  restored.interact(notice.id);
+  restored.choose('vault:survey');
+  const survey = restored.quests.find((q) => q.id === `${site.id}:survey`)!;
+  assert.ok(survey.complete);
+  assert.equal(survey.stage, 1);
+  assert.deepEqual(survey.target, site.reward);
+  assert.match(survey.objective, /recovered/);
+  assert.deepEqual(restored.inventory, inventory);
+  assert.equal(restored.player.coins, coins);
+  restored.interact(notice.id);
+  restored.choose('vault:survey');
+  assert.equal(restored.quests.filter((q) => q.id === survey.id).length, 1);
+  assert.ok(Stichos.restore(restored.save()).quests.find((q) => q.id === survey.id)?.complete);
+});
+
+test('wild generation-two plants yield exactly their displayed botanical profile and stay harvested after restoration', () => {
+  const game = new Stichos(3886, 2);
+  const plants = game.world
+    .propsAround(120, 0, 48)
+    .filter((p) => game.world.tile(p.x, p.y).biome !== 'settlement');
+  for (const kind of ['cequin', 'heartleaf', 'emberroot', 'mushroom'] as const) {
+    const plant = plants.find((p) => p.kind === kind)!;
+    assert.ok(plant && !plant.id.startsWith('origin:'));
+    const displayed = game.botanicalProfile(plant)!;
+    assert.ok(displayed.yield >= 1 && displayed.yield <= 4);
+    assert.ok(displayed.name && displayed.construction);
+    assert.ok(!game.world.blocked(plant.x, plant.y));
+    Object.assign(game.player, { x: plant.x, y: plant.y });
+    const item: ItemId = kind === 'mushroom' ? 'rations' : kind;
+    const before = game.inventory[item] ?? 0;
+    game.drainEvents();
+    game.interact(plant.id);
+    assert.equal(game.inventory[item], before + displayed.yield);
+    assert.ok(game.removed.has(plant.id));
+    assert.ok(
+      game
+        .drainEvents()
+        .some(
+          (event) => event.kind === 'harvest' && event.text?.includes(displayed.name.toLowerCase()),
+        ),
+    );
+    const saved = game.save();
+    const restored = Stichos.restore(JSON.parse(JSON.stringify(saved)));
+    assert.deepEqual(restored.botanicalProfile(plant), displayed);
+    restored.interact(plant.id);
+    restored.interact(plant.id);
+    assert.deepEqual(
+      restored.inventory,
+      saved.inventory,
+      'a removed plant cannot be harvested again after loading',
+    );
+    assert.ok(restored.removed.has(plant.id));
+  }
+});
+
+test('a wild harvest that does not fit leaves the whole plant intact until a consumable frees enough space', () => {
+  const game = new Stichos(3886, 2);
+  const plant = game.world
+    .propsAround(120, 0, 48)
+    .find(
+      (p) =>
+        game.world.tile(p.x, p.y).biome !== 'settlement' &&
+        (game.botanicalProfile(p)?.yield ?? 0) >= 2,
+    )!;
+  assert.ok(plant);
+  const displayed = game.botanicalProfile(plant)!;
+  Object.assign(game.player, { x: plant.x, y: plant.y });
+  game.inventory = { rations: game.capacity - displayed.yield + 1 };
+  const before = game.save();
+  game.interact(plant.id);
+  assert.equal(game.removed.has(plant.id), false);
+  assert.deepEqual(
+    game.inventory,
+    before.inventory,
+    'harvesting never silently accepts a partial yield',
+  );
+  assert.equal(game.player.coins, before.player.coins);
+  assert.deepEqual(game.quests, before.quests);
+  assert.deepEqual(game.journal, before.journal);
+  const restored = Stichos.restore(game.save());
+  restored.player.stamina = 50;
+  restored.use('rations');
+  assert.equal(restored.capacity - restored.carried, displayed.yield);
+  const item = (plant.kind === 'mushroom' ? 'rations' : plant.kind) as ItemId;
+  const amount = restored.inventory[item] ?? 0;
+  restored.interact(plant.id);
+  assert.equal(restored.inventory[item], amount + displayed.yield);
+  assert.equal(restored.carried, restored.capacity);
+  assert.ok(restored.removed.has(plant.id));
+});
+
+test('legacy wilderness and the origin teaching garden keep their established cequin and other plant yields', () => {
+  for (const generation of [1, 2] as const) {
+    const game = new Stichos(3886, generation);
+    const plants =
+      generation === 1
+        ? game.world
+            .propsAround(120, 0, 48)
+            .filter((p) => game.world.tile(p.x, p.y).biome !== 'settlement')
+        : game.world.propsAround(0, 5, 12).filter((p) => p.id.startsWith('origin:'));
+    for (const kind of ['cequin', 'heartleaf', 'emberroot', 'mushroom'] as const) {
+      const plant = plants.find((p) => p.kind === kind)!;
+      assert.ok(plant);
+      const expected = kind === 'cequin' ? 3 : 2;
+      assert.equal(game.botanicalProfile(plant)?.yield, expected);
+      const item: ItemId = kind === 'mushroom' ? 'rations' : kind;
+      const before = game.inventory[item] ?? 0;
+      Object.assign(game.player, { x: plant.x, y: plant.y });
+      game.interact(plant.id);
+      assert.equal(game.inventory[item], before + expected);
+      assert.ok(game.removed.has(plant.id));
+    }
+  }
+});
+
+test('correspondence requires a real journey and lets disclosure change family trust without repeat payments', () => {
+  const game = new Stichos(3886);
+  npc(game, 'origin-archivist');
+  game.choose('dispatch:request');
+  const job = game.save().correspondenceJobs[0];
+  assert.ok(job);
+  assert.notEqual(job.settlementId, 'origin');
+  assert.ok(dist(job.sourcePoint, job.target) > 50);
+  const resident = game.world
+    .npcsAround(job.target.x, job.target.y, 2)
+    .find((n) => n.id === job.recipientId);
+  assert.ok(resident, 'the address belongs to an actual generated resident');
+  const coins = game.player.coins;
+  game.choose(`dispatch:deliver:${job.sourceId}`);
+  assert.equal(game.player.coins, coins, 'an accepted task cannot be completed at its source');
+  const duplicate = new Stichos(3886);
+  npc(duplicate, 'origin-archivist');
+  duplicate.choose('dispatch:request');
+  assert.deepEqual(
+    duplicate.save().correspondenceJobs[0],
+    job,
+    'the same source generates the same addressed dispatch',
+  );
+  game.choose('close');
+  game.use('cequin');
+  travelRoads(game, job.target);
+  assert.ok(game.distanceTraveled > 60);
+  assert.equal(game.phase, 'playing');
+  const arrival = game.save();
+  for (const [choice, sourceTrust, recipientTrust, payment] of [
+    ['deliver', 7, 2, job.reward],
+    ['reveal', -6, 8, Math.floor(job.reward * 0.6)],
+    ['withhold', 3, -5, 0],
+  ] as const) {
+    const branch = Stichos.restore(arrival);
+    branch.interact(job.recipientId);
+    assert.ok(branch.dialogue?.choices.some((c) => c.id === `dispatch:${choice}:${job.sourceId}`));
+    const before = branch.player.coins;
+    branch.choose(`dispatch:${choice}:${job.sourceId}`);
+    assert.equal(branch.player.coins, before + payment);
+    if (job.sourceClan === job.recipientClan)
+      assert.equal(branch.reputation[job.sourceClan], sourceTrust + recipientTrust);
+    else {
+      assert.equal(branch.reputation[job.sourceClan], sourceTrust);
+      assert.equal(branch.reputation[job.recipientClan], recipientTrust);
+    }
+    assert.ok(branch.quests.find((q) => q.id === `correspondence:${job.sourceId}:1`)?.complete);
+    branch.choose(`dispatch:${choice}:${job.sourceId}`);
+    branch.interact(job.recipientId);
+    branch.choose(`dispatch:${choice}:${job.sourceId}`);
+    assert.equal(branch.player.coins, before + payment, 'repeat conversations cannot pay again');
+    const restored = Stichos.restore(branch.save());
+    assert.equal(
+      restored.save().correspondenceJobs[0].status,
+      choice === 'deliver' ? 'delivered' : choice === 'reveal' ? 'revealed' : 'withheld',
+    );
+  }
+});
+
+test('a dead correspondence recipient can be cancelled at a noticeboard and replaced without reward farming', () => {
+  const game = new Stichos(104);
+  npc(game, 'origin-engineer');
+  game.choose('dispatch:request');
+  const job = game.save().correspondenceJobs[0];
+  game.choose('close');
+  game.use('cequin');
+  travelRoads(game, job.target);
+  const recipient = game.npcs.find((n) => n.id === job.recipientId)!;
+  assert.ok(recipient);
+  recipient.hp = 1;
+  game.attack(recipient);
+  assert.ok(game.removed.has(recipient.id));
+  const deadSave = game.save();
+  const restored = Stichos.restore(deadSave);
+  assert.equal(restored.save().correspondenceJobs[0].status, 'active');
+  restored.use('cequin');
+  travelRoads(restored, { x: -2, y: 1 });
+  const notice = prop(restored, (p) => p.kind === 'notice' && p.id.startsWith('origin:'));
+  walkTo(restored, notice);
+  restored.interact(notice.id);
+  const cancel = `dispatch:cancel:${job.sourceId}`;
+  assert.match(
+    restored.dialogue?.choices.find((c) => c.id === cancel)?.label ?? '',
+    /cannot receive/,
+  );
+  const before = { coins: restored.player.coins, xp: restored.player.xp };
+  restored.choose(cancel);
+  assert.equal(restored.save().correspondenceJobs[0].status, 'cancelled');
+  assert.equal(restored.player.coins, before.coins);
+  assert.equal(restored.player.xp, before.xp, 'cancellation never grants completion experience');
+  npc(restored, 'origin-engineer');
+  restored.choose('dispatch:request');
+  const replacement = restored.save().correspondenceJobs[0];
+  assert.equal(replacement.number, 2);
+  assert.equal(replacement.status, 'active');
+  assert.notEqual(replacement.recipientId, recipient.id);
+  assert.ok(!restored.removed.has(replacement.recipientId));
+  const saved = restored.save();
+  assert.throws(() =>
+    Stichos.restore({ ...saved, correspondenceJobs: [{ ...replacement, status: 'delivered' }] }),
+  );
+  assert.throws(() =>
+    Stichos.restore({ ...saved, correspondenceJobs: [replacement, replacement] }),
+  );
+  const { correspondenceJobs: _dispatches, ...legacy } = saved;
+  assert.equal(Stichos.restore(legacy).save().correspondenceJobs.length, 0);
+});
+
 test('the opening story consumes gathered materials, repairs a radio, and permits voluntary mental travel without replacing the world', () => {
   const game = new Stichos(3886);
   opening(game);
@@ -148,7 +530,14 @@ test('the opening story consumes gathered materials, repairs a radio, and permit
   assert.ok(priest, 'the original priest remains a real human in the world');
   assert.deepEqual({ x: priest.x, y: priest.y }, { x: before.player.x, y: before.player.y });
   assert.deepEqual([...game.removed], before.removed);
-  assert.deepEqual(game.inventory, before.inventory);
+  assert.notDeepEqual(
+    game.inventory,
+    before.inventory,
+    'the host supplies a different physical pack',
+  );
+  const priestBelongings = game.save().bodyPossessions.find((body) => body.npcId === priest.id)!;
+  assert.deepEqual(priestBelongings.inventory, before.inventory);
+  assert.equal(priestBelongings.coins, before.player.coins);
   assert.equal(game.player.name, 'Theo Bishop');
   assert.notDeepEqual(game.player.appearance, before.player.appearance);
   assert.ok(game.drainEvents().some((e) => e.kind === 'transfer'));
@@ -170,11 +559,112 @@ test('the opening story consumes gathered materials, repairs a radio, and permit
   assert.equal(restored.occupiedNpcId, priest.id);
   assert.equal(restored.player.bodyName, 'The priest');
   assert.equal(restored.player.appearance.coat, before.player.appearance.coat);
+  assert.deepEqual(
+    restored.inventory,
+    before.inventory,
+    'returning to the priest restores the pack left behind',
+  );
+  assert.equal(restored.player.coins, before.player.coins);
+  assert.deepEqual([...restored.weapons], before.weapons);
   const released = restored.npcs.find((n) => n.id === candidate.id)!;
   assert.ok(released, 'leaving a living host releases that person');
   assert.deepEqual({ x: released.x, y: released.y }, leaving);
   assert.ok(!restored.npcs.some((n) => n.id === priest.id));
   assert.equal(Stichos.restore(restored.save()).occupiedNpcId, priest.id);
+});
+
+test('body possessions survive repeated possession and restoration without refreshing consumed supplies', () => {
+  const game = new Stichos(3886);
+  game.storyStage = 4;
+  game.weapons.add('bow');
+  game.equip('bow');
+  game.inventory.lens = 2;
+  game.player.coins = 61;
+  game.player.xp = 37;
+  const shrine = prop(game, (p) => p.kind === 'shrine');
+  walkTo(game, shrine);
+  const priest = game.save();
+  const firstHost = game.transferCandidate!;
+  game.reincarnate();
+  assert.ok(!game.weapons.has('bow'), 'the priest’s bow stays with the priest');
+  assert.equal(game.inventory.lens, undefined);
+  assert.equal(game.player.xp, 37, 'experience is a memory');
+  game.use('cequin');
+  const hostInventory = structuredClone(game.inventory);
+  const hostCoins = game.player.coins;
+  const hostWeapons = [...game.weapons];
+  walkTo(game, shrine);
+  assert.ok(game.transferCandidate?.id.startsWith('body:theo-priest:'));
+  game.reincarnate();
+  assert.deepEqual(game.inventory, priest.inventory);
+  assert.equal(game.player.coins, 61);
+  assert.equal(game.player.appearance.weapon, 'bow');
+  assert.deepEqual([...game.weapons], priest.weapons);
+  const saved = game.save();
+  assert.equal(
+    saved.bodyPossessions.length,
+    1,
+    'active possessions have only one storage location',
+  );
+  assert.equal(saved.bodyPossessions[0].npcId, firstHost.id);
+  const restored = Stichos.restore(saved);
+  assert.equal(restored.transferCandidate?.id, firstHost.id);
+  restored.reincarnate();
+  assert.deepEqual(
+    restored.inventory,
+    hostInventory,
+    're-entering a body does not regenerate its starter pack',
+  );
+  assert.equal(restored.player.coins, hostCoins);
+  assert.deepEqual([...restored.weapons], hostWeapons);
+  assert.equal(restored.player.xp, 37);
+  assert.equal(restored.save().bodyPossessions[0].npcId, game.occupiedNpcId);
+
+  for (const bodyPossessions of [
+    [saved.bodyPossessions[0], saved.bodyPossessions[0]],
+    [{ ...saved.bodyPossessions[0], npcId: saved.occupiedNpcId }],
+    [{ ...saved.bodyPossessions[0], inventory: { cequin: 61 } }],
+    [{ ...saved.bodyPossessions[0], equipped: 'bow', weapons: ['staff'] }],
+  ])
+    assert.throws(() => Stichos.restore({ ...saved, bodyPossessions }));
+  const { bodyPossessions: _ledger, ...legacy } = saved;
+  assert.deepEqual(
+    Stichos.restore(legacy).inventory,
+    game.inventory,
+    'older saves keep their current body’s pack',
+  );
+});
+
+test('a shrine offers distinct bodies and revalidates the exact chosen person before possession', () => {
+  const game = new Stichos(3886);
+  game.storyStage = 4;
+  const shrine = prop(game, (p) => p.kind === 'shrine');
+  walkTo(game, shrine);
+  game.interact(shrine.id);
+  const candidates = game.transferCandidates;
+  assert.equal(candidates.length, 3);
+  const first = candidates[0];
+  const alternative = candidates[1];
+  const option = game.dialogue?.choices.find((c) => c.id === `transfer:${alternative.id}`);
+  assert.ok(option?.label.includes(alternative.name));
+  assert.ok(option?.detail?.includes(game.world.clans[alternative.clan].name));
+  assert.match(option?.detail ?? '', /health.*coins/);
+  game.removed.add(first.id);
+  const before = game.save();
+  game.choose('transfer');
+  assert.equal(
+    game.occupiedNpcId,
+    null,
+    'a stale first option must not silently choose somebody else',
+  );
+  assert.deepEqual(game.player, before.player);
+  game.interact(shrine.id);
+  game.reincarnate('origin-archivist');
+  assert.equal(game.occupiedNpcId, null, 'essential actors cannot be selected by a supplied ID');
+  game.reincarnate(alternative.id);
+  assert.equal(game.occupiedNpcId, alternative.id);
+  assert.equal(game.player.bodyName, alternative.name);
+  assert.deepEqual({ x: game.player.x, y: game.player.y }, { x: alternative.x, y: alternative.y });
 });
 
 test('an ethical alternative cannot pay twice or invent cequin and has different family consequences', () => {
@@ -502,4 +992,129 @@ test('losing a body freezes action and clinic recovery preserves the world befor
   assert.deepEqual([...restored.removed], removed);
   assert.equal(restored.storyStage, 0);
   assert.deepEqual({ x: restored.player.x, y: restored.player.y }, restored.world.spawn);
+});
+
+test('post-signal loss without an answering host revives the occupied body at the clinic', () => {
+  const game = new Stichos(104);
+  game.storyStage = 4;
+  const shrine = prop(game, (p) => p.kind === 'shrine');
+  walkTo(game, shrine);
+  assert.ok(game.transferCandidate);
+  game.reincarnate();
+  const identity = {
+    id: game.occupiedNpcId,
+    name: game.player.bodyName,
+    appearance: structuredClone(game.player.appearance),
+    clan: game.player.clan,
+  };
+  assert.ok(identity.id);
+  walkTo(game, shrine);
+  for (const n of [...game.world.npcsAround(0, 0, 30), ...game.npcs]) {
+    if (n.id !== identity.id && ['pilgrim', 'refugee', 'guard'].includes(n.role))
+      game.removed.add(n.id);
+  }
+  game.npcs = game.npcs.filter((n) => !game.removed.has(n.id));
+  assert.equal(game.transferCandidate, null);
+  const position = { x: game.player.x, y: game.player.y };
+  game.reincarnate();
+  assert.deepEqual({ x: game.player.x, y: game.player.y }, position);
+  assert.equal(game.phase, 'playing', 'voluntary travel without a host leaves the body alone');
+
+  game.player.hp = 0.1;
+  game.player.breath = game.player.warmth = game.player.cequinTime = 0;
+  game.update(0.25, still);
+  assert.equal(game.phase, 'lost');
+  const restored = Stichos.restore(game.save());
+  assert.equal(restored.transferCandidate, null);
+  const inventory = structuredClone(restored.inventory);
+  restored.reincarnate();
+  assert.equal(restored.phase, 'playing');
+  assert.equal(restored.player.hp, restored.player.maxHp);
+  assert.equal(restored.occupiedNpcId, identity.id);
+  assert.equal(restored.player.bodyName, identity.name);
+  assert.equal(restored.player.clan, identity.clan);
+  assert.deepEqual(restored.player.appearance, identity.appearance);
+  assert.deepEqual(restored.inventory, inventory);
+  assert.deepEqual({ x: restored.player.x, y: restored.player.y }, restored.world.spawn);
+  assert.ok(!restored.npcs.some((n) => n.id === identity.id));
+  assert.match(restored.drainEvents().find((e) => e.kind === 'transfer')?.text ?? '', /clinic/);
+  assert.equal(Stichos.restore(restored.save()).occupiedNpcId, identity.id);
+});
+
+test('legacy origin saves migrate displaced bodies locally while current and distant saves stay strict', () => {
+  const game = new Stichos(3886);
+  const { terrainRevision: _revision, ...legacy } = game.save();
+  const oldPosition = { x: 11, y: -3 };
+  assert.ok(
+    game.world.blocked(oldPosition.x, oldPosition.y),
+    'the wider cathedral now has a wall here',
+  );
+  Object.assign(legacy.player, oldPosition);
+  legacy.restAnchor = { x: -11, y: -3 };
+  legacy.inventory.wood = 3;
+  legacy.removed.push('origin:timber:1');
+  const resident = actor(game, 'legacy-witness', 11, -3, false);
+  resident.home = { x: 11, y: -3 };
+  resident.hp = 40;
+  legacy.npcs.push(resident);
+  const restored = Stichos.restore(legacy);
+  assert.ok(
+    dist(restored.player, oldPosition) <= 1.01,
+    'migration finds adjacent ground, not a new spawn',
+  );
+  assert.ok(!restored.world.blocked(restored.player.x, restored.player.y, restored.removed));
+  assert.deepEqual(restored.inventory, legacy.inventory);
+  assert.deepEqual([...restored.removed], legacy.removed);
+  assert.deepEqual(restored.quests, legacy.quests);
+  const migrated = restored.save();
+  assert.equal(migrated.terrainRevision, 3);
+  assert.ok(!restored.world.blocked(migrated.restAnchor.x, migrated.restAnchor.y));
+  const witness = migrated.npcs.find((n) => n.id === resident.id)!;
+  assert.equal(witness.hp, 40);
+  assert.ok(!restored.world.blocked(witness.x, witness.y));
+  assert.ok(!restored.world.blocked(witness.home.x, witness.home.y));
+  assert.deepEqual(Stichos.restore(migrated).player, restored.player);
+  assert.deepEqual(Stichos.restore({ ...legacy, terrainRevision: 2 }).player, restored.player);
+  assert.throws(() => Stichos.restore({ ...legacy, terrainRevision: 3 }), /blocked terrain/);
+  assert.throws(() => Stichos.restore({ ...legacy, terrainRevision: 4 }), /incompatible/);
+
+  const { terrainRevision: _clearRevision, ...clearLegacy } = game.save();
+  assert.deepEqual(
+    Stichos.restore(clearLegacy).player,
+    game.player,
+    'clear legacy footing stays exact',
+  );
+  const farWall = game.world
+    .propsAround(96, 96, 60)
+    .find((p) => p.solid && Math.abs(p.x) > 24 && game.world.blocked(p.x, p.y));
+  assert.ok(farWall);
+  Object.assign(clearLegacy.player, { x: farWall.x, y: farWall.y });
+  assert.throws(
+    () => Stichos.restore(clearLegacy),
+    /blocked terrain/,
+    'origin migration never relocates a distant invalid save',
+  );
+});
+
+test('legacy wilderness saves retain their exact generator while new worlds opt into climate generation two', () => {
+  const old = new Stichos(77, 1);
+  const current = new Stichos(77);
+  assert.equal(current.world.generation, 2);
+  let changed: Point | undefined;
+  for (let y = 24; y < 72 && !changed; y++) {
+    for (let x = 24; x < 72 && !changed; x++) {
+      if (!old.world.blocked(x, y) && current.world.blocked(x, y)) changed = { x, y };
+    }
+  }
+  assert.ok(changed, 'the enhanced generator changes some wilderness collision');
+  const { worldGeneration: _generation, ...legacy } = old.save();
+  Object.assign(legacy.player, changed);
+  const restored = Stichos.restore(legacy);
+  assert.equal(restored.world.generation, 1);
+  assert.deepEqual({ x: restored.player.x, y: restored.player.y }, changed);
+  assert.deepEqual(restored.world.tile(changed.x, changed.y), old.world.tile(changed.x, changed.y));
+  assert.ok(!restored.world.blocked(changed.x, changed.y));
+  assert.equal(restored.save().worldGeneration, 1);
+  assert.equal(Stichos.restore(current.save()).world.generation, 2);
+  assert.throws(() => Stichos.restore({ ...current.save(), worldGeneration: 3 }));
 });

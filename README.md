@@ -28,7 +28,10 @@ The first sequence is a memory of the failed transmission. Play resumes in **388
 
 - **Explore:** square-tile terrain continues across positive and negative coordinates. Roads and bridges connect generated settlements. Frostwood, tundra, marshes, and highlands contain different resources and terrain. There is no enclosing island boundary.
 - **Gather and prepare:** cequin supports breathing, heartleaf becomes medicine, emberroot restores warmth. Timber and conductive ore supply equipment and radio repairs. Gathering changes the actual world, and harvested objects stay removed when you leave and return.
+- **Recognize botanical varieties:** stems, branches, leaf arrangement, buds, and roots are generated together. Wild varieties yield different amounts according to their visible growth. Hover or approach to inspect the harvest before gathering.
 - **Talk and decide:** botanists offer local supply work; a merchant buys supplies and sells provisions and weapons; the archivist and engineer advance the Sallas investigation. The opening cequin choice changes clan trust and consumes the same scarce bundle either way.
+- **Carry a dispatch:** noticeboards, archivists, and engineers send you to a named person in another settlement. Deliver the authorized account, disclose its omitted witness note, or withhold it. Payment and the two families’ trust reflect your choice.
+- **Search seed vaults:** follow an excavation notice off the road into connected botanical chambers. Physical rock walls, alternate corridors, raiders, and a deep archive give the expedition an objective. Recover plants, materials, and a remembered Sallas clue. Vaults appear in new generation-2 worlds.
 - **Fight and recover:** aim a staff, sword, or bow at an attacker, use a botanical ward, consume medicine, or rest at a bench or shrine. Weapon material, name, strength, reach, recovery, and successful-hit effects are seeded. Attacking residents has consequences.
 - **Inhabit another person:** after restoring the mind signal, concentrate at a shrine. The candidate is an existing living human with a name, location, appearance, and clan. Your consciousness moves into that body; the previous body remains in the world. The occupied character is not duplicated. Each body keeps its own supplies, coins, and weapons; returning restores what you left with that person. Your knowledge, experience, investigation, and the world's changes follow your mind.
 
@@ -39,7 +42,9 @@ Speak to the botanist beside the cathedral garden and ask what the clinic needs.
 
 Then open the cathedral door, walk inside, and speak to the archivist about the Sallas record. The engineer explains the damaged radio. A signal lens costs **2 ore + 1 timber** and requires a nearby workbench. Repairing the radio then consumes **2 additional ore + 2 additional timber + the lens**. Two mineral deposits and two timber trees near the starting district provide enough raw material. Merchants and other districts provide additional supplies.
 
-A repaired signal allows voluntary mind travel at a shrine. It opens a way to continue investigating; it does not finish the entire Sallas mystery. You can keep following the roads after the opening thread.
+A repaired signal allows voluntary mind travel at a shrine. Choose among the nearby eligible living people; the dialogue identifies each person and their possessions. It opens a way to continue investigating; it does not finish the entire Sallas mystery. You can keep following the roads after the opening thread.
+
+For the first excavation, take the road south to the next east–west road, then east to the vault notice near **40, 79**. Its path leads north into the chambers. The map also marks seed-vault entrances. Prepare medicine and supplies before entering.
 
 </details>
 
@@ -68,11 +73,15 @@ Touch controls provide movement, interaction, attacks, medicine, and the satchel
 
 Progress autosaves to this browser under `verso.stichos.v1`. **Continue this life** resumes it. The pause menu can **Download save** or **Restore a save**; invalid files leave the current run intact. The previous prototypes use separate save keys.
 
+The save records its world-generation version. Earlier lives retain their wilderness and established harvests. Start a new life to use the revised regional climate and botanical excavations; export an existing life first if you want to retain both.
+
 Storage belongs to a browser and origin: different ports, `localhost`, and `127.0.0.1` have different saves. Export before changing addresses or clearing browser data. The production service worker caches a build after a complete online load. Updates wait for existing sessions to close; they do not reload a live game automatically.
 
 ## Generation and rendering
 
 `src/stichos/world.ts` creates 16×16 chunks from addressed coordinate hashes and coherent noise. An LRU cache retains at most 160 world chunks. A connected network of roads and bridges crosses settlement regions. Town footprints, material details, local populations, resources, and wilderness encounters vary by seed. The starting cathedral and story roles provide stable narrative anchors.
+
+New worlds couple broad altitude, moisture, and temperature fields into coherent cold-climate regions. `vault.ts` partitions an excavation into rooms, connects a room graph with passages and cycles, applies constrained cellular growth, and verifies its walkable component before placing it in the world. `equipment.ts` and `botany.ts` construct sprites from shared parameters that also determine weapon handling and plant yields.
 
 `src/stichos/art.ts` builds reusable pixel modules for ground, masonry, roofs, trees, plants, props, and humanoid parts. `render.ts` composes those modules into the camera view, with procedural gait, roof cutaways, occlusion handling, snow, breath, footsteps, light, and ability effects. Ground chunks and reusable art have bounded render caches. There is no painted full-world background or fixed terrain image in Stíchos.
 
