@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, writeFile, rename, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile, rename, stat, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { verifyRoomCheckpoint } from '../src/stichos/room-checkpoint.ts';
 import { RoomPersistence } from '../src/stichos/room-persistence.ts';
@@ -8,6 +9,10 @@ const MAX_PRIVATE_BACKUP_BYTES = 32_000_000;
 /** Files contain private authority keys and traveler credentials: never serve this directory. */
 export async function attachRoomDisk(hub, directory, { onCheckpoint = async () => {} } = {}) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  // Fail before listening if the persistent mount is read-only or owned by another UID.
+  const probe = join(directory, `.write-probe-${randomUUID()}`);
+  await writeFile(probe, 'ready', { mode: 0o600, flag: 'wx' });
+  await unlink(probe);
   const writers = new Map();
   const save = async (record) => {
     const path = join(directory, `${record.checkpoint.state.room}.json`);

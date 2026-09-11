@@ -1,0 +1,12 @@
+**/.env
+**/.env.*
+.git
+.dream-loop
+.verso-server
+node_modules
+dist
+tests
+docs
+reference
+pear-node
+*.log

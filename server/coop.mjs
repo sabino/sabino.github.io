@@ -3,6 +3,7 @@ import { WebSocketServer } from 'ws';
 import { CoopRooms, MAX_MESSAGE_BYTES } from '../src/stichos/room-authority.mjs';
 import { MULTIPLAYER_PROTOCOL } from '../src/stichos/multiplayer-protocol.ts';
 import { attachRoomDisk } from './room-disk.mjs';
+import { connectionAddress } from './config.mjs';
 export { CoopRooms };
 
 function originAllowed(req, allowedOrigins) {
@@ -33,6 +34,9 @@ export function createCoopServer({
   allowedOrigins = [],
   persistenceDirectory = process.env.VERSO_WORLD_STORAGE || null,
   onCheckpoint = async () => {},
+  trustedProxyHops = 0,
+  maxConnections = 512,
+  maxConnectionsPerIp = 32,
   ...roomOptions
 } = {}) {
   const hub = new CoopRooms({
@@ -42,15 +46,29 @@ export function createCoopServer({
   let disk;
   let persistenceTimer;
   let persistenceError = null;
+  let closing = null;
+  const flushDisk = async (latest = false) => {
+    try {
+      if (disk) await disk.flush(latest);
+      persistenceError = null;
+    } catch (error) {
+      persistenceError = error;
+      throw error;
+    }
+  };
   const origins = new Set(allowedOrigins);
   const http = createServer(async (req, res) => {
     try {
       if (await storeHandler(req, res)) return;
       if (req.method === 'GET' && req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        const healthy = !persistenceError && !closing;
+        res.writeHead(healthy ? 200 : 503, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
         res.end(
           JSON.stringify({
-            ok: true,
+            ok: healthy,
             protocol: MULTIPLAYER_PROTOCOL,
             rooms: hub.rooms.size,
             players: [...hub.rooms.values()].reduce(
@@ -83,12 +101,13 @@ export function createCoopServer({
   });
   const ipConnections = new Map();
   http.on('upgrade', (req, socket, head) => {
-    const ip = req.socket.remoteAddress ?? 'unknown';
+    const ip = connectionAddress(req, trustedProxyHops);
     if (
+      closing ||
       req.url !== '/ws' ||
       !originAllowed(req, origins) ||
-      (ipConnections.get(ip) ?? 0) >= 32 ||
-      hub.connections.size >= 512
+      (ipConnections.get(ip) ?? 0) >= maxConnectionsPerIp ||
+      hub.connections.size >= maxConnections
     ) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
@@ -115,14 +134,7 @@ export function createCoopServer({
       if (persistenceDirectory && !disk) {
         disk = await attachRoomDisk(hub, persistenceDirectory, { onCheckpoint });
         persistenceTimer = setInterval(() => {
-          void disk
-            .flush()
-            .then(() => {
-              persistenceError = null;
-            })
-            .catch((error) => {
-              persistenceError = error;
-            });
+          void flushDisk().catch(() => {});
         }, 5000);
         persistenceTimer.unref();
       }
@@ -135,17 +147,24 @@ export function createCoopServer({
       });
       return http.address();
     },
-    async close() {
-      clearInterval(timer);
-      clearInterval(combatTimer);
-      clearInterval(persistenceTimer);
-      if (disk) await disk.flush(true);
-      for (const client of websocket.clients) client.terminate();
-      await new Promise((resolve) => websocket.close(resolve));
-      if (http.listening) await new Promise((resolve) => http.close(resolve));
+    close() {
+      if (!closing)
+        closing = (async () => {
+          clearInterval(timer);
+          clearInterval(combatTimer);
+          clearInterval(persistenceTimer);
+          try {
+            await flushDisk(true);
+          } finally {
+            for (const client of websocket.clients) client.terminate();
+            await new Promise((resolve) => websocket.close(resolve));
+            if (http.listening) await new Promise((resolve) => http.close(resolve));
+          }
+        })();
+      return closing;
     },
     async checkpoint() {
-      if (disk) await disk.flush();
+      await flushDisk();
     },
   };
 }

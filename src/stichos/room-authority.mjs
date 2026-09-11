@@ -94,7 +94,7 @@ const publicPeer = (member) => ({
 });
 const randomBytes = (length) => crypto.getRandomValues(new Uint8Array(length));
 const roomCode = () =>
-  [...randomBytes(5)]
+  [...randomBytes(8)]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')
     .toUpperCase();
@@ -103,6 +103,8 @@ const resumeToken = () =>
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replaceAll('=', '');
+const publicWorldCode = (seed, generation) =>
+  `P${generation}${(seed >>> 0).toString(36).toUpperCase().padStart(7, '0')}`;
 
 /** Room authority covers generated resource claims, doors and hostile NPC combat.
  * Presence positions are reported by clients and checked for finite clear coordinates.
@@ -433,6 +435,7 @@ export class CoopRooms {
       !appearanceValid(message.appearance) ||
       !point(message.position) ||
       (message.combatActive !== undefined && typeof message.combatActive !== 'boolean') ||
+      (message.publicWorld !== undefined && typeof message.publicWorld !== 'boolean') ||
       (message.bodyId !== undefined && !bodyIdValid(message.bodyId)) ||
       (message.progression !== undefined && !validSharedCombatProgression(message.progression)) ||
       (message.room !== undefined &&
@@ -446,9 +449,18 @@ export class CoopRooms {
           !/^[A-Za-z0-9_-]{32}$/.test(message.resumeToken)))
     )
       return this.error(connection, 'invalid_join', 'Check the room, world and humanoid identity.');
+    if (
+      message.publicWorld === true &&
+      message.room?.toUpperCase() !== publicWorldCode(message.seed, message.generation)
+    )
+      return this.error(
+        connection,
+        'invalid_join',
+        'The public planet code must match its seed and generation.',
+      );
     this.sweep();
     let room = message.room ? this.rooms.get(message.room.toUpperCase()) : null;
-    if (message.room && !room)
+    if (message.room && !room && message.publicWorld !== true)
       return this.error(connection, 'room_missing', 'That room is no longer available.');
     if (room && (room.seed !== message.seed || room.generation !== message.generation))
       return this.error(
@@ -464,10 +476,11 @@ export class CoopRooms {
       const world = new InfiniteWorld(message.seed, message.generation);
       if (world.blocked(message.position.x, message.position.y))
         return this.error(connection, 'blocked_pose', 'Begin on clear ground to create a room.');
-      let id;
-      do {
-        id = this.codeFactory();
-      } while (this.rooms.has(id));
+      let id = message.publicWorld === true ? message.room.toUpperCase() : null;
+      if (!id)
+        do {
+          id = this.codeFactory();
+        } while (this.rooms.has(id));
       room = {
         id,
         seed: message.seed,
