@@ -31,6 +31,7 @@ import type {
   PropKind,
   Settlement,
   Tile,
+  TownLandscape,
 } from './types.ts';
 
 export const PLANET_NAME = 'Stíchos';
@@ -114,6 +115,12 @@ interface Building {
 interface TownLayout {
   settlement: Settlement;
   buildings: Building[];
+  landscapes?: LandscapeParcel[];
+}
+interface LandscapeParcel extends Point {
+  halfX: number;
+  halfY: number;
+  planting: Omit<TownLandscape, 'edge'>;
 }
 
 /** Addressed coordinate generation makes eviction, travel direction, and load order irrelevant. */
@@ -566,7 +573,71 @@ export class InfiniteWorld {
           b.name = `${b.kind === 'church' ? 'Cathedral' : b.kind === 'greenhouse' ? 'Botanical conservatory' : names[b.kind!].replace('Snowbound', 'Family').replace('Winter ', '')} of ${name}`;
       }
     }
-    return { settlement, buildings };
+    return {
+      settlement,
+      buildings,
+      ...(this.generation === 4 ? { landscapes: this.planLandscape(settlement, buildings) } : {}),
+    };
+  }
+  private planLandscape(settlement: Settlement, buildings: Building[]): LandscapeParcel[] {
+    const parcels: LandscapeParcel[] = [];
+    const c = this.climate(settlement.x, settlement.y) as RegionalClimate;
+    const ecology = ecologyProfile(c);
+    const culture = settlement.architecture!;
+    const sealed = (culture.technology ?? 0) > 0.7 && (culture.organics ?? 0) < 0.6;
+    const harsh = c.temperature < -12 || c.geothermal > 0.58;
+    // Managed planting is viable near shelter even in dry regions, but never as
+    // dense as moist woodland. Advanced sealed beds retain their local species.
+    const density = clamp01(
+      (0.2 + ecology.groundCover * 0.64 + c.moisture * 0.15) *
+        (harsh ? 0.48 : 1) *
+        (sealed ? 0.68 : 1),
+    );
+    for (const b of buildings) {
+      const slots = [
+        { x: b.x - b.halfX - 3, y: b.y, halfX: 1, halfY: Math.min(3, b.halfY + 1) },
+        { x: b.x + b.halfX + 3, y: b.y, halfX: 1, halfY: Math.min(3, b.halfY + 1) },
+        { x: b.x, y: b.y - b.halfY - 3, halfX: Math.min(5, b.halfX + 1), halfY: 1 },
+        { x: b.x, y: b.y + b.halfY + 3, halfX: Math.min(5, b.halfX + 1), halfY: 1 },
+      ];
+      slots.forEach((slot, side) => {
+        const seed = deriveSeed(settlement.seed, 'v4-planned-landscape', b.id, side);
+        // Workshop forecourts retain delivery space; the sides form small groves.
+        if (b.kind === 'workshop' && side === 3) return;
+        parcels.push({
+          ...slot,
+          planting: {
+            parcel: `${b.id}:landscape:${side}`,
+            seed,
+            kind: sealed ? 'planter' : side < 2 || seed % 3 !== 0 ? 'grove' : 'garden',
+            density,
+          },
+        });
+      });
+    }
+    return parcels;
+  }
+  private landscapeParcel(x: number, y: number, layout: TownLayout): LandscapeParcel | undefined {
+    const { settlement: s, buildings, landscapes } = layout;
+    if (!landscapes || Math.abs(x - s.x) > s.radius - 1 || Math.abs(y - s.y) > s.radius - 1) return;
+    // Preserve civic fixtures, existing cultivated plots, all resident spawns,
+    // stockpiles and the shared workbench/machine approach as one clear forecourt.
+    if (Math.abs(x - s.x) <= 6 && y - s.y >= -4 && y - s.y <= 9) return;
+    if (Math.abs(x - s.x) <= 2 || Math.abs(y - s.y) <= 2) return;
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) if (this.highway(x + dx, y + dy)) return;
+    for (const b of buildings) {
+      if (Math.abs(x - b.x) <= b.halfX + 1 && Math.abs(y - b.y) <= b.halfY + 1) return;
+      // Both entrances keep a three-tile-wide approach beyond the parcel depth.
+      if (Math.abs(x - b.x) <= 1 && Math.abs(y - b.y) <= b.halfY + 5) return;
+    }
+    return landscapes.find(
+      (p) =>
+        Math.abs(x - p.x) <= p.halfX &&
+        Math.abs(y - p.y) <= p.halfY &&
+        // Beveled ends make bounded planted groups rather than painted stripes.
+        !(Math.abs(x - p.x) === p.halfX && Math.abs(y - p.y) === p.halfY),
+    );
   }
   private layouts(x: number, y: number, radius = 20): TownLayout[] {
     if (this.generation >= 3) {
@@ -643,7 +714,8 @@ export class InfiniteWorld {
     }
     const highway = this.highway(x, y);
     if (highway) tile.terrain = terrain === 'water' || terrain === 'ice' ? 'bridge' : 'road';
-    for (const { settlement: s, buildings } of layouts) {
+    for (const layout of layouts) {
+      const { settlement: s, buildings } = layout;
       const dx = x - s.x,
         dy = y - s.y;
       if (Math.abs(dx) > s.radius || Math.abs(dy) > s.radius) continue;
@@ -673,6 +745,22 @@ export class InfiniteWorld {
           if (b.kind) tile.buildingKind = b.kind;
           if (b.architecture) tile.architecture = b.architecture;
         }
+      if (this.generation === 4 && !tile.building && !tile.cultivated) {
+        const parcel = this.landscapeParcel(x, y, layout);
+        if (parcel) {
+          const edge = [
+            [0, -1],
+            [1, 0],
+            [0, 1],
+            [-1, 0],
+          ].reduce(
+            (mask, [dx, dy], side) =>
+              this.landscapeParcel(x + dx, y + dy, layout) === parcel ? mask : mask | (1 << side),
+            0,
+          );
+          tile.landscape = { ...parcel.planting, edge };
+        }
+      }
     }
     // Buildings that meet a trunk road form an arcade instead of sealing the
     // route. This preserves both interior rooms and an uninterrupted road grid.
@@ -871,6 +959,29 @@ export class InfiniteWorld {
           const dx = Math.abs(x - town.x),
             dy = y - town.y;
           const reservedGarden = dx <= 6 && dy >= 3 && dy <= 8;
+          if (this.generation === 4 && tile.landscape) {
+            const planting = tile.landscape;
+            const offset = deriveSeed(town.seed, 'v4-street-tree-lattice');
+            // One potential trunk per three-tile cell leaves room to walk around
+            // every tree and keeps adjacent parcels from producing merged walls.
+            if (
+              planting.kind !== 'garden' &&
+              (x - town.x + (offset % 3)) % 3 === 0 &&
+              (y - town.y + (Math.floor(offset / 3) % 3)) % 3 === 0 &&
+              deriveSeed(planting.seed, 'tree', x, y) / 0xffffffff < planting.density
+            )
+              add(
+                this.prop(
+                  'pine',
+                  x,
+                  y,
+                  'Planted town tree',
+                  `${planting.parcel}:tree:${x}:${y}`,
+                  town.clan,
+                ),
+              );
+            continue;
+          }
           const clearWall = layouts.every((l) =>
             l.buildings.every(
               (b) => Math.abs(x - b.x) > b.halfX + 1 || Math.abs(y - b.y) > b.halfY + 1,

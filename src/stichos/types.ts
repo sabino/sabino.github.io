@@ -61,6 +61,15 @@ export interface TileEcology {
   rockMaterial: RockMaterial;
   groundCover: number;
 }
+/** Planned nonblocking ground planting; tree trunks remain separate harvestable props. */
+export interface TownLandscape {
+  parcel: string;
+  seed: number;
+  kind: 'grove' | 'garden' | 'planter';
+  density: number;
+  /** Exposed boundaries: north 1, east 2, south 4, west 8. */
+  edge: number;
+}
 export type ItemId =
   | 'cequin'
   | 'heartleaf'
@@ -93,6 +102,7 @@ export interface Tile extends Point {
   architecture?: ArchitecturalCulture;
   ecology?: TileEcology;
   cultivated?: boolean;
+  landscape?: TownLandscape;
   site?: string;
   clan?: number;
 }
