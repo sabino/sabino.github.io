@@ -45,7 +45,11 @@ let selectedItem: ItemId | null = null;
 let trackedQuestId: string | null = null;
 function trackedQuest() {
   const active = game.quests.filter((q) => !q.complete);
-  return active.find((q) => q.id === trackedQuestId) ?? active.find((q) => q.target) ?? active[0];
+  return (
+    active.find((q) => q.id === trackedQuestId) ??
+    active.filter((q) => q.target).at(-1) ??
+    active[0]
+  );
 }
 let stored: string | null = null;
 try {
@@ -799,8 +803,19 @@ root.addEventListener('click', (event) => {
     save();
   }
   if (d.choice) {
+    const knownQuests = new Set(game.quests.map((q) => q.id));
+    const sourceId = game.dialogue?.npcId;
     game.choose(d.choice);
+    const accepted = game.quests.find((q) => !knownQuests.has(q.id) && !q.complete);
+    if (accepted) trackedQuestId = accepted.id;
+    else if (d.choice === 'vault:survey' && sourceId) {
+      const survey = game.quests.find(
+        (q) => q.id === sourceId.replace(/:notice$/, ':survey') && !q.complete,
+      );
+      if (survey) trackedQuestId = survey.id;
+    }
     updateUI();
+    drawMap();
     save();
   }
 });
@@ -1104,6 +1119,9 @@ Object.defineProperty(window, 'stichos', {
     },
     vaults(x: number, y: number, radius = 100) {
       return structuredClone(game.world.vaultsAround(x, y, radius));
+    },
+    botanicalProfile(prop: Prop) {
+      return structuredClone(game.botanicalProfile(prop));
     },
     blocked(x: number, y: number) {
       return game.world.blocked(x, y, game.removed);
