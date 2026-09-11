@@ -82,6 +82,59 @@ export interface SharedCombatResult extends SharedCombatFrame {
   ok: boolean;
   reason?: string;
 }
+export interface SharedCombatCheckpoint {
+  snapshot: SharedCombatSnapshot;
+  records: SharedEnemy[];
+  serial: number;
+  contributors: [string, string[]][];
+  cooldowns: [string, { attack: number; ward: number }][];
+}
+export function validSharedCombatCheckpoint(v: unknown): v is SharedCombatCheckpoint {
+  if (
+    !object(v) ||
+    !integer(v.serial) ||
+    !validSharedCombatFrame({ snapshot: v.snapshot, hits: [], deaths: [] })
+  )
+    return false;
+  if (
+    !Array.isArray(v.records) ||
+    v.records.length > 2048 ||
+    !Array.isArray(v.contributors) ||
+    v.contributors.length > 2048
+  )
+    return false;
+  for (let i = 0; i < v.records.length; i += 512) {
+    if (
+      !validSharedCombatFrame({
+        snapshot: { ...(v.snapshot as SharedCombatSnapshot), enemies: v.records.slice(i, i + 512) },
+        hits: [],
+        deaths: [],
+      })
+    )
+      return false;
+  }
+  return (
+    unique(v.records.map((n) => n.id)) &&
+    v.contributors.every(
+      (row) =>
+        Array.isArray(row) &&
+        row.length === 2 &&
+        text(row[0]) &&
+        boundedArray(row[1], 32, (id) => text(id)),
+    ) &&
+    boundedArray(
+      v.cooldowns,
+      64,
+      (row) =>
+        Array.isArray(row) &&
+        row.length === 2 &&
+        text(row[0]) &&
+        object(row[1]) &&
+        finite(row[1].attack, 0, 30000) &&
+        finite(row[1].ward, 0, 30000),
+    )
+  );
+}
 type CombatWorld = Pick<InfiniteWorld, 'generation' | 'blocked' | 'npcsAround' | 'propsAround'>;
 interface CombatProfile {
   damage: number;
@@ -328,6 +381,41 @@ export class SharedCombat {
       dead: [...this.dead].sort(),
       peaceful: [...this.peaceful].sort(),
     };
+  }
+
+  /** Trusted authority persistence; never accepted as a client combat command. */
+  checkpoint(): SharedCombatCheckpoint {
+    return {
+      snapshot: this.snapshot(),
+      records: [...this.records.values()].map(copy),
+      serial: this.serial,
+      contributors: [...this.contributors].map(([id, peers]) => [id, [...peers]]),
+      cooldowns: [...this.cooldowns].map(([id, c]) => [
+        id,
+        { attack: Math.max(0, c.attack - this.now()), ward: Math.max(0, c.ward - this.now()) },
+      ]),
+    };
+  }
+  restore(checkpoint: SharedCombatCheckpoint) {
+    if (!validSharedCombatCheckpoint(checkpoint)) throw Error('Invalid shared combat checkpoint.');
+    const value = copy(checkpoint);
+    this.seq = value.snapshot.seq;
+    this.serial = Math.max(value.serial, ...value.snapshot.projectiles.map((p) => p.id));
+    this.enemies = new Map(value.snapshot.enemies.map((n) => [n.id, n]));
+    this.records = new Map(value.records.map((n) => [n.id, n]));
+    this.dead = new Set(value.snapshot.dead);
+    this.peaceful = new Set(value.snapshot.peaceful);
+    this.projectiles = value.snapshot.projectiles;
+    this.contributors = new Map(value.contributors.map(([id, peers]) => [id, new Set(peers)]));
+    this.hits = [];
+    this.deaths = [];
+    this.cooldowns = new Map(
+      value.cooldowns.map(([id, c]) => [
+        id,
+        { attack: this.now() + c.attack, ward: this.now() + c.ward },
+      ]),
+    );
+    this.discovery = 0;
   }
 
   private frame(advance = true): SharedCombatFrame {

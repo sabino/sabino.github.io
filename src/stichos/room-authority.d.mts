@@ -1,4 +1,5 @@
 export const MAX_MESSAGE_BYTES: number;
+import type { RoomWorldCheckpoint, SignedRoomCheckpoint } from './room-checkpoint.ts';
 export interface AuthoritySocket {
   readyState: number;
   bufferedAmount: number;
@@ -24,6 +25,7 @@ export class CoopRooms {
     messagesPerSecond?: number;
     messageBurst?: number;
     codeFactory?: () => string;
+    durable?: boolean;
   });
   rooms: Map<string, unknown>;
   connections: Set<AuthorityConnection>;
@@ -33,4 +35,7 @@ export class CoopRooms {
   heartbeat(): void;
   tick(dt?: number): void;
   sweep(): void;
+  exportRoom(id: string): { state: RoomWorldCheckpoint; privateState: unknown } | null;
+  restoreRoom(state: RoomWorldCheckpoint, privateState?: unknown): string;
+  publishCheckpoint(checkpoint: SignedRoomCheckpoint): void;
 }

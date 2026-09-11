@@ -1,10 +1,32 @@
 import type { Appearance, Point } from './types.ts';
 import type { WorldGeneration } from './world.ts';
 import type { SharedCombatFrame, SharedCombatProgression } from './shared-combat.ts';
+import type { SignedRoomCheckpoint } from './room-checkpoint.ts';
 
-export const MULTIPLAYER_PROTOCOL = 2 as const;
+export const MULTIPLAYER_PROTOCOL = 3 as const;
 export const MAX_ROOM_PLAYERS = 8;
 export type MultiplayerGesture = 'wave' | 'thanks' | 'help';
+export type ChatChannel = 'say' | 'world';
+export interface RoomChat extends Point {
+  id: number;
+  room: string;
+  channel: ChatChannel;
+  peerId: string;
+  name: string;
+  text: string;
+  at: number;
+}
+export interface ProductionMachine extends Point {
+  id: string;
+  kind: 'garden' | 'sawmill' | 'ore-sorter';
+  ownerId: string;
+}
+export interface RoomInfo {
+  room: string;
+  seed: number;
+  generation: WorldGeneration;
+  players: number;
+}
 
 /** Presence is player-reported; the server validates and owns shared resource claims. */
 export interface MultiplayerPeer extends Point {
@@ -18,6 +40,18 @@ export interface MultiplayerPeer extends Point {
 }
 
 export type MultiplayerClientMessage =
+  | { type: 'hello'; room: string; protocol: typeof MULTIPLAYER_PROTOCOL }
+  | { type: 'chat'; requestId: string; channel: ChatChannel; text: string }
+  | { type: 'machine'; requestId: string; machine: Omit<ProductionMachine, 'ownerId'> }
+  | {
+      type: 'production';
+      requestId: string;
+      machineId: string;
+      jobId: string;
+      propId: string;
+      x: number;
+      y: number;
+    }
   | {
       type: 'join';
       protocol: typeof MULTIPLAYER_PROTOCOL;
@@ -28,6 +62,7 @@ export type MultiplayerClientMessage =
       appearance: Appearance;
       position: Point;
       resumeToken?: string;
+      clientId?: string;
       combatActive?: boolean;
       bodyId?: string;
       progression?: SharedCombatProgression;
@@ -59,6 +94,11 @@ export type MultiplayerClientMessage =
   | { type: 'emote'; gesture: MultiplayerGesture };
 
 export type MultiplayerServerMessage =
+  | { type: 'room_info'; info: RoomInfo }
+  | { type: 'chat'; message: RoomChat }
+  | { type: 'chat_result'; requestId: string; ok: boolean; reason?: string }
+  | { type: 'machines'; machines: ProductionMachine[] }
+  | { type: 'checkpoint'; checkpoint: SignedRoomCheckpoint }
   | {
       type: 'welcome';
       protocol: typeof MULTIPLAYER_PROTOCOL;
@@ -73,6 +113,8 @@ export type MultiplayerServerMessage =
       removed: string[];
       opened: string[];
       combat: SharedCombatFrame;
+      chat: RoomChat[];
+      machines: ProductionMachine[];
     }
   | { type: 'peerJoined'; peer: MultiplayerPeer }
   | { type: 'peerLeft'; peerId: string }

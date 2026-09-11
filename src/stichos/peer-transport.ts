@@ -1,5 +1,7 @@
 import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
 import { CoopRooms, type AuthoritySocket } from './room-authority.mjs';
+import { RoomPersistence } from './room-persistence.ts';
+import { storeRoom, type SavedRoom } from './room-storage.ts';
 
 /** A common wire shape keeps the WebSocket and browser-hosted room rules identical. */
 export interface RoomTransport {
@@ -64,9 +66,14 @@ class HostSocket implements AuthoritySocket {
 }
 
 /** Peers exchange room data directly. PeerServer supplies discovery/signalling only. */
-export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomTransport {
-  const hosting = !room;
+export function createPeerTransport(
+  room = '',
+  peerOptions?: PeerOptions,
+  restore?: SavedRoom,
+): RoomTransport {
+  const hosting = !room || !!restore?.owner;
   const code =
+    restore?.checkpoint.state.room ||
     room ||
     [...crypto.getRandomValues(new Uint8Array(5))]
       .map((byte) => byte.toString(16).padStart(2, '0'))
@@ -77,6 +84,7 @@ export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomT
   const peer = hosting ? new Peer(hostId, peerOptions) : new Peer(peerOptions ?? {});
   let closed = false;
   let initialized = false;
+  let activated = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectAttempts = 0;
   const pendingChannels = new Set<DataConnection>();
@@ -85,8 +93,41 @@ export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomT
   let local: HostSocket | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let combatClock: ReturnType<typeof setInterval> | undefined;
+  let persistenceClock: ReturnType<typeof setInterval> | undefined;
+  let initialSave: ReturnType<typeof setTimeout> | undefined;
   const sockets = new Set<HostSocket>();
-  const hub = hosting ? new CoopRooms({ maxRooms: 1, codeFactory: () => code }) : null;
+  const hub = hosting
+    ? new CoopRooms({ maxRooms: 1, codeFactory: () => code, durable: true })
+    : null;
+  if (hub && restore?.owner) hub.restoreRoom(restore.checkpoint.state, restore.owner.privateState);
+  const persistence = hub
+    ? new RoomPersistence(
+        hub,
+        (saved) => {
+          if (!storeRoom(saved))
+            throw Error('Browser storage is full; this world could not be saved.');
+        },
+        restore?.owner?.identity,
+        restore?.checkpoint,
+      )
+    : null;
+  const persist = () =>
+    activated
+      ? persistence?.flush().catch(() => {
+          wire.onmessage?.({
+            data: JSON.stringify({
+              type: 'error',
+              code: 'storage_failed',
+              reason:
+                'This world could not be saved in browser storage. Export your personal save and free storage before closing.',
+            }),
+          });
+        })
+      : undefined;
+  const onPageHide = () => {
+    void persist();
+  };
+  if (hosting) globalThis.addEventListener?.('pagehide', onPageHide);
   const wire: RoomTransport = {
     readyState: 0,
     onopen: null,
@@ -104,6 +145,10 @@ export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomT
       wire.readyState = 3;
       clearInterval(heartbeat);
       clearInterval(combatClock);
+      clearInterval(persistenceClock);
+      clearTimeout(initialSave);
+      globalThis.removeEventListener?.('pagehide', onPageHide);
+      void persist();
       clearTimeout(reconnectTimer);
       for (const pending of pendingChannels) pending.close();
       pendingChannels.clear();
@@ -124,6 +169,7 @@ export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomT
   };
   const opened = () => {
     if (!closed) {
+      activated = true;
       wire.readyState = 1;
       wire.onopen?.();
     }
@@ -175,6 +221,8 @@ export function createPeerTransport(room = '', peerOptions?: PeerOptions): RoomT
       hub.attach(local);
       heartbeat = setInterval(() => hub.heartbeat(), 15000);
       combatClock = setInterval(() => hub.tick(0.05), 50);
+      persistenceClock = setInterval(() => void persist(), 5000);
+      initialSave = setTimeout(() => void persist(), 500);
       opened();
     } else {
       channel = peer.connect(hostId, {

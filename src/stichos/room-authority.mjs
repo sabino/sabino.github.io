@@ -2,7 +2,12 @@ import { InfiniteWorld } from './world.ts';
 import { generateArtifact, normalizeArtifactDesign } from './artifacts.ts';
 import { artifactToolKind, requiredToolFor } from './labor.ts';
 import { MULTIPLAYER_PROTOCOL, MAX_ROOM_PLAYERS } from './multiplayer-protocol.ts';
-import { SharedCombat, validSharedCombatProgression } from './shared-combat.ts';
+import {
+  SharedCombat,
+  validSharedCombatProgression,
+  validSharedCombatFrame,
+} from './shared-combat.ts';
+import { validRoomWorldCheckpoint, validProductionMachine } from './room-checkpoint.ts';
 
 const MAX_COORDINATE = Number.MAX_SAFE_INTEGER - 4096;
 export const MAX_MESSAGE_BYTES = 8192;
@@ -105,8 +110,11 @@ export class CoopRooms {
     messagesPerSecond = 30,
     messageBurst = 60,
     codeFactory = roomCode,
+    durable = false,
   } = {}) {
     this.now = now;
+    this.durable = durable;
+    this.checkpoints = new Map();
     this.codeFactory = codeFactory;
     this.maxRooms = maxRooms;
     this.maxPeers = maxPeers;
@@ -204,9 +212,10 @@ export class CoopRooms {
     const now = this.now();
     for (const [id, room] of this.rooms) {
       for (const [peerId, member] of room.members)
-        if (!member.connection && now - member.disconnectedAt >= this.reconnectMs)
+        if (!this.durable && !member.connection && now - member.disconnectedAt >= this.reconnectMs)
           room.members.delete(peerId);
       if (
+        !this.durable &&
         ![...room.members.values()].some((member) => member.connection) &&
         now - room.lastActivity >= this.roomIdleMs
       )
@@ -283,6 +292,26 @@ export class CoopRooms {
   handle(connection, message) {
     if (!object(message) || !text(message.type, 1, 24))
       return this.error(connection, 'invalid_message', 'Unknown message.');
+    if (message.type === 'hello') {
+      if (
+        message.protocol !== MULTIPLAYER_PROTOCOL ||
+        typeof message.room !== 'string' ||
+        !/^[A-Za-z0-9]{4,16}$/.test(message.room)
+      )
+        return this.error(connection, 'invalid_hello', 'Use a valid room code.');
+      const room = this.rooms.get(message.room.toUpperCase());
+      if (!room)
+        return this.error(connection, 'room_missing', 'That world is not currently hosted.');
+      return this.send(connection, {
+        type: 'room_info',
+        info: {
+          room: room.id,
+          seed: room.seed,
+          generation: room.generation,
+          players: [...room.members.values()].filter((m) => m.connection).length,
+        },
+      });
+    }
     if (message.type === 'join') return this.join(connection, message);
     if (!connection.member)
       return this.error(connection, 'join_required', 'Join a room before acting.');
@@ -317,6 +346,9 @@ export class CoopRooms {
       this.broadcast(room, { type: 'pose', peer: publicPeer(member) }, connection);
       return;
     }
+    if (message.type === 'chat') return this.chat(connection, message);
+    if (message.type === 'machine' || message.type === 'production')
+      return this.production(connection, message);
     if (message.type === 'claim' || message.type === 'door') return this.claim(connection, message);
     if (message.type === 'combat') return this.combat(connection, message);
     if (message.type === 'combat_ack') {
@@ -356,6 +388,8 @@ export class CoopRooms {
       (message.progression !== undefined && !validSharedCombatProgression(message.progression)) ||
       (message.room !== undefined &&
         (typeof message.room !== 'string' || !/^[A-Za-z0-9]{4,16}$/.test(message.room))) ||
+      (message.clientId !== undefined &&
+        (typeof message.clientId !== 'string' || !/^[a-f0-9-]{36}$/.test(message.clientId))) ||
       (message.resumeToken !== undefined &&
         (typeof message.resumeToken !== 'string' ||
           !/^[A-Za-z0-9_-]{32}$/.test(message.resumeToken)))
@@ -393,6 +427,10 @@ export class CoopRooms {
         opened: new Set(),
         lastActivity: this.now(),
         combatEvent: 0,
+        chat: [],
+        chatSerial: 0,
+        machines: new Map(),
+        productionReceipts: new Map(),
       };
       room.combat = new SharedCombat(world, room.removed, { now: this.now });
       this.rooms.set(id, room);
@@ -407,6 +445,12 @@ export class CoopRooms {
           connection,
           'resume_expired',
           'That connection can no longer be resumed.',
+        );
+      if (member.clientId && member.clientId !== message.clientId)
+        return this.error(
+          connection,
+          'resume_identity',
+          'This credential belongs to a different browser identity.',
         );
       if (member.connection)
         return this.error(connection, 'resume_in_use', 'That traveler is already connected.');
@@ -431,6 +475,8 @@ export class CoopRooms {
         token: resumeToken(),
         requests: new Map(),
         lastEmote: -Infinity,
+        lastChat: -Infinity,
+        clientId: message.clientId,
         combatHits: new Map(),
         combatDeaths: new Map(),
         combatAck: 0,
@@ -470,8 +516,287 @@ export class CoopRooms {
       removed: [...room.removed],
       opened: [...room.opened],
       combat: this.combatFrame(room, member),
+      chat: room.chat.filter((c) => c.channel === 'world' || distance(c, member) <= 12),
+      machines: [...room.machines.values()],
     });
     this.broadcast(room, { type: 'peerJoined', peer: publicPeer(member) }, connection);
+    const checkpoint = this.checkpoints.get(room.id);
+    if (checkpoint) this.send(connection, { type: 'checkpoint', checkpoint });
+  }
+  /** Trusted host-only persistence API. No wire message can restore or replace world state. */
+  exportRoom(id) {
+    const room = this.rooms.get(id);
+    if (!room) return null;
+    const state = {
+      version: 1,
+      room: room.id,
+      seed: room.seed,
+      generation: room.generation,
+      removed: [...room.removed],
+      opened: [...room.opened],
+      combat: room.combat.checkpoint(),
+      combatEvent: room.combatEvent,
+      machines: [...room.machines.values()],
+      chat: room.chat.filter((c) => c.channel === 'world'),
+      chatSerial: room.chatSerial,
+      productionReceipts: [...room.productionReceipts.values()],
+    };
+    const members = [...room.members.values()].map((m) => ({
+      id: m.id,
+      token: m.token,
+      clientId: m.clientId,
+      name: m.name,
+      x: m.x,
+      y: m.y,
+      heading: m.heading,
+      phase: m.phase,
+      appearance: m.appearance,
+      bodyId: m.bodyId,
+      progression: m.progression,
+      combatAck: m.combatAck,
+      combatSerial: m.combatSerial,
+      combatNamedRequests: [...m.combatNamedRequests],
+      requests: [...m.requests],
+      combatHits: [...m.combatHits.values()],
+      combatDeaths: [...m.combatDeaths.values()],
+    }));
+    return structuredClone({ state, privateState: { members, chat: room.chat } });
+  }
+  restoreRoom(state, privateState = { members: [], chat: [] }) {
+    if (
+      !validRoomWorldCheckpoint(state) ||
+      this.rooms.has(state.room) ||
+      this.rooms.size >= this.maxRooms
+    )
+      throw Error('Invalid, occupied, or full room restore.');
+    if (
+      !object(privateState) ||
+      !Array.isArray(privateState.members) ||
+      privateState.members.length > 32 ||
+      !Array.isArray(privateState.chat) ||
+      privateState.chat.length > 200
+    )
+      throw Error('Invalid private room backup.');
+    const world = new InfiniteWorld(state.seed, state.generation),
+      removed = new Set(state.removed);
+    const room = {
+      id: state.room,
+      seed: state.seed,
+      generation: state.generation,
+      world,
+      removed,
+      opened: new Set(state.opened),
+      members: new Map(),
+      machines: new Map(state.machines.map((m) => [m.id, structuredClone(m)])),
+      chat: structuredClone(state.chat),
+      chatSerial: state.chatSerial,
+      productionReceipts: new Map(
+        state.productionReceipts.map((r) => [r.sourceId, structuredClone(r)]),
+      ),
+      combatEvent: state.combatEvent,
+      lastActivity: this.now(),
+    };
+    room.combat = new SharedCombat(world, removed, { now: this.now });
+    room.combat.restore(state.combat);
+    for (const m of privateState.members) {
+      if (
+        !object(m) ||
+        !text(m.id, 1, 160) ||
+        !text(m.token, 32, 32) ||
+        !point(m) ||
+        !appearanceValid(m.appearance) ||
+        !text(m.name, 1, 64) ||
+        !integer(m.combatAck, 0, state.combatEvent) ||
+        !integer(m.combatSerial, 0, Number.MAX_SAFE_INTEGER) ||
+        !Array.isArray(m.requests) ||
+        m.requests.length > 128 ||
+        !Array.isArray(m.combatNamedRequests) ||
+        m.combatNamedRequests.length > 1024 ||
+        !validSharedCombatFrame({
+          snapshot: state.combat.snapshot,
+          hits: m.combatHits,
+          deaths: m.combatDeaths,
+        })
+      )
+        throw Error('Invalid private traveler record.');
+      room.members.set(m.id, {
+        ...structuredClone(m),
+        connection: null,
+        disconnectedAt: this.now(),
+        combatActive: false,
+        lastPose: 0,
+        lastChat: -Infinity,
+        lastEmote: -Infinity,
+        requests: new Map(m.requests),
+        combatNamedRequests: new Set(m.combatNamedRequests),
+        combatHits: new Map(m.combatHits.map((h) => [h.id, h])),
+        combatDeaths: new Map(m.combatDeaths.map((d) => [d.id, d])),
+      });
+    }
+    // Spatial speech remains in the private host backup, never the public replica.
+    if (privateState.chat.length && validRoomWorldCheckpoint({ ...state, chat: privateState.chat }))
+      room.chat = structuredClone(privateState.chat);
+    this.rooms.set(room.id, room);
+    return room.id;
+  }
+  publishCheckpoint(checkpoint) {
+    const room = this.rooms.get(checkpoint.state.room);
+    if (!room) return;
+    this.checkpoints.set(room.id, checkpoint);
+    this.broadcast(room, { type: 'checkpoint', checkpoint });
+  }
+  chat(connection, message) {
+    const { room, member } = connection;
+    if (!text(message.requestId, 1, 80))
+      return this.error(connection, 'invalid_chat', 'A chat action ID is required.');
+    const fingerprint = JSON.stringify(['chat', message.channel, message.text]),
+      old = member.requests.get(message.requestId);
+    const answer = (ok, reason) => {
+      const result = {
+        type: 'chat_result',
+        requestId: message.requestId,
+        ok,
+        ...(reason ? { reason } : {}),
+      };
+      member.requests.set(message.requestId, { fingerprint, result });
+      while (member.requests.size > 128)
+        member.requests.delete(member.requests.keys().next().value);
+      this.send(connection, result);
+    };
+    if (old) {
+      if (old.fingerprint !== fingerprint)
+        return this.send(connection, {
+          type: 'chat_result',
+          requestId: message.requestId,
+          ok: false,
+          reason: 'Action ID was already used.',
+        });
+      return this.send(connection, old.result);
+    }
+    if (
+      !['say', 'world'].includes(message.channel) ||
+      !text(message.text, 1, 560) ||
+      [...message.text].length > 280 ||
+      !message.text.trim()
+    )
+      return answer(false, 'Use 1–280 plain-text characters.');
+    if (this.now() - member.lastChat < 1000)
+      return answer(false, 'Wait a moment before speaking again.');
+    member.lastChat = this.now();
+    const chat = {
+      id: ++room.chatSerial,
+      room: room.id,
+      peerId: member.id,
+      name: member.name,
+      text: message.text.normalize('NFC').trim(),
+      channel: message.channel,
+      x: member.x,
+      y: member.y,
+      at: this.now(),
+    };
+    room.chat.push(chat);
+    if (room.chat.length > 200) room.chat.shift();
+    answer(true);
+    for (const target of room.members.values())
+      if (target.connection && (chat.channel === 'world' || distance(member, target) <= 12))
+        this.send(target.connection, { type: 'chat', message: chat });
+    room.lastActivity = this.now();
+  }
+  production(connection, message) {
+    const { room, member } = connection;
+    if (!text(message.requestId, 1, 80))
+      return this.error(connection, 'invalid_production', 'An action ID is required.');
+    const fingerprint = JSON.stringify(message),
+      old = member.requests.get(message.requestId);
+    const answer = (ok, reason) => {
+      const result = {
+        type: 'claimResult',
+        requestId: message.requestId,
+        ok,
+        ...(reason ? { reason } : {}),
+      };
+      member.requests.set(message.requestId, { fingerprint, result });
+      while (member.requests.size > 128)
+        member.requests.delete(member.requests.keys().next().value);
+      this.send(connection, result);
+    };
+    if (old) {
+      if (old.fingerprint !== fingerprint)
+        return this.send(connection, {
+          type: 'claimResult',
+          requestId: message.requestId,
+          ok: false,
+          reason: 'Action ID was already used.',
+        });
+      return this.send(connection, old.result);
+    }
+    if (message.type === 'machine') {
+      const machine = { ...message.machine, ownerId: member.id };
+      if (!validProductionMachine(machine)) return answer(false, 'Invalid production platform.');
+      const oldMachine = room.machines.get(machine.id);
+      if (oldMachine)
+        return answer(
+          oldMachine.ownerId === member.id &&
+            oldMachine.kind === machine.kind &&
+            distance(oldMachine, machine) < 0.01,
+          'That platform already has a different owner or placement.',
+        );
+      if (distance(member, machine) > 2 || room.world.blocked(machine.x, machine.y, room.removed))
+        return answer(false, 'Stand within two tiles of a clear platform.');
+      if (
+        [...room.machines.values()].filter((m) => m.ownerId === member.id).length >= 8 ||
+        room.machines.size >= 256
+      )
+        return answer(false, 'The production platform limit is reached.');
+      if ([...room.machines.values()].some((m) => distance(m, machine) < 3))
+        return answer(false, 'Leave three tiles between production platforms.');
+      room.machines.set(machine.id, machine);
+      answer(true);
+      this.broadcast(room, { type: 'machines', machines: [...room.machines.values()] });
+      return;
+    }
+    const machine = room.machines.get(message.machineId);
+    if (
+      !machine ||
+      machine.ownerId !== member.id ||
+      !text(message.jobId, 1, 160) ||
+      !text(message.propId, 1, 160) ||
+      !point(message)
+    )
+      return answer(false, 'Register your own production platform first.');
+    const receipt = room.productionReceipts.get(message.propId);
+    if (receipt)
+      return answer(
+        receipt.ownerId === member.id &&
+          receipt.machineId === machine.id &&
+          receipt.jobId === message.jobId,
+        'That source belongs to another production claim.',
+      );
+    if (distance(machine, message) > 16)
+      return answer(false, 'That source is outside the platform work area.');
+    const prop = room.world
+      .propsAround(message.x, message.y, 1)
+      .find((p) => p.id === message.propId);
+    if (
+      !prop ||
+      distance(prop, message) > 0.1 ||
+      prop.kind !==
+        (machine.kind === 'sawmill' ? 'pine' : machine.kind === 'ore-sorter' ? 'rock' : '')
+    )
+      return answer(false, 'The source does not match this platform.');
+    if (room.removed.has(prop.id)) return answer(false, 'That source was already consumed.');
+    if (room.productionReceipts.size >= 16384 || room.removed.size >= 16384)
+      return answer(false, 'This world has reached its persistent resource limit.');
+    room.productionReceipts.set(prop.id, {
+      ownerId: member.id,
+      machineId: machine.id,
+      jobId: message.jobId,
+      sourceId: prop.id,
+    });
+    room.removed.add(prop.id);
+    answer(true);
+    this.broadcast(room, { type: 'world', actorId: member.id, removed: [prop.id] });
+    room.lastActivity = this.now();
   }
   combat(connection, message) {
     const { room, member } = connection;
@@ -622,6 +947,8 @@ export class CoopRooms {
     }
     if (room.removed.has(prop.id) || room.opened.has(prop.id))
       return result(false, 'Another traveler already gathered or searched this object.');
+    if (room.removed.size >= 14000 || room.opened.size >= 16000)
+      return result(false, 'This world has reached its persistent resource limit.');
     if (message.kind === 'gather') {
       if (!GATHERABLE.has(prop.kind)) return result(false, 'That object cannot be gathered.');
       const required = requiredToolFor(prop.kind);

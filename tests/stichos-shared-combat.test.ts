@@ -4,6 +4,7 @@ import {
   SharedCombat,
   validSharedCombatFrame,
   validSharedCombatProgression,
+  validSharedCombatCheckpoint,
   type SharedCombatPeer,
 } from '../src/stichos/shared-combat.ts';
 import { weaponProfile } from '../src/stichos/equipment.ts';
@@ -91,6 +92,45 @@ function arena(npcs: Npc[], props: Prop[] = []) {
     },
   };
 }
+
+test('authority checkpoint restores streamed injuries, exact cooldown, launched projectile identity and sequence without resetting consequences', () => {
+  const a = arena([enemy('wounded', 1, 0), enemy('far', 41, 0)]),
+    p = peer();
+  const injury = a.combat.attack(p, 0).snapshot.enemies[0].hp;
+  a.combat.tick(0.25, [peer('far-peer', 40, 0)]);
+  a.combat.tick(0.25, [peer('far-peer', 40, 0)]);
+  const checkpoint = a.combat.checkpoint();
+  assert.equal(validSharedCombatCheckpoint(checkpoint), true);
+  assert.ok(checkpoint.records.some((n) => n.id === 'wounded' && n.hp === injury));
+  const restored = new SharedCombat(a.world, a.removed, { now: () => 0 });
+  restored.restore(checkpoint);
+  assert.equal(
+    restored.attack(p, 0).ok,
+    false,
+    'restart must not clear the current attack cooldown',
+  );
+  restored.tick(0.25, [p]);
+  restored.tick(0.25, [p]);
+  assert.equal(restored.snapshot().enemies.find((n) => n.id === 'wounded')?.hp, injury);
+  assert.ok(restored.snapshot().seq > checkpoint.snapshot.seq);
+  const shotArena = arena([enemy('target', 6, 0)]),
+    archer = { ...peer('archer', 0, 0, 'bow'), bodyId: 'body:original' };
+  shotArena.combat.attack(archer, 0);
+  const shot = shotArena.combat.checkpoint(),
+    target = new SharedCombat(shotArena.world, shotArena.removed);
+  target.restore(shot);
+  let hits: any[] = [];
+  for (let i = 0; i < 9; i++)
+    hits.push(...target.tick(0.1, [{ ...archer, bodyId: 'body:new' }]).hits);
+  assert.equal(hits.filter((h) => h.target === 'npc').length, 1);
+  assert.equal(hits.find((h) => h.target === 'npc').actorBodyId, 'body:original');
+  const corrupt = structuredClone(checkpoint);
+  corrupt.records[0].hp = NaN;
+  assert.equal(validSharedCombatCheckpoint(corrupt), false);
+  const before = restored.snapshot();
+  assert.throws(() => restored.restore(corrupt));
+  assert.deepEqual(restored.snapshot(), before);
+});
 
 test('two peers share exact generated damage, a single death receipt, and immutable late-join snapshots', () => {
   const a = arena([enemy('foe', 1, 0, 'sword', 50)]);

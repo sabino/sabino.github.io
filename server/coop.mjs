@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { CoopRooms, MAX_MESSAGE_BYTES } from '../src/stichos/room-authority.mjs';
 import { MULTIPLAYER_PROTOCOL } from '../src/stichos/multiplayer-protocol.ts';
+import { attachRoomDisk } from './room-disk.mjs';
 export { CoopRooms };
 
 function originAllowed(req, allowedOrigins) {
@@ -30,9 +31,17 @@ function originAllowed(req, allowedOrigins) {
 export function createCoopServer({
   storeHandler = async () => false,
   allowedOrigins = [],
+  persistenceDirectory = process.env.VERSO_WORLD_STORAGE || null,
+  onCheckpoint = async () => {},
   ...roomOptions
 } = {}) {
-  const hub = new CoopRooms(roomOptions);
+  const hub = new CoopRooms({
+    ...roomOptions,
+    durable: !!persistenceDirectory || roomOptions.durable,
+  });
+  let disk;
+  let persistenceTimer;
+  let persistenceError = null;
   const origins = new Set(allowedOrigins);
   const http = createServer(async (req, res) => {
     try {
@@ -49,6 +58,8 @@ export function createCoopServer({
                 sum + [...room.members.values()].filter((member) => member.connection).length,
               0,
             ),
+            durable: !!disk,
+            storageHealthy: !persistenceError,
           }),
         );
         return;
@@ -101,6 +112,20 @@ export function createCoopServer({
     websocket,
     hub,
     async listen(port = 4175, host = '0.0.0.0') {
+      if (persistenceDirectory && !disk) {
+        disk = await attachRoomDisk(hub, persistenceDirectory, { onCheckpoint });
+        persistenceTimer = setInterval(() => {
+          void disk
+            .flush()
+            .then(() => {
+              persistenceError = null;
+            })
+            .catch((error) => {
+              persistenceError = error;
+            });
+        }, 5000);
+        persistenceTimer.unref();
+      }
       await new Promise((resolve, reject) => {
         http.once('error', reject);
         http.listen(port, host, () => {
@@ -113,9 +138,14 @@ export function createCoopServer({
     async close() {
       clearInterval(timer);
       clearInterval(combatTimer);
+      clearInterval(persistenceTimer);
+      if (disk) await disk.flush();
       for (const client of websocket.clients) client.terminate();
       await new Promise((resolve) => websocket.close(resolve));
       if (http.listening) await new Promise((resolve) => http.close(resolve));
+    },
+    async checkpoint() {
+      if (disk) await disk.flush();
     },
   };
 }
