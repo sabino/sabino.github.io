@@ -6,6 +6,8 @@ Create one director and call `await audio.start(seed)` from the deployment butto
 
 Supported events: `blade`, `pulse`, `dash`, `scan`, `scanned`, `hurt`, `heal`, `enemy-death`, `relay`, `portal`, `complete`, `death`, `click`, and `step`. Step, combat, and UI effects have built-in rate limits, and a 56-voice ceiling bounds rapid event bursts.
 
+Stíchos also uses `breath`, `radio` and `mind-transfer`: filtered inhalation/exhalation, short radio interference with a three-note reply, and a spatial rising chord with paired heartbeats. These support Theo's mental transmission and the borrowed body's breathing. The archived `portal` sound belongs to the earlier prototype; the Stíchos experience has no physical rift.
+
 The score combines a seed-specific minor pentatonic motif with gently detuned low drones, moving filtered wind, restrained glass-like partials, and a damped delay. A seeded world changes the root, motif, tempo, and wind register. Higher danger adds understated low pulses and denser notes. Effects use a separate seeded random stream so footsteps and combat do not alter the world's melodic sequence.
 
 The mixer fades state changes, schedules notes ahead of time, drops missed beats after a delayed frame, cleans up completed voices, and compresses the combined output. No microphone, speakers selection, network access, stored audio files, or autoplay is required.

@@ -203,7 +203,7 @@ export async function mountStore(
         element(
           'p',
           's-store-price',
-          owned ? 'Owned by this browser wallet' : (cost ?? 'Purchases are not configured'),
+          owned ? 'Owned by this browser wallet' : (cost ?? 'Currently unavailable'),
         ),
       );
       if (owned)
@@ -403,9 +403,9 @@ export async function mountStore(
     notice = problem
       ? 'The store is unavailable. Your save and earned outfits are unaffected; refresh to retry.'
       : !catalog!.enabled
-        ? 'Purchases are disabled in this build. You can preview the outfits and refresh any already-owned styles.'
+        ? 'Purchases are disabled for now. Preview the outfits or restore any styles you already own.'
         : catalog!.testMode
-          ? 'Test checkout is enabled. These are server-configured test prices; no live payment is being offered.'
+          ? 'Test checkout is enabled. These are test prices; no live payment is being offered.'
           : 'Choose an outfit to continue to secure payment. The final total is shown at checkout.';
     render();
     if (changed) onChange();
