@@ -120,6 +120,7 @@ interface TownLayout {
 interface LandscapeParcel extends Point {
   halfX: number;
   halfY: number;
+  cells: Set<string>;
   planting: Omit<TownLandscape, 'edge'>;
 }
 
@@ -606,6 +607,7 @@ export class InfiniteWorld {
         if (b.kind === 'workshop' && side === 3) return;
         parcels.push({
           ...slot,
+          cells: new Set(),
           planting: {
             parcel: `${b.id}:landscape:${side}`,
             seed,
@@ -615,29 +617,88 @@ export class InfiniteWorld {
         });
       });
     }
-    return parcels;
+    // Public orchards occupy otherwise unused southern quadrants. Their final
+    // footprint is clipped by exactly the same street and entrance clearances.
+    if (settlement.rank !== 'hamlet')
+      for (const side of [-1, 1]) {
+        const seed = deriveSeed(settlement.seed, 'v4-public-orchard', side);
+        parcels.push({
+          x: settlement.x + side * Math.min(10, settlement.radius - 5),
+          y: settlement.y + 5,
+          halfX: 3,
+          halfY: 2,
+          cells: new Set(),
+          planting: {
+            parcel: `${settlement.id}:landscape:orchard:${side}`,
+            seed,
+            kind: sealed ? 'planter' : 'grove',
+            density,
+          },
+        });
+      }
+    const planned: LandscapeParcel[] = [],
+      occupied = new Set<string>();
+    for (const parcel of parcels) {
+      const candidates = new Map<string, Point>();
+      for (let y = parcel.y - parcel.halfY; y <= parcel.y + parcel.halfY; y++)
+        for (let x = parcel.x - parcel.halfX; x <= parcel.x + parcel.halfX; x++) {
+          if (Math.abs(x - parcel.x) === parcel.halfX && Math.abs(y - parcel.y) === parcel.halfY)
+            continue;
+          if (!occupied.has(key(x, y)) && this.clearLandscape(x, y, settlement, buildings))
+            candidates.set(key(x, y), { x, y });
+        }
+      let component = 0;
+      while (candidates.size) {
+        const start = candidates.values().next().value!,
+          queue = [start];
+        candidates.delete(key(start.x, start.y));
+        for (let i = 0; i < queue.length; i++)
+          for (const [dx, dy] of [
+            [0, -1],
+            [1, 0],
+            [0, 1],
+            [-1, 0],
+          ]) {
+            const id = key(queue[i].x + dx, queue[i].y + dy),
+              next = candidates.get(id);
+            if (next) {
+              candidates.delete(id);
+              queue.push(next);
+            }
+          }
+        // Clipping must never leave isolated one-tile pots or two-tile slivers.
+        if (queue.length < 3) continue;
+        const cells = new Set(queue.map((p) => key(p.x, p.y)));
+        for (const id of cells) occupied.add(id);
+        planned.push({
+          ...parcel,
+          cells,
+          planting: {
+            ...parcel.planting,
+            parcel: `${parcel.planting.parcel}:patch:${component++}`,
+          },
+        });
+      }
+    }
+    return planned;
   }
-  private landscapeParcel(x: number, y: number, layout: TownLayout): LandscapeParcel | undefined {
-    const { settlement: s, buildings, landscapes } = layout;
-    if (!landscapes || Math.abs(x - s.x) > s.radius - 1 || Math.abs(y - s.y) > s.radius - 1) return;
+  private clearLandscape(x: number, y: number, s: Settlement, buildings: Building[]): boolean {
+    if (Math.abs(x - s.x) > s.radius - 1 || Math.abs(y - s.y) > s.radius - 1) return false;
     // Preserve civic fixtures, existing cultivated plots, all resident spawns,
     // stockpiles and the shared workbench/machine approach as one clear forecourt.
-    if (Math.abs(x - s.x) <= 6 && y - s.y >= -4 && y - s.y <= 9) return;
-    if (Math.abs(x - s.x) <= 2 || Math.abs(y - s.y) <= 2) return;
+    if (Math.abs(x - s.x) <= 6 && y - s.y >= -4 && y - s.y <= 9) return false;
+    if (Math.abs(x - s.x) <= 2 || Math.abs(y - s.y) <= 2) return false;
     for (let dy = -1; dy <= 1; dy++)
-      for (let dx = -1; dx <= 1; dx++) if (this.highway(x + dx, y + dy)) return;
+      for (let dx = -1; dx <= 1; dx++) if (this.highway(x + dx, y + dy)) return false;
     for (const b of buildings) {
-      if (Math.abs(x - b.x) <= b.halfX + 1 && Math.abs(y - b.y) <= b.halfY + 1) return;
+      if (Math.abs(x - b.x) <= b.halfX + 1 && Math.abs(y - b.y) <= b.halfY + 1) return false;
       // Both entrances keep a three-tile-wide approach beyond the parcel depth.
-      if (Math.abs(x - b.x) <= 1 && Math.abs(y - b.y) <= b.halfY + 5) return;
+      if (Math.abs(x - b.x) <= 1 && Math.abs(y - b.y) <= b.halfY + 5) return false;
     }
-    return landscapes.find(
-      (p) =>
-        Math.abs(x - p.x) <= p.halfX &&
-        Math.abs(y - p.y) <= p.halfY &&
-        // Beveled ends make bounded planted groups rather than painted stripes.
-        !(Math.abs(x - p.x) === p.halfX && Math.abs(y - p.y) === p.halfY),
-    );
+    return true;
+  }
+  private landscapeParcel(x: number, y: number, layout: TownLayout): LandscapeParcel | undefined {
+    return layout.landscapes?.find((parcel) => parcel.cells.has(key(x, y)));
   }
   private layouts(x: number, y: number, radius = 20): TownLayout[] {
     if (this.generation >= 3) {

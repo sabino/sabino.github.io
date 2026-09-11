@@ -59,6 +59,28 @@ test('parcel edges reconstruct across chunks while roads, wall verges, doors, ga
     for (const town of towns) {
       const tiles = townTiles(world, town);
       const planted = tiles.filter((tile) => tile.landscape);
+      const parcels = new Map<string, Tile[]>();
+      for (const tile of planted) {
+        const id = tile.landscape!.parcel;
+        parcels.set(id, [...(parcels.get(id) ?? []), tile]);
+      }
+      for (const cells of parcels.values()) {
+        assert.ok(
+          cells.length >= 3,
+          'clearance clipping removes isolated pots and two-cell slivers',
+        );
+        const unseen = new Set(cells.map((tile) => `${tile.x},${tile.y}`)),
+          queue = [cells[0]];
+        unseen.delete(`${cells[0].x},${cells[0].y}`);
+        for (let i = 0; i < queue.length; i++)
+          for (const next of cells)
+            if (
+              Math.abs(next.x - queue[i].x) + Math.abs(next.y - queue[i].y) === 1 &&
+              unseen.delete(`${next.x},${next.y}`)
+            )
+              queue.push(next);
+        assert.equal(unseen.size, 0, 'every named garden compound is cardinally contiguous');
+      }
       const props = world.propsAround(town.x, town.y, town.radius * 1.5);
       const buildings = tiles.filter((tile) => tile.building);
       for (const tile of planted) {
@@ -104,6 +126,24 @@ test('parcel edges reconstruct across chunks while roads, wall verges, doors, ga
         );
     }
   }
+});
+
+test('unused southern town quadrants have public orchard shade without consuming road verges', () => {
+  const world = new InfiniteWorld(11, 4),
+    town = world.settlementsAround(-213, 0, 30)[0];
+  const orchard = townTiles(world, town).filter((tile) =>
+    tile.landscape?.parcel.includes(':orchard:'),
+  );
+  assert.ok(orchard.length >= 15, 'public planting has a coherent courtyard footprint');
+  assert.ok(orchard.some((tile) => tile.x > town.x + 6 && tile.y > town.y + 2));
+  const trees = world
+    .propsAround(town.x, town.y, 30)
+    .filter((prop) => prop.id.includes(':orchard:'));
+  assert.ok(
+    trees.some((tree) => tree.x > town.x + 6),
+    'the formerly empty southeast quadrant gains real orchard shade',
+  );
+  assert.ok(trees.length <= 8, 'public planting remains navigable');
 });
 
 test('landscaping follows civilization containment and the local climatic density budget', () => {
