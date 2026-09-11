@@ -3,6 +3,7 @@ import type { Appearance, BuildingKind, PropKind, Terrain, Tile } from './types.
 import { drawWeapon, weaponGenome } from './equipment.ts';
 import { drawArtifact } from './artifact-art.ts';
 import { humanoidGenome } from './humanoid-genome.ts';
+import { drawLaborTool } from './labor-art.ts';
 import { drawPlant } from './botany.ts';
 import type { PlantKind } from './botany.ts';
 import { actionMotion } from './actor-motion.ts';
@@ -1489,6 +1490,8 @@ export function drawHumanoid(
     strike,
     weaponBehindBody,
     motion.kind ?? '',
+    action?.tool?.kind ?? '',
+    action?.tool?.seed ?? '',
     motion.step,
     !!action?.reduced,
   ].join(':');
@@ -1511,7 +1514,12 @@ export function drawHumanoid(
           player,
           weaponBehindBody,
           motion.kind
-            ? { kind: motion.kind, progress: motion.step / 6, reduced: action?.reduced }
+            ? {
+                kind: motion.kind,
+                progress: motion.step / 6,
+                reduced: action?.reduced,
+                tool: action?.tool,
+              }
             : null,
         ),
       48,
@@ -1625,10 +1633,12 @@ function drawHumanoidParts(
     const held = motion.kind ? handPose(1, true) : null;
     const wx = held ? held.x : side ? east * 7 : 8,
       hand = held ? held.y : -14 + step * 2 - attack * 7;
-    if (look.weapon !== 'none') {
+    const workTool = motion.kind === 'gather' ? action?.tool : undefined;
+    if (workTool || look.weapon !== 'none') {
       const sign = side ? east : 1;
       const angle =
-        (motion.kind === 'gather' ? sign * strength * 0.22 : 0) +
+        (workTool ? sign * (-0.85 + strength * 1.4) : 0) +
+        (motion.kind === 'gather' && !workTool ? sign * strength * 0.22 : 0) +
         (look.weapon === 'sword'
           ? sign * (0.16 + attack * 1.12)
           : look.weapon === 'bow'
@@ -1642,8 +1652,9 @@ function drawHumanoidParts(
       ctx.translate(wx + sign * attack * 4, hand);
       ctx.rotate(angle);
       if (side && east < 0) ctx.scale(-1, 1);
-      if (look.artifactDesign) drawArtifact(ctx, look.artifactDesign, 0, 0, weaponScale);
-      else
+      if (workTool) drawLaborTool(ctx, workTool, 0, 0, 0.85);
+      else if (look.artifactDesign) drawArtifact(ctx, look.artifactDesign, 0, 0, weaponScale);
+      else if (look.weapon !== 'none')
         drawWeapon(
           ctx,
           weaponSeed,

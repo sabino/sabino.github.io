@@ -168,6 +168,7 @@ export class StichosRenderer {
         kind: owner.kind,
         progress: effect.age / Math.max(0.01, effect.duration),
         reduced: this.reducedMotion,
+        tool: effect.tool,
       });
     }
     const follow = options.reducedMotion

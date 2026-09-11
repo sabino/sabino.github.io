@@ -5,6 +5,7 @@ export interface HumanoidAction {
   kind: HumanoidActionKind;
   progress: number;
   reduced?: boolean;
+  tool?: { kind: 'axe' | 'pickaxe' | 'sickle'; seed: number };
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -39,7 +40,10 @@ export function effectActor(
     return player
       ? {
           id: player.id,
-          kind: Math.hypot(effect.x - player.x, effect.y - player.y) < 0.3 ? 'craft' : 'gather',
+          kind:
+            !effect.tool && Math.hypot(effect.x - player.x, effect.y - player.y) < 0.3
+              ? 'craft'
+              : 'gather',
         }
       : null;
   }
