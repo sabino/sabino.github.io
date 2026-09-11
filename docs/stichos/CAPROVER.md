@@ -67,3 +67,21 @@ Back up the entire private `/data` volume with restricted access. For a consiste
 After a deployment, verify HTTPS `/health`, two actual WebSocket clients using the game origin, room-code discovery, public join-or-create, shared world changes, and identity recovery after a graceful service restart. Browser-hosted PeerJS success on a single machine is not evidence that this hosted endpoint works from other networks.
 
 References: [CapRover Dockerfile definitions](https://caprover.com/docs/captain-definition-file), [persistent apps](https://caprover.com/docs/persistent-apps), [Node 24 TypeScript support](https://nodejs.org/download/release/v24.15.0/docs/api/typescript.html).
+
+## Authenticated deployment helper
+
+`scripts/deploy-world-node.mjs` supports `plan`, `inspect` and `deploy`. It uses CapRover's authenticated API, never reads the server's internal authentication database, and never resets administrator credentials. Supply the current administrator password through stdin or `CAPROVER_PASSWORD`; stdin may be either the password alone or a JSON object with `password` and optional `otpToken`. The helper never prints credentials, API tokens, environment arrays, arbitrary API response bodies or build logs.
+
+For the constrained host, its default is 512 MiB container memory with a 384 MiB heap. A larger allocation can use `--memory-mib 768 --heap-mib 512`. The default node placement is `vmb4ky49reg899ibcp5ce74yj`. Review the non-secret plan first:
+
+```bash
+rtk proxy node scripts/deploy-world-node.mjs plan --image verso-world:aa36cee
+```
+
+Load the exact image into the server Docker daemon before deployment. A CapRover `imageName` definition always requests a registry pull; a local-only image instead uses the helper's one-line Dockerfile definition, `FROM verso-world:<commit>`, to create the CapRover-managed deployment image. The helper does not upload images or alter the remote Docker daemon itself.
+
+`inspect` logs in and returns only the selected app's non-secret status. `deploy` registers the persistent app if absent, configures port 4175, one instance, resources, restart policy, stop-first updates, `/data`, and WebSockets; obtains the app-domain certificate; forces HTTPS; then submits the image build and waits for completion. Supply the same `--image` and optional resource/mount arguments to each command. A failed certificate step stops before deploying. An existing app build or mismatching `/data` volume also stops the operation.
+
+The default mount is the named volume `verso-world-data` (CapRover may prefix its physical Docker name). To use an explicitly prepared UID/GID-1000 host directory instead, pass `--host-path /captain/data/verso-world`. Verify actual volume ownership before opening the game to players. The helper preserves existing extra app environment values and volumes, but owns the documented service-update override, public origin, port, resource limits and payment-disabled setting. It never edits another app.
+
+The script follows the official [app-definition routes](https://github.com/caprover/caprover/blob/master/src/routes/user/apps/appdefinition/AppDefinitionRouter.ts), [deployment routes](https://github.com/caprover/caprover/blob/master/src/routes/user/apps/appdata/AppDataRouter.ts), and [image build handling](https://github.com/caprover/caprover/blob/master/src/user/ImageMaker.ts). The `containerHttpPort` API field uses this exact casing. After the helper completes, inspect the live Docker service and verify public `/health` plus real room traffic before announcing availability.
