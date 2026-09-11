@@ -293,6 +293,8 @@ export class StichosRenderer {
         rect(ctx, a.x - 3 * scale, z.y - 3 * scale, z.x - a.x + 6 * scale, 11 * scale, '#172a2c');
       }
       ctx.restore();
+      const occupied = game.world.tile(game.player.x, game.player.y).building;
+      for (const b of buildings.values()) if (b.id === occupied) this.interiorFloor(game, b);
     }
     this.drawFootprints(game, dt);
     const radius = Math.hypot(this.width / unit / 2, this.height / unit / 2) + 10;
@@ -509,6 +511,7 @@ export class StichosRenderer {
           for (const tile of tiles) {
             const p = { x: (tile.x - cx * 16) * 32 + 16, y: (tile.y - cy * 16) * 32 + 16 };
             this.transition(game, tile, ctx, 32, p);
+            if (tile.landscape) this.landscapedGround(tile, ctx, p);
             if (
               tile.terrain === 'grass' &&
               tile.biome === 'settlement' &&
@@ -531,6 +534,62 @@ export class StichosRenderer {
           Math.ceil(u * 16),
         );
       }
+  }
+
+  /** Maintained planting parcels come from world generation; these low leaves never impersonate a resource. */
+  private landscapedGround(tile: Tile, ctx: CanvasRenderingContext2D, p: Point) {
+    const bed = tile.landscape!;
+    const rng = random(deriveSeed(bed.seed, tile.x, tile.y, 'parcel-cover'));
+    const formal = bed.kind === 'planter';
+    const cold = tile.temperature < 0;
+    const dry = (tile.ecology?.moisture ?? 0.5) < 0.36;
+    const soil = cold ? '#5d665e' : dry ? '#8f7d55' : '#586346';
+    const leaf = cold ? '#506f60' : dry ? '#78814b' : '#547541';
+    const edge = formal
+      ? color(tile.architecture?.wallColor ?? '#74818a', -24)
+      : color(tile.architecture?.woodColor ?? '#665944', -9);
+    const north = bed.edge & 1 ? 3 : 0,
+      east = bed.edge & 2 ? 3 : 0;
+    const south = bed.edge & 4 ? 3 : 0,
+      west = bed.edge & 8 ? 3 : 0;
+    rect(ctx, p.x - 16 + west, p.y - 16 + north, 32 - west - east, 32 - north - south, soil);
+    // Raised construction has a continuous rim; natural plots have broken earth and stone edging.
+    for (const [bit, dx, dy] of [
+      [1, 0, -1],
+      [2, 1, 0],
+      [4, 0, 1],
+      [8, -1, 0],
+    ]) {
+      if (!(bed.edge & bit)) continue;
+      for (let i = 0; i < 8; i++) {
+        const span = i * 4;
+        const x = p.x - 16 + (dx ? (dx > 0 ? 29 : 0) : span);
+        const y = p.y - 16 + (dy ? (dy > 0 ? 29 : 0) : span);
+        if (formal || rng() > 0.16) {
+          rect(ctx, x + 1, y + 2, dx ? 3 : 4, dy ? 3 : 4, '#34453b');
+          rect(ctx, x, y, dx ? 3 : 4, dy ? 3 : 4, color(edge, rng() * 12));
+          rect(ctx, x, y, dx ? 2 : 4, 1, color(edge, 29));
+        }
+      }
+    }
+    const plantCount = Math.round(2 + Math.max(0.15, bed.density) * 7);
+    for (let n = 0; n < plantCount; n++) {
+      const x = p.x - 12 + west + rng() * (24 - west - east);
+      const y = p.y - 10 + north + rng() * (23 - north - south);
+      const span = 4 + rng() * 4;
+      rect(ctx, x - span, y + 1, span * 2, 3, color(soil, -20));
+      for (let layer = 0; layer < 3; layer++) {
+        const w = span * (1 - layer * 0.18);
+        rect(ctx, x - w, y - layer * 2, w * 2, 3, color(leaf, layer * 13 - 18));
+        rect(ctx, x - w + 1, y - layer * 2 - 1, w, 2, color(leaf, layer * 13 - 6));
+      }
+      if (!cold && !dry && rng() > 0.48) {
+        const flower = rng() > 0.45 ? '#d3c492' : '#c09ab0';
+        for (let bloom = 0; bloom < 3; bloom++)
+          rect(ctx, x - span * 0.6 + rng() * span, y - 6 + rng() * 3, 2, 2, flower);
+      }
+      if (cold) rect(ctx, x - span * 0.45, y - 5, span * 0.8, 2, '#b5c8c7');
+    }
   }
 
   private transition(
@@ -668,8 +727,9 @@ export class StichosRenderer {
     p = this.worldToScreen(tile),
   ) {
     const s = u / 32,
-      rng = random(deriveSeed(tile.seed, 'cultivation'));
-    rect(ctx, p.x - u / 2, p.y - u / 2, u, u, '#344f57');
+      rng = random(deriveSeed(tile.seed, 'cultivation')),
+      warm = game.world.generation >= 4 && tile.temperature > 1;
+    rect(ctx, p.x - u / 2, p.y - u / 2, u, u, warm ? '#514737' : '#344f57');
     for (let i = -10; i <= 10; i += 7) {
       line(
         ctx,
@@ -677,7 +737,7 @@ export class StichosRenderer {
         p.y + i * s,
         p.x + u * 0.4,
         p.y + i * s,
-        '#213a45',
+        warm ? '#302c26' : '#213a45',
         Math.max(1, s * 2),
       );
       line(
@@ -686,7 +746,7 @@ export class StichosRenderer {
         p.y + (i - 2) * s,
         p.x + u * 0.4,
         p.y + (i - 2) * s,
-        '#556a68',
+        warm ? '#766750' : '#556a68',
         Math.max(1, s),
       );
     }
@@ -716,7 +776,7 @@ export class StichosRenderer {
           dy ? y - 4 * s : p.y - u / 2,
           dx ? 6 * s : u,
           dy ? 9 * s : u,
-          '#344b60',
+          warm ? color(tile.architecture?.woodColor ?? '#756044', -20) : '#344b60',
         );
         rect(
           ctx,
@@ -724,16 +784,23 @@ export class StichosRenderer {
           dy ? y - 5 * s : p.y - u / 2,
           dx ? 4 * s : u,
           dy ? 3 * s : u,
-          '#94adc5',
+          warm ? '#9c8964' : '#94adc5',
         );
         for (let stone = 0; stone < 4; stone++) {
           const offset = (-16 + stone * 8) * s;
           if (dy) {
             rect(ctx, p.x + offset, y - 2 * s, 7 * s, 4 * s, stone % 2 ? '#566f83' : '#627b8d');
-            rect(ctx, p.x + offset, y - 4 * s, (5 + rng() * 2) * s, 2 * s, '#d0deea');
+            rect(
+              ctx,
+              p.x + offset,
+              y - 4 * s,
+              (5 + rng() * 2) * s,
+              2 * s,
+              warm ? '#aa9b75' : '#d0deea',
+            );
           } else {
             rect(ctx, x - 2 * s, p.y + offset, 4 * s, 7 * s, '#637c8d');
-            rect(ctx, x - 3 * s, p.y + offset, 2 * s, 6 * s, '#c8d8e5');
+            rect(ctx, x - 3 * s, p.y + offset, 2 * s, 6 * s, warm ? '#a79876' : '#c8d8e5');
           }
         }
       }
@@ -1215,7 +1282,8 @@ export class StichosRenderer {
             u,
             (b.cathedral ? 53 : 34) * s,
             deriveSeed(game.world.seed, b.id, x, y),
-            x % 2 === 0,
+            game.world.generation >= 4 ? y === b.minY && x % 3 === 0 : x % 2 === 0,
+            b.architecture,
           );
         }
       ctx.globalAlpha = 1;
@@ -1237,6 +1305,88 @@ export class StichosRenderer {
       }
   }
 
+  private interiorFloor(game: Stichos, b: Building) {
+    const c = this.ctx,
+      s = this.unit / 32,
+      p = this.worldToScreen({ x: b.minX + 0.5, y: b.minY + 0.5 }),
+      w = (b.maxX - b.minX - 1) * 32,
+      h = (b.maxY - b.minY - 1) * 32;
+    if (w < 32 || h < 32 || !b.architecture) return;
+    const culture = b.architecture,
+      wood = culture.woodColor,
+      trim = culture.accentColor,
+      tech = (culture.technology ?? 0) > 0.62,
+      r = random(deriveSeed(game.world.seed, b.id, 'interior'));
+    c.save();
+    c.translate(p.x, p.y);
+    c.scale(s, s);
+    c.beginPath();
+    c.rect(0, 0, w, h);
+    c.clip();
+    const timber = ['house', 'inn'].includes(b.kind ?? 'house');
+    rect(c, 0, 0, w, h, timber ? color(wood, -25) : color(culture.wallColor, -38));
+    for (let y = 0; y < h; y += timber ? 8 : 20)
+      for (let x = 0; x < w; x += timber ? 48 : 20) {
+        const tone = color(timber ? wood : culture.wallColor, -12 + r() * 13);
+        rect(c, x + 1, y + 1, timber ? 46 : 18, timber ? 6 : 18, tone);
+        rect(c, x + 2, y + 1, timber ? 43 : 16, 1, color(tone, 11));
+      }
+    const rw = Math.min(w * 0.48, 96),
+      rh = Math.min(h * 0.6, 150),
+      rx = (w - rw) / 2,
+      ry = (h - rh) / 2;
+    rect(c, rx - 3, ry - 3, rw + 6, rh + 6, color(trim, -48));
+    rect(c, rx, ry, rw, rh, color(trim, -29));
+    rect(c, rx + 3, ry + 3, rw - 6, rh - 6, color(trim, -38));
+    for (let y = ry + 8; y < ry + rh - 4; y += 12) {
+      rect(c, rx + 6, y, 3, 3, color(trim, 5));
+      rect(c, rx + rw - 9, y, 3, 3, color(trim, 5));
+    }
+    // Wall-mounted storage and counters belong to the room; the central walking aisle stays clear.
+    const shelf = (xx: number, yy: number, ww: number) => {
+      rect(c, xx + 3, yy + 5, ww, 29, '#12242b70');
+      rect(c, xx, yy, ww, 25, color(wood, -27));
+      rect(c, xx + 2, yy + 2, ww - 4, 20, color(wood, 5));
+      for (let row = 0; row < 2; row++) {
+        rect(c, xx + 3, yy + 5 + row * 10, ww - 6, 8, color(wood, -40));
+        for (let q = 0; q < ww / 6 - 1; q++) {
+          const col = tech
+            ? color(trim, r() * 18)
+            : ['#99876a', '#678273', '#a07867', '#7b7891'][Math.floor(r() * 4)];
+          rect(c, xx + 5 + q * 6, yy + 5 + row * 10, 3 + r() * 2, 7, col);
+        }
+      }
+      rect(c, xx - 1, yy - 2, ww + 2, 3, color(wood, 23));
+    };
+    if (b.kind === 'greenhouse') {
+      for (const x of [3, w - 29]) {
+        rect(c, x, 8, 26, h - 20, color(wood, -18));
+        rect(c, x + 3, 11, 20, h - 26, '#433e30');
+        for (let y = 15; y < h - 18; y += 14) {
+          line(c, x + 13, y + 6, x + 13, y - 4, '#82a16a', 2);
+          rect(c, x + 6, y, 7, 3, '#527452');
+          rect(c, x + 13, y - 3, 7, 3, '#91ab70');
+        }
+      }
+    } else {
+      shelf(2, 2, Math.min(62, w * 0.35));
+      shelf(w - Math.min(52, w * 0.3) - 2, 2, Math.min(52, w * 0.3));
+    }
+    if (tech && ['workshop', 'hall', 'church'].includes(b.kind ?? ''))
+      for (const x of [4, w - 32]) {
+        rect(c, x, 41, 27, 25, color(culture.wallColor, -43));
+        rect(c, x + 2, 43, 23, 11, '#18343e');
+        rect(c, x + 4, 45, 19, 2, color(trim, 38));
+        for (let n = 0; n < 4; n++) rect(c, x + 5 + n * 4, 51, 2, 2, trim);
+        rect(c, x, 64, 27, 3, color(culture.wallColor, 13));
+      }
+    // Narrow wall shadows establish an enclosed room, never a second outdoor courtyard.
+    rect(c, 0, 0, w, 7, '#0c1b2860');
+    rect(c, 0, 0, 8, h, '#0c1b2848');
+    rect(c, w - 6, 0, 6, h, '#0c1b283d');
+    c.restore();
+  }
+
   private wall(
     x: number,
     foot: number,
@@ -1244,10 +1394,50 @@ export class StichosRenderer {
     height: number,
     seed: number,
     window: boolean,
+    culture?: ArchitecturalCulture,
   ) {
     const ctx = this.ctx,
       rng = random(seed),
       s = this.unit / 32;
+    if (culture) {
+      const wall = color(culture.wallColor, -24),
+        dark = color(culture.wallColor, -65),
+        tech = (culture.technology ?? 0) > 0.62;
+      rect(ctx, x, foot - height, width, height, dark);
+      for (let yy = foot - height + 4 * s; yy < foot; yy += 8 * s)
+        for (let xx = x; xx < x + width; xx += tech ? width : 12 * s) {
+          const tone = color(wall, rng() * 14 - 7);
+          rect(ctx, xx + s, yy, Math.min(width - s, tech ? width - 2 * s : 11 * s), 7 * s, tone);
+          rect(ctx, xx + 2 * s, yy, Math.min(width - 4 * s, 9 * s), s, color(tone, 12));
+        }
+      rect(
+        ctx,
+        x - 2 * s,
+        foot - height - 3 * s,
+        width + 4 * s,
+        7 * s,
+        color(culture.wallColor, 12),
+      );
+      rect(ctx, x - 2 * s, foot - height + 3 * s, width + 4 * s, 2 * s, dark);
+      rect(ctx, x, foot - 4 * s, width, 4 * s, dark);
+      if (window) {
+        const cx = x + width / 2,
+          yy = foot - height + 10 * s;
+        rect(ctx, cx - 8 * s, yy - 2 * s, 16 * s, 19 * s, dark);
+        rect(ctx, cx - 6 * s, yy, 12 * s, 15 * s, tech ? '#365b69' : '#786745');
+        rect(
+          ctx,
+          cx - 5 * s,
+          yy + s,
+          10 * s,
+          7 * s,
+          tech ? color(culture.accentColor, 43) : '#cfb679',
+        );
+        rect(ctx, cx - s, yy, 2 * s, 15 * s, dark);
+        rect(ctx, cx - 9 * s, yy + 17 * s, 18 * s, 3 * s, color(culture.wallColor, 24));
+      }
+      return;
+    }
     rect(ctx, x, foot - height, width, height, '#374a5b');
     for (let row = 0; row < Math.ceil(height / (6 * s)); row++)
       for (let col = -1; col < 4; col++) {

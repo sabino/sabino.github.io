@@ -1,3 +1,4 @@
+import { civilizationFor } from './civilization.ts';
 import { generateLifeCandidate, type LifeCustomization, type LifeCandidate } from './life-origin';
 import { drawPortrait } from './portrait';
 import { drawHumanoid } from './art';
@@ -30,7 +31,7 @@ export function mountCreation(
   function refresh(reset = false) {
     candidate = generate();
     get('v-life-facts').innerHTML =
-      `<canvas id="v-create-portrait" width="96" height="112"></canvas><h3>${esc(candidate.name)}</h3><p>${candidate.age} years · ${esc(candidate.profession)}</p><dl><div><dt>Home</dt><dd>${esc(candidate.home.name)}</dd></div><div><dt>When you arrive</dt><dd>${esc(candidate.activity.label)}</dd></div><div><dt>Vitality / pace</dt><dd>${candidate.stats.maxHp} / ${candidate.stats.speed.toFixed(1)}</dd></div><div><dt>Owned coin</dt><dd>${candidate.coins}</dd></div><div><dt>Tools</dt><dd>${candidate.tools.join(', ')}</dd></div></dl><p class="v-perk">${esc(candidate.perk)}</p>`;
+      `<canvas id="v-create-portrait" width="96" height="112"></canvas><h3>${esc(candidate.name)}</h3><p>${candidate.age} years · ${esc(generation >= 4 ? civilizationFor(seed).roleNames[candidate.profession] : candidate.profession)}</p><dl><div><dt>Home</dt><dd>${esc(candidate.home.name)}</dd></div><div><dt>When you arrive</dt><dd>${esc(candidate.activity.label)}</dd></div><div><dt>Vitality / pace</dt><dd>${candidate.stats.maxHp} / ${candidate.stats.speed.toFixed(1)}</dd></div><div><dt>Owned coin</dt><dd>${candidate.coins}</dd></div><div><dt>Tools</dt><dd>${candidate.tools.join(', ')}</dd></div></dl><p class="v-perk">${esc(candidate.perk)}</p>`;
     drawPortrait(
       get<HTMLCanvasElement>('v-create-portrait').getContext('2d')!,
       candidate.appearance,

@@ -1,3 +1,4 @@
+import { InfiniteWorld } from '../src/stichos/world.ts';
 /** Real-input universe QA in fresh contexts of a verified Agent Workspace browser.
  * node scripts/browser-universe.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
  * Only reads DOM/diagnostics; game and storage changes are driven by actual inputs.
@@ -15,7 +16,7 @@ if (
 )
   throw Error('Use the verified workspace endpoint and the local or published Verso frontend.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, '.dream-loop/civilization-qa');
+const out = path.join(root, '.dream-loop/woodland-round3');
 fs.mkdirSync(out, { recursive: true });
 const started = new Date(),
   results = [],
@@ -221,38 +222,59 @@ async function traveler(name, targetUrl = url, mobile = false) {
 }
 
 try {
-  const version = await (await fetch(`${endpoint}/json/version`)).json();
-  browser = await connect(version.webSocketDebuggerUrl);
-  for (const seed of (process.env.VERSO_QA_SEEDS || '1,2,8,71').split(',')) {
-    const c = await traveler('world-' + seed);
-    await c.fill('#s-seed-input', seed);
-    await c.click('#s-start button[type=submit]');
-    await c.wait("window.stichos.state.modal==='creation'", 'creator');
-    await c.shot(seed + '-creator');
-    await c.click('#v-accept-life');
-    await c.wait('window.stichos.state.transfer', 'arrival');
-    await c.click('#s-skip');
-    await c.wait("window.stichos.state.modal===''&&!window.stichos.state.transfer", 'world');
-    await delay(2500);
-    console.log('FPS ' + seed + ' ' + (await c.read('window.stichos.fps')));
-    await c.shot(seed + '-world');
-    fs.writeFileSync(
-      path.join(out, seed + '-state.json'),
-      JSON.stringify(await c.state(), null, 2),
-    );
-    console.log('CAPTURE ' + seed + ' target ' + c.targetId + ' context ' + c.browserContextId);
-    c.page.close();
-    await browser.send('Target.disposeBrowserContext', { browserContextId: c.browserContextId });
-    clients.splice(clients.indexOf(c), 1);
+  browser = await connect(
+    (await (await fetch(`${endpoint}/json/version`)).json()).webSocketDebuggerUrl,
+  );
+  const c = await traveler('woodland');
+  const w = new InfiniteWorld(11, 4);
+  const targets = new Map(
+    w
+      .settlementsAround(0, 0, 340)
+      .filter((t) => t.architecture?.style === 'timber')
+      .flatMap((t) => w.npcsAround(t.x, t.y, t.radius + 6))
+      .filter(
+        (n) => !n.hostile && w.tile(n.x, n.y).temperature > 10 && n.appearance.weapon !== 'none',
+      )
+      .map((n) => [n.name, n]),
+  );
+  console.log('Available warm woodland armed residents: ' + targets.size);
+  await c.fill('#s-seed-input', '11');
+  await c.click('#s-start button[type=submit]');
+  await c.wait("window.stichos.state.modal==='creation'", 'creator');
+  let found = false;
+  for (let n = 0; n < 200; n++) {
+    const name = await c.read("document.querySelector('#v-life-facts h3').textContent");
+    const person = targets.get(name);
+    if (person && (!process.env.VERSO_RESIDENT || person.id === process.env.VERSO_RESIDENT)) {
+      found = true;
+      console.log('Chosen ' + JSON.stringify(person));
+      break;
+    }
+    await c.click('#v-reroll');
   }
-  console.log('ERRORS ' + JSON.stringify(errors));
+  assert(found, 'Find a warm woodland resident through actual rerolls');
+  await c.shot('creator');
+  await c.click('#v-accept-life');
+  await c.wait('window.stichos.state.transfer', 'arrival');
+  await c.click('#s-skip');
+  await c.wait("window.stichos.state.modal===''&&!window.stichos.state.transfer", 'arrived');
+  await delay(7600);
+  await c.shot('world');
+  const fps = await c.read('window.stichos.fps');
+  console.log('FPS ' + fps);
+  await c.key('w', 'KeyW', 87, 450);
+  await c.shot('north');
+  fs.writeFileSync(
+    path.join(out, 'result.json'),
+    JSON.stringify({ state: await c.state(), fps, errors }, null, 2),
+  );
+  assert.equal(errors.length, 0);
+  console.log(
+    'PASS native woodland arrival, actual equipped blade, north-facing held-item layering capture.',
+  );
 } catch (e) {
   console.error(e);
   console.error(JSON.stringify(errors));
-  for (const c of clients) {
-    await c.shot(c.name + '-failure');
-    console.log(await c.read('document.body.innerText.slice(-2000)'));
-  }
   process.exitCode = 1;
 } finally {
   for (const c of clients) {

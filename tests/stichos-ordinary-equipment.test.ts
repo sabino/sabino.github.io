@@ -18,7 +18,7 @@ function merchant(g: Stichos) {
   Object.assign(g.player, { x: -3, y: 2, coins: 250 });
   g.update(0.02, idle);
   g.interact('origin:resident:3');
-  assert.equal(g.dialogue?.role, 'merchant');
+  assert.equal(g.dialogue?.role, g.world.civilization?.roleNames.merchant ?? 'merchant');
 }
 
 test('ordinary everyday items independently construct every blade, staff and bow form without crown templates', () => {

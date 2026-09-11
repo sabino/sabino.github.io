@@ -124,6 +124,7 @@ async function traveler(name, targetUrl = url, mobile = false, sharedContext) {
   };
   const focus = () => page.send('Page.bringToFront');
   const key = async (key, code, vk, hold = 0, modifiers = 0) => {
+    await focus();
     await page.send('Input.dispatchKeyEvent', {
       type: 'keyDown',
       key,
@@ -143,6 +144,7 @@ async function traveler(name, targetUrl = url, mobile = false, sharedContext) {
     await delay(80);
   };
   const point = async (x, y) => {
+    await focus();
     await page.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
       button: 'left',
@@ -266,15 +268,19 @@ try {
   const version = await (await fetch(`${endpoint}/json/version`)).json();
   browser = await connect(version.webSocketDebuggerUrl);
   c = await traveler('ContinuingLife');
-  await c.fill('#s-seed-input', '3886');
-  await c.click('#v-theo-story');
-  await c.wait('window.stichos.state.transfer', 'story arrival');
+  await c.fill('#s-seed-input', '8');
+  await c.click('#s-start button[type=submit]');
+  await c.wait("window.stichos.state.modal==='creation'", 'generated life chooser');
+  await c.click('#v-accept-life');
+  await c.wait('window.stichos.state.transfer', 'generated life arrival');
   await c.click('#s-skip');
   await c.wait(
     "window.stichos.state.modal===''&&!window.stichos.state.transfer",
     'inhabited world',
   );
   const initial = await c.state();
+  assert.equal(initial.worldGeneration, 4);
+  assert(initial.lifeOrigin, 'new generated life is accepted');
   await c.key('s', 'KeyS', 83, 1500);
   await pause(c);
   const saved = await c.state();

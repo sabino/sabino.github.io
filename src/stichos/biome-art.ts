@@ -76,6 +76,25 @@ export function regionalGroundColor(tile: Tile) {
   return blendColor(grass, '#8a9fa1', Math.max(0, Math.min(0.8, (4 - tile.temperature) / 30)));
 }
 
+// Low-frequency ground relief spans many tiles; the small grain sits inside these shared patches.
+function surfaceField(x: number, y: number, scale: number, salt: number) {
+  const ix = Math.floor(x / scale),
+    iy = Math.floor(y / scale);
+  const fx = x / scale - ix,
+    fy = y / scale - iy;
+  const sx = fx * fx * (3 - 2 * fx),
+    sy = fy * fy * (3 - 2 * fy);
+  const hash = (a: number, b: number) => {
+    let n = Math.imul(a, 374761393) ^ Math.imul(b, 668265263) ^ salt;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 0xffffffff;
+  };
+  return (
+    (hash(ix, iy) * (1 - sx) + hash(ix + 1, iy) * sx) * (1 - sy) +
+    (hash(ix, iy + 1) * (1 - sx) + hash(ix + 1, iy + 1) * sx) * sy
+  );
+}
+
 // A world-space cellular surface: fractures and stones continue across tile edges.
 function mineralSurface(c: Ctx, tile: Tile, base: string, basalt: boolean) {
   const sx = basalt ? 35 : 13,
@@ -115,7 +134,8 @@ function mineralSurface(c: Ctx, tile: Tile, base: string, basalt: boolean) {
       const gap = second - first,
         grain = hash(x + ox, y + oy),
         rim = basalt ? 0.026 : 0.046;
-      let light = (chosen.seed % 23) - 11 + (grain % 7) - 3;
+      let light = (chosen.seed % 23) - 11 + (grain % 5) - 2;
+      light += (surfaceField(x + ox, y + oy, 117, basalt ? 197 : 283) - 0.5) * 22;
       if (gap < rim) light = basalt ? -29 : -22;
       else if (gap < rim * 2.1) light += x + ox < chosen.x && y + oy < chosen.y ? 19 : -8;
       const hot =
@@ -132,6 +152,21 @@ export function makeRegionalGround(tile: Tile): Sprite {
     base = regionalGroundColor(tile);
   return sprite(32, 32, 16, 16, (c) => {
     rect(c, 0, 0, 32, 32, base);
+    if (['grass', 'sand', 'mud', 'snow'].includes(tile.terrain)) {
+      for (let y = 0; y < 32; y += 2)
+        for (let x = 0; x < 32; x += 2) {
+          const wx = tile.x * 32 + x,
+            wy = tile.y * 32 + y;
+          const broad = surfaceField(wx, wy, 126, 593);
+          const fold = surfaceField(wx, wy, 37, 229);
+          let tone = (broad - 0.5) * 36 + (fold - 0.5) * 11;
+          if (tile.terrain === 'sand') {
+            const wave = Math.sin(wx / 53 + wy / 24 + broad * 3.2);
+            tone += Math.max(0, wave) * 9 - Math.max(0, -wave) * 5;
+          }
+          rect(c, x, y, 2, 2, shade(base, tone));
+        }
+    }
     if (['road', 'floor', 'wall'].includes(tile.terrain)) {
       const wood = tile.architecture?.wallMaterial === 'timber' && !!tile.building;
       if (
@@ -163,11 +198,21 @@ export function makeRegionalGround(tile: Tile): Sprite {
           rect(c, xx + 2, y + 1, wood ? 30 : 8, 1, shade(tone, 11));
         }
     } else if (tile.terrain === 'sand') {
-      for (let i = 0; i < 5; i++) {
-        const yy = i * 8 + r() * 3;
-        for (let x = -3; x < 32; x += 2)
-          rect(c, x, yy + Math.sin(x / 8 + i) * 2, 3, 1, shade(base, i % 2 ? 8 : -9));
-      }
+      // Wind combs long shared dune contours, rather than restarting a stripe on each square.
+      for (let y = 0; y < 32; y++)
+        for (let x = 0; x < 32; x += 2) {
+          const wx = tile.x * 32 + x,
+            wy = tile.y * 32 + y;
+          const contour = wy + Math.sin(wx / 47) * 5 + Math.sin(wx / 101) * 9;
+          if (((contour % 19) + 19) % 19 < 0.85) rect(c, x, y, 2, 1, shade(base, 9));
+        }
+      if (r() > 0.75)
+        for (let n = 0; n < 5; n++) {
+          const x = 8 + r() * 15,
+            y = 10 + r() * 12;
+          rect(c, x, y, 2 + r() * 2, 1, shade(base, -15));
+          rect(c, x, y - 1, 2, 1, shade(base, 12));
+        }
     } else if (tile.terrain === 'basalt') {
       mineralSurface(c, tile, base, true);
     } else if (tile.terrain === 'water' || tile.terrain === 'ice') {
@@ -181,12 +226,12 @@ export function makeRegionalGround(tile: Tile): Sprite {
       }
       for (const x of [3, 27]) for (let y = 2; y < 32; y += 6) rect(c, x, y, 1, 1, '#38474a');
     } else {
-      for (let i = 0; i < 40; i++)
+      for (let i = 0; i < 18; i++)
         rect(c, r() * 32, r() * 32, 1 + r() * 3, 1, shade(base, r() * 24 - 12));
       if (tile.terrain === 'grass') {
         // Overlapping moss and low foliage clusters read as ground cover, with breathing space for paths.
         const cover = tile.ecology?.groundCover ?? 0.5;
-        for (let patch = 0; patch < 3 + cover * 6; patch++) {
+        for (let patch = 0; patch < 2 + cover * 4; patch++) {
           const px = r() * 32,
             py = r() * 32,
             span = 3 + r() * 6,
@@ -199,7 +244,7 @@ export function makeRegionalGround(tile: Tile): Sprite {
             if (r() > 0.6) rect(c, px + dx, py + dy - 1, 2, 1, shade(tone, 25));
           }
         }
-        for (let i = 0; i < 8 + cover * 13; i++) {
+        for (let i = 0; i < 5 + cover * 8; i++) {
           const x = r() * 32,
             y = r() * 32;
           line(c, x, y, x - 1, y - 2, shade(base, -14));

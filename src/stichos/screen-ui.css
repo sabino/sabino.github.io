@@ -1262,3 +1262,13 @@ button[aria-selected='true'] {
   font-size: 20px;
   color: #172b36;
 }
+
+/* No resident has been accepted at entry: show the landscape, not a legacy identity behind the chooser. */
+.s-shell:has(> .s-modal.is-title:not([hidden])) .s-sidebar,
+.s-shell:has(> .s-modal.is-title:not([hidden])) .s-hotbar,
+.s-shell:has(> .s-modal.is-title:not([hidden])) .s-weather,
+.s-shell:has(> .s-modal.is-title:not([hidden])) .s-world-caption,
+.s-shell:has(> .s-modal.is-title:not([hidden])) .s-place,
+.s-shell:has(> .s-modal.is-title:not([hidden])) .s-brand small {
+  visibility: hidden;
+}
