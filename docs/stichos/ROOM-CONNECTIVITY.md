@@ -50,3 +50,14 @@ Click walking uses bounded A\* with cached collision samples and one search for 
 `tests/fixtures/world-fingerprints.json` captures 64 complete chunks before these optimizations across four seeds and all four generations. Tests verify unchanged tile, building, resource and NPC/appearance bytes in reverse visitation order and after cache eviction. These samples support determinism of the changes; they are not an exhaustive proof of every possible seed or floating-point implementation.
 
 Same-machine browser contexts verify the real RTC protocol and invitation flow but cannot substitute for two physical computers on different networks. Internet TURN verification must use an actual relay and show `route: relay`; no relay success is claimed from a direct local connection.
+
+## Published verification — 2026-09-11
+
+Source `265e9cc` was published in `sabino/sabino.github.io` commit `3af659ae2662745cbb5bad9dfed2f3362660b1fc`; [Pages deployment 34639464044](https://github.com/sabino/sabino.github.io/actions/runs/34639464044) succeeded. Every one of 31 non-HTML deployed files matched the built SHA-256; HTML loaded the expected `app-Co4MB4l8.js` / `peer-transport-CXmaMgBs.js` bundle generation. Offline cache version: `9781ec6d2848affb1127`.
+
+- 401 unit/integration tests passed; production TypeScript build and formatting checks passed.
+- Native-input public-site QA created three separate browser identities, joined seed 8/generation 4 by invitation URL and complete mobile code, and displayed a real QR invitation. An additional browser with networking disabled selected that planet from its code without host discovery. After the host left, a fresh invited traveler saw a persistent host-offline error. No runtime or console errors were recorded.
+- The actual PeerJS fixture connected eight participants through public signalling, verified nonce/DTLS proofs, exchanged large combat frames and signed checkpoints, preserved 35-bit procedural weapon seeds, and recovered signalling without losing the established RTC channels.
+- Native WASD and click walking entered the real generated home through its door. Reload/Continue retained identity, location and belongings, including with page/worker networking disabled. The foreground woodland capture measured approximately 60 FPS on the test workspace.
+
+Evidence is retained locally under `.dream-loop/g4-native-coop-public/`, `.dream-loop/network-release-assets.json`, `.dream-loop/stichos-peer-transport-g4/`, `.dream-loop/network-walking-qa/` and `.dream-loop/life-offline/`. These browser tests used isolated Chromium contexts on one physical machine. No Internet TURN relay or cross-physical-device success is claimed; operator relay/world-node provisioning remains outstanding.
