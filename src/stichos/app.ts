@@ -239,8 +239,9 @@ function toast(message: string, duration = 4500) {
   el('s-toast').classList.add('visible');
   toastUntil = performance.now() + duration;
 }
+let ownsLifeTab = false;
 function save() {
-  if (!started) return false;
+  if (!started || !ownsLifeTab) return false;
   try {
     stored = JSON.stringify(game.save());
     localStorage.setItem(storageKey, stored);
@@ -265,6 +266,7 @@ function activate(next: Stichos) {
   el('v-chat-log').replaceChildren();
   setChatCollapsed(innerWidth < 900);
   game = next;
+  roomName = next.player.name;
   currentPlanet = planetAt(next.world.seed, next.world.generation);
   void import('./store')
     .then(({ restoreStoreEntitlements }) =>
@@ -467,6 +469,7 @@ async function joinInvitation(invite: RoomInvitation) {
           else throw error;
         }
     } else await multiplayer.connect(roomServer, roomIdentity(), invite.room);
+    if (source !== game) return;
     pendingInvitation = null;
     history.replaceState(null, '', roomLink(location.href, invite));
     toast(
@@ -1440,6 +1443,8 @@ function togetherMenu() {
     el<HTMLFormElement>('s-room-form').onsubmit = async (e) => {
       e.preventDefault();
       if (multiplayer.status === 'connecting') return;
+      const source = game,
+        revision = modalRevision;
       roomName = el<HTMLInputElement>('s-room-name').value.trim() || game.player.name;
       roomServer =
         el<HTMLSelectElement>('s-room-mode').value === 'peer'
@@ -1457,6 +1462,7 @@ function togetherMenu() {
         if (code) {
           const { discoverRoom } = await import('./multiplayer');
           const info = await discoverRoom(roomServer, code);
+          if (source !== game || revision !== modalRevision) return;
           if (info.seed !== game.world.seed || info.generation !== game.world.generation) {
             choosePlanet(info.seed, info.generation, {
               seed: info.seed,
@@ -1822,7 +1828,7 @@ function renderRoster() {
   const all = [
     {
       id: multiplayer.peerId || '$self',
-      name: game.player.name,
+      name: multiplayer.status === 'online' ? roomName : game.player.name,
       appearance: game.displayAppearance,
     },
     ...multiplayer.peers.map(({ id, name, appearance }) => ({ id, name, appearance })),
@@ -1930,6 +1936,7 @@ function sendCombatPose(
     active,
     game.sharedCombatProgression,
     game.bodyId,
+    roomName,
   );
 }
 multiplayer.onEmote = (id, gesture) => {
@@ -2781,7 +2788,8 @@ Object.defineProperty(window, 'stichos', {
 });
 updateUI();
 async function enterBrowserLife() {
-  if (await claimLifeTab()) {
+  ownsLifeTab = await claimLifeTab();
+  if (ownsLifeTab) {
     title();
     return;
   }
@@ -2794,6 +2802,7 @@ async function enterBrowserLife() {
 void enterBrowserLife();
 addEventListener('pagehide', () => {
   save();
+  ownsLifeTab = false;
   releaseLifeTab();
 });
 addEventListener('pageshow', (event) => {
