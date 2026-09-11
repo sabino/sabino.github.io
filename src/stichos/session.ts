@@ -42,6 +42,24 @@ import {
   type SharedCombatProgression,
 } from './shared-combat.ts';
 import { deriveSeed } from '../procedural/random.ts';
+import {
+  generateLifeCandidate,
+  normalizeLifeCustomization,
+  restoreLifeOrigin,
+  type LifeCandidate,
+  type LifeCustomization,
+  type LifeOriginRecord,
+} from './life-origin.ts';
+import {
+  createProduction,
+  restoreProduction,
+  productionSources,
+  PRODUCTION_KINDS,
+  PRODUCTION_RECIPES,
+  type ProductionKind,
+  type ProductionState,
+  type ProductionStructure,
+} from './production.ts';
 import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
 import { resolveForge, type ForgeRecipe, type ForgeResult } from './forge.ts';
@@ -323,6 +341,9 @@ export class Stichos {
   private occupiedBody: Npc | null = null;
   private bodyPossessions = new Map<string, BodyPossessions>();
   private notebook = true;
+  private originRecord: LifeOriginRecord | null = null;
+  private originCandidate: LifeCandidate | null = null;
+  private production = createProduction();
   private winterState = createCompact();
   private winterPlan: CompactPlan | null = null;
   private winterLaborBaseline = 0;
@@ -443,8 +464,547 @@ export class Stichos {
     return this.notebook;
   }
 
+  get lifeOrigin() {
+    return this.originCandidate ? clone(this.originCandidate) : null;
+  }
+  get identityName() {
+    return this.player.name;
+  }
+  get originName() {
+    return this.originCandidate?.settlement.name ?? ORIGIN_CITY_NAME;
+  }
+  lifeCandidate(index: number, customization: LifeCustomization = {}) {
+    const candidate = generateLifeCandidate(this.seed, index, customization, this.world.generation);
+    const known =
+      this.npcMemory.get(candidate.id) ??
+      (this.occupiedNpcId === candidate.id ? this.occupiedBody : null);
+    if (known) {
+      candidate.name = known.name;
+      candidate.appearance = clone(known.appearance);
+      candidate.stats.maxHp = known.maxHp;
+      candidate.start = { x: known.x, y: known.y };
+      const belongings =
+        known.id === this.bodyId
+          ? { inventory: this.inventory, coins: this.player.coins }
+          : (this.bodyPossessions.get(known.id) ?? this.initialPossessions(known));
+      candidate.inventory = clone(belongings.inventory);
+      candidate.coins = belongings.coins;
+    }
+    return candidate;
+  }
+  private lifeBody(candidate: LifeCandidate): Npc {
+    return {
+      id: candidate.id,
+      seed: candidate.seed,
+      name: candidate.name,
+      role: candidate.profession,
+      clan: candidate.clan,
+      appearance: clone(candidate.appearance),
+      x: candidate.start.x,
+      y: candidate.start.y,
+      home: { x: candidate.home.x, y: candidate.home.y + 1 },
+      hp: candidate.stats.maxHp,
+      maxHp: candidate.stats.maxHp,
+      speed: 0.75,
+      heading: Math.PI / 2,
+      phase: 0,
+      hostile: false,
+      cooldown: 0,
+    };
+  }
+  acceptLife(index: number, customization: LifeCustomization = {}) {
+    if (
+      this.originRecord ||
+      this.time !== 0 ||
+      this.distanceTraveled !== 0 ||
+      this.removed.size ||
+      this.opened.size ||
+      this.player.xp ||
+      this.player.coins !== THEO_ESTATE.coins ||
+      this.journal.length !== 1 ||
+      this.orders.length ||
+      this.artifactPacks.size ||
+      this.forgedWeapons.size ||
+      Object.values(this.progression.xp).some((n) => n > 0)
+    )
+      return {
+        ok: false,
+        message:
+          'Choose an origin before this life begins. Retire the current life to enter another resident.',
+      };
+    let candidate: LifeCandidate;
+    try {
+      candidate = this.lifeCandidate(index, customization);
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : 'Invalid life candidate.',
+      };
+    }
+    this.originRecord = {
+      version: 1,
+      index,
+      customization: normalizeLifeCustomization(customization),
+    };
+    this.originCandidate = candidate;
+    this.occupiedNpcId = candidate.id;
+    this.occupiedBody = this.lifeBody(candidate);
+    this.npcMemory.set(candidate.id, clone(this.occupiedBody));
+    Object.assign(this.player, {
+      ...candidate.start,
+      name: candidate.name,
+      bodyName: candidate.name,
+      clan: candidate.clan,
+      appearance: clone(candidate.appearance),
+      maxHp: candidate.stats.maxHp,
+      hp: candidate.stats.maxHp,
+      speed: candidate.stats.speed,
+      breath: candidate.stats.breath,
+      warmth: candidate.stats.warmth,
+      coins: candidate.coins,
+    });
+    this.inventory = clone(candidate.inventory);
+    this.notebook = false;
+    this.weapons.clear();
+    this.weapons.add('staff');
+    if (candidate.appearance.weapon !== 'none') this.weapons.add(candidate.appearance.weapon);
+    this.progression = createProgression(this.seed);
+    this.progression.xp = { ...candidate.professionXp };
+    this.progression.homes = [
+      { ...candidate.home, purchasedAt: 0, furniture: {}, plots: [null, null] },
+    ];
+    this.estateTrust = Object.fromEntries(THEO_ESTATE.staffIds.map((id) => [id, false]));
+    this.toolPacks.clear();
+    this.installLifeTools(candidate);
+    this.restAnchor = { ...candidate.start };
+    this.quests = [
+      {
+        id: 'life-first-work',
+        title: 'A life already in motion',
+        description: `${candidate.name}, ${candidate.age}, ${candidate.profession} in ${candidate.settlement.name}. ${candidate.activity.label}.`,
+        objective: 'Read a local notice, practice your trade, or investigate the old signal.',
+        stage: 0,
+        complete: false,
+        target: { x: candidate.settlement.x - 2, y: candidate.settlement.y + 1 },
+      },
+    ];
+    this.journal = [];
+    this.entry(
+      'A different morning',
+      `${candidate.name} was ${candidate.activity.label.toLowerCase()} when awareness settled into this body. ${candidate.perk} A real home waits in ${candidate.settlement.name}.`,
+    );
+    this.visited.clear();
+    this.fogChunks.clear();
+    this.legacyFogChunks.clear();
+    this.knownSites.clear();
+    this.knownSiteView = Object.freeze([]);
+    this.fogBounds = null;
+    this.knowledgeRevision = 0;
+    this.lastExplorationPoint = null;
+    this.effects = [];
+    this.refreshNpcs();
+    this.visit();
+    const e = this.effect('mind', this.player, '#c1d9ff', 2.4);
+    e.actorId = this.bodyId;
+    this.event('transfer', `Awareness enters ${candidate.name}.`);
+    return {
+      ok: true,
+      message: `${candidate.name}'s life begins in ${candidate.settlement.name}.`,
+    };
+  }
+  private installLifeTools(candidate: LifeCandidate) {
+    if (this.toolPacks.has(candidate.id)) return;
+    this.toolPacks.set(candidate.id, {
+      tools: candidate.tools.map((kind) => ({
+        kind,
+        seed: candidate.appearance.seed,
+        durability: seededTool(candidate.appearance.seed, kind).maxDurability,
+      })),
+      equipped: candidate.tools[0] ?? null,
+    });
+  }
+  retireLife(index: number, customization: LifeCustomization = {}) {
+    if (this.phase !== 'playing' || this.sharedWorld || this.nearbyThreat())
+      return { ok: false, message: 'Settle safely in solo play before retiring this life.' };
+    let candidate: LifeCandidate;
+    try {
+      candidate = this.lifeCandidate(index, customization);
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : 'Invalid life candidate.',
+      };
+    }
+    if (candidate.id === this.bodyId || this.removed.has(candidate.id))
+      return { ok: false, message: 'That body is already occupied or no longer available.' };
+    const existing = this.npcMemory.get(candidate.id),
+      target = existing ? clone(existing) : this.lifeBody(candidate);
+    if (target.hp <= 0 || target.hostile || !this.clear(target))
+      return { ok: false, message: 'That resident cannot receive this arrival.' };
+    if (!existing) {
+      this.npcMemory.set(target.id, clone(target));
+      this.bodyPossessions.set(target.id, {
+        npcId: target.id,
+        notebook: false,
+        inventory: clone(candidate.inventory),
+        coins: candidate.coins,
+        weapons:
+          candidate.appearance.weapon === 'staff'
+            ? ['staff']
+            : [
+                'staff',
+                candidate.appearance.weapon === 'none' ? 'staff' : candidate.appearance.weapon,
+              ],
+        equipped: candidate.appearance.weapon === 'none' ? 'staff' : candidate.appearance.weapon,
+      });
+      this.installLifeTools(candidate);
+    }
+    this.enterBody(target, false);
+    this.originRecord = {
+      version: 1,
+      index,
+      customization: normalizeLifeCustomization(customization),
+    };
+    this.originCandidate = candidate;
+    this.player.name = candidate.name;
+    this.player.speed = candidate.stats.speed;
+    for (const profession of ['botany', 'crafting', 'combat'] as const)
+      this.progression.xp[profession] = Math.max(
+        this.progression.xp[profession],
+        candidate.professionXp[profession],
+      );
+    this.restAnchor = { x: this.player.x, y: this.player.y };
+    if (
+      !this.progression.homes.some((home) => home.id === candidate.home.id) &&
+      this.progression.homes.length < 3
+    )
+      this.progression.homes.push({
+        ...candidate.home,
+        purchasedAt: this.time,
+        furniture: {},
+        plots: [null, null],
+      });
+    this.entry(
+      'A life left standing',
+      `Awareness now lives as ${candidate.name}. The previous body keeps its physical belongings; work sites and commitments remain on this planet.`,
+    );
+    return {
+      ok: true,
+      message: `Entered ${candidate.name}; the previous life and its belongings remain.`,
+    };
+  }
+
   get transferReady() {
     return this.storyStage >= 4;
+  }
+  get productionStructures() {
+    return this.production.structures.map((s) => {
+      const recipe = PRODUCTION_RECIPES.find((r) => r.id === s.job?.recipe);
+      return {
+        ...clone(s),
+        phase: s.job?.blocked
+          ? 'blocked'
+          : s.job?.awaitingClaim
+            ? 'awaiting-claim'
+            : s.job
+              ? 'working'
+              : Object.values(s.output).some((n) => n && n > 0)
+                ? 'ready'
+                : 'idle',
+        progress: s.job && recipe ? s.job.elapsed / recipe.seconds : 0,
+      };
+    });
+  }
+  get productionRecipes() {
+    return clone(PRODUCTION_RECIPES);
+  }
+  private productionSiteClear(point: Point, ignoreId?: string) {
+    if (this.production.structures.some((s) => s.id !== ignoreId && distance(s, point) < 3))
+      return false;
+    for (let y = -1; y <= 1; y++)
+      for (let x = -1; x <= 1; x++) {
+        const tile = this.world.tile(point.x + x, point.y + y);
+        if (
+          tile.building ||
+          tile.site ||
+          !['snow', 'grass'].includes(tile.terrain) ||
+          this.world.blocked(tile.x, tile.y, this.removed)
+        )
+          return false;
+      }
+    if (
+      this.world
+        .propsAround(point.x, point.y, 2.1)
+        .some((p) => !this.removed.has(p.id) && distance(p, point) < 2.1)
+    )
+      return false;
+    return !this.npcs.some((n) => n.hp > 0 && distance(n, point) < 2);
+  }
+  productionPreview(kind: ProductionKind, point: Point) {
+    const definition = PRODUCTION_KINDS.find((k) => k.id === kind),
+      valid =
+        point &&
+        finite(point.x) &&
+        finite(point.y) &&
+        Math.abs(point.x) <= 10000000 &&
+        Math.abs(point.y) <= 10000000;
+    const place = valid ? { x: Math.round(point.x), y: Math.round(point.y) } : { x: 0, y: 0 };
+    const fail = (message: string) => ({
+      ok: false,
+      message,
+      point: place,
+      definition: definition ?? null,
+    });
+    if (!definition || !valid) return fail('Choose a valid production structure and world tile.');
+    if (this.phase !== 'playing' || this.nearbyThreat()) return fail('Build while safe and awake.');
+    if (distance(this.player, place) > 2)
+      return fail('Stand within two paces of the marked work platform.');
+    if (this.production.structures.length >= 8 || this.production.serial >= 1000000)
+      return fail('This household already maintains eight production platforms.');
+    if (!this.productionSiteClear(place))
+      return fail(
+        'Choose a clear three-by-three patch of snow or grass away from roads, buildings, people and resources.',
+      );
+    if (kind !== 'garden' && professionProfile(this.progression, 'crafting').level < 2)
+      return fail('Crafting level two is needed to assemble powered production.');
+    if (this.player.coins < definition.coins || !this.has(definition.items))
+      return fail(
+        `Construction needs ${definition.coins} coins and ${this.costText(definition.items)}.`,
+      );
+    return {
+      ok: true,
+      message: `Build ${definition.name.toLowerCase()} here.`,
+      point: place,
+      definition,
+    };
+  }
+  buildProduction(kind: ProductionKind, point: Point) {
+    const preview = this.productionPreview(kind, point);
+    if (!preview.ok || !preview.definition) return preview;
+    this.player.coins -= preview.definition.coins;
+    this.spend(preview.definition.items);
+    const structure: ProductionStructure = {
+      id: `production:${++this.production.serial}`,
+      kind,
+      ...preview.point,
+      createdAt: this.time,
+      output: {},
+      job: null,
+    };
+    this.production.structures.push(structure);
+    grantPractice(this.progression, 'crafting', 12);
+    this.effect('harvest', structure, '#d5dca4', 1);
+    this.entry(
+      'A working place',
+      `${preview.definition.name} assembled at (${structure.x}, ${structure.y}). Each job must receive its physical inputs before work begins.`,
+    );
+    return {
+      ok: true,
+      message: `${preview.definition.name} is ready for inputs.`,
+      structure: clone(structure),
+    };
+  }
+  private productionReservations() {
+    return new Set([
+      ...this.production.structures.flatMap(
+        (s) => s.job?.sources.slice(s.job.completed).map((p) => p.id) ?? [],
+      ),
+      ...this.orders
+        .filter((o) => o.status === 'working')
+        .flatMap((o) => o.allocations.map((a) => a.propId)),
+    ]);
+  }
+  productionJobPreview(id: string, recipeId: string, batches = 1) {
+    const s = this.production.structures.find((s) => s.id === id),
+      recipe = PRODUCTION_RECIPES.find((r) => r.id === recipeId && r.kind === s?.kind),
+      fail = (message: string) => ({
+        ok: false,
+        message,
+        recipe: recipe ?? null,
+        sources: [] as ReturnType<typeof productionSources>,
+        inputs: {} as Partial<Record<ItemId, number>>,
+        batches,
+      });
+    if (!s || !recipe || !Number.isInteger(batches) || batches < 1 || batches > 5)
+      return fail('Choose one to five batches from this structure’s recipes.');
+    if (this.phase !== 'playing' || distance(this.player, s) > 3)
+      return fail('Load inputs beside the actual structure.');
+    if (s.job) return fail('Finish or cancel the current job first.');
+    if (this.production.jobSerial >= 1000000) return fail('The production ledger is full.');
+    const inputs = Object.fromEntries(
+      Object.entries(recipe.inputs).map(([item, n]) => [item, n! * batches]),
+    ) as Partial<Record<ItemId, number>>;
+    if (!this.has(inputs)) return fail(`The job needs ${this.costText(inputs)}.`);
+    const stored = Object.values(s.output).reduce((a, b) => a + (b ?? 0), 0),
+      yieldCount = Object.values(recipe.output).reduce((a, b) => a + (b ?? 0), 0) * batches;
+    if (stored + yieldCount > 60)
+      return fail('Retrieve the stored output before loading that many batches.');
+    const sources = recipe.source
+      ? productionSources(
+          this.world.propsAround(s.x, s.y, 16),
+          recipe.source,
+          s,
+          this.removed,
+          this.productionReservations(),
+          batches,
+        )
+      : [];
+    if (recipe.source && sources.length !== batches)
+      return fail(
+        `This job needs ${batches} unreserved ${recipe.source === 'pine' ? 'timber trees' : 'ore outcrops'} within sixteen paces.`,
+      );
+    return {
+      ok: true,
+      message: `Load ${batches} batch${batches === 1 ? '' : 'es'} of ${recipe.name.toLowerCase()}.`,
+      recipe,
+      sources,
+      inputs,
+      batches,
+    };
+  }
+  startProduction(id: string, recipeId: string, batches = 1) {
+    const preview = this.productionJobPreview(id, recipeId, batches);
+    if (!preview.ok) return preview;
+    this.spend(preview.inputs);
+    const s = this.production.structures.find((s) => s.id === id)!;
+    s.job = {
+      id: ++this.production.jobSerial,
+      recipe: recipeId,
+      batches,
+      completed: 0,
+      elapsed: 0,
+      sources: preview.sources,
+    };
+    return { ok: true, message: 'Inputs loaded. Production advances while this life is active.' };
+  }
+  private finishProductionBatch(s: ProductionStructure, sharedClaim = false) {
+    const job = s.job,
+      recipe = PRODUCTION_RECIPES.find((r) => r.id === job?.recipe);
+    if (!job || !recipe) return false;
+    const source = job.sources[job.completed];
+    if (source && !sharedClaim && this.removed.has(source.id)) {
+      job.blocked =
+        'The reserved resource was taken. Cancel this unfinished job to recover its unused inputs.';
+      return false;
+    }
+    if (source) this.removed.add(source.id);
+    for (const [id, n] of Object.entries(recipe.output))
+      s.output[id as ItemId] = (s.output[id as ItemId] ?? 0) + n!;
+    job.completed++;
+    job.elapsed = 0;
+    delete job.awaitingClaim;
+    delete job.blocked;
+    if (job.completed === job.batches) s.job = null;
+    if (distance(s, this.player) < 22) this.effect('harvest', s, '#b8d6a1', 0.8);
+    this.event('harvest', `${recipe.name}: one completed batch is stored at the platform.`);
+    return true;
+  }
+  private updateProduction(dt: number) {
+    for (const s of this.production.structures) {
+      const job = s.job;
+      if (!job || job.blocked || job.awaitingClaim) continue;
+      const recipe = PRODUCTION_RECIPES.find((r) => r.id === job.recipe)!;
+      job.elapsed = Math.min(recipe.seconds, job.elapsed + dt);
+      if (job.elapsed >= recipe.seconds) {
+        if (recipe.source && this.sharedWorld) job.awaitingClaim = true;
+        else this.finishProductionBatch(s);
+      }
+    }
+  }
+  get pendingProductionClaims() {
+    return this.production.structures.flatMap((s) => {
+      const job = s.job,
+        source = job?.sources[job.completed];
+      return job?.awaitingClaim && source
+        ? [
+            {
+              structureId: s.id,
+              jobId: job.id,
+              sourceId: source.id,
+              x: source.x,
+              y: source.y,
+              kind: source.kind,
+            },
+          ]
+        : [];
+    });
+  }
+  commitProductionClaim(id: string, jobId: number, sourceId: string) {
+    const s = this.production.structures.find((s) => s.id === id),
+      job = s?.job;
+    if (
+      !this.sharedWorld ||
+      !s ||
+      !job?.awaitingClaim ||
+      job.id !== jobId ||
+      job.sources[job.completed]?.id !== sourceId
+    )
+      return { ok: false, message: 'That production completion is no longer pending.' };
+    return {
+      ok: this.finishProductionBatch(s, true),
+      message: 'The room confirmed this finite production batch.',
+    };
+  }
+  rejectProductionClaim(
+    id: string,
+    jobId: number,
+    sourceId: string,
+    reason = 'The room could not confirm this reserved resource.',
+  ) {
+    const s = this.production.structures.find((s) => s.id === id),
+      job = s?.job;
+    if (!job?.awaitingClaim || job.id !== jobId || job.sources[job.completed]?.id !== sourceId)
+      return { ok: false, message: 'That production completion is no longer pending.' };
+    job.blocked = reason.slice(0, 180);
+    delete job.awaitingClaim;
+    return { ok: true, message: job.blocked };
+  }
+  retryProduction(id: string) {
+    const s = this.production.structures.find((s) => s.id === id),
+      job = s?.job;
+    if (!s || !job?.blocked || distance(s, this.player) > 3)
+      return { ok: false, message: 'Inspect the blocked production platform nearby.' };
+    if (job.sources[job.completed] && this.removed.has(job.sources[job.completed].id))
+      return { ok: false, message: 'The source is gone. Cancel and load a new resource.' };
+    delete job.blocked;
+    return { ok: true, message: 'Production will retry its reserved source.' };
+  }
+  cancelProduction(id: string) {
+    const s = this.production.structures.find((s) => s.id === id),
+      job = s?.job,
+      recipe = PRODUCTION_RECIPES.find((r) => r.id === job?.recipe);
+    if (
+      !s ||
+      !job ||
+      !recipe ||
+      this.phase !== 'playing' ||
+      distance(s, this.player) > 3 ||
+      (job.awaitingClaim && this.sharedWorld)
+    )
+      return {
+        ok: false,
+        message: 'Inspect the active platform nearby; a pending room claim must settle first.',
+      };
+    const refund = Object.fromEntries(
+      Object.entries(recipe.inputs).map(([item, n]) => [item, n! * (job.batches - job.completed)]),
+    ) as Partial<Record<ItemId, number>>;
+    if (!this.gain(refund))
+      return { ok: false, message: 'Make room for the unused physical inputs.' };
+    s.job = null;
+    return { ok: true, message: 'Unfinished inputs returned; completed batches remain stored.' };
+  }
+  collectProduction(id: string) {
+    const s = this.production.structures.find((s) => s.id === id);
+    if (!s || this.phase !== 'playing' || distance(s, this.player) > 3)
+      return { ok: false, message: 'Collect output beside the actual platform.' };
+    if (!Object.values(s.output).some((n) => n && n > 0))
+      return { ok: false, message: 'No completed output is waiting.' };
+    if (!this.gain(s.output))
+      return { ok: false, message: 'Make room for the complete stored output.' };
+    const output = clone(s.output);
+    s.output = {};
+    grantPractice(this.progression, 'crafting', 2);
+    return { ok: true, message: `Retrieved ${this.costText(output)}.`, output };
   }
   get explorationRevision() {
     return this.knowledgeRevision;
@@ -636,9 +1196,14 @@ export class Stichos {
   }
   get estate() {
     return {
-      residence: this.progression.homes.find((h) => h.id === THEO_ESTATE.residenceId) ?? null,
-      staffIds: [...THEO_ESTATE.staffIds],
-      description: THEO_ESTATE.description,
+      residence:
+        this.progression.homes.find(
+          (h) => h.id === (this.originCandidate?.home.id ?? THEO_ESTATE.residenceId),
+        ) ?? null,
+      staffIds: this.originCandidate ? [] : [...THEO_ESTATE.staffIds],
+      description: this.originCandidate
+        ? `${this.originCandidate.name}'s established home in ${this.originCandidate.settlement.name}. People may be hired through their own paid agreements.`
+        : THEO_ESTATE.description,
     };
   }
   get tools() {
@@ -2103,6 +2668,7 @@ export class Stichos {
     }
     this.updateNpcs(dt);
     this.updateLabor(dt);
+    this.updateProduction(dt);
     this.updateArrows(dt);
     this.updateSharedProjectiles(dt);
     for (const effect of this.effects) effect.age += dt;
@@ -4236,6 +4802,9 @@ export class Stichos {
       this.event('dialogue', 'No living human mind answers near this place of rest.');
       return;
     }
+    this.enterBody(target, lost);
+  }
+  private enterBody(target: Npc | undefined, lost: boolean) {
     const previousPosition = { x: this.player.x, y: this.player.y };
     if (target) {
       const previous: Npc = this.occupiedBody
@@ -4603,6 +5172,8 @@ export class Stichos {
       worldGeneration: this.world.generation,
       seed: this.seed,
       player: this.player,
+      lifeOrigin: this.originRecord ?? undefined,
+      production: this.production.structures.length ? this.production : undefined,
       notebook: this.notebook,
       campaign: this.campaignState,
       winterCompact:
@@ -4667,6 +5238,31 @@ export class Stichos {
   static restore(value: unknown): Stichos {
     const data = validateSave(value);
     const game = new Stichos(data.seed, data.worldGeneration ?? 1);
+    if (data.lifeOrigin) {
+      game.originRecord = restoreLifeOrigin(data.lifeOrigin);
+      game.originCandidate = generateLifeCandidate(
+        data.seed,
+        game.originRecord.index,
+        game.originRecord.customization,
+        data.worldGeneration ?? 1,
+      );
+    }
+    game.production = restoreProduction(data.production, data.time);
+    for (const structure of game.production.structures) {
+      for (let y = -1; y <= 1; y++)
+        for (let x = -1; x <= 1; x++) {
+          const tile = game.world.tile(structure.x + x, structure.y + y);
+          if (tile.building || tile.site || !['snow', 'grass'].includes(tile.terrain))
+            throw new Error('A production platform overlaps protected terrain.');
+        }
+      for (const source of structure.job?.sources ?? []) {
+        const actual = game.world
+          .propsAround(source.x, source.y, 0.1)
+          .find((p) => p.id === source.id);
+        if (!actual || actual.kind !== source.kind)
+          throw new Error('A production job names an absent resource.');
+      }
+    }
     game.player = clone(data.player);
     const priestBodyId = `body:theo-priest:${data.seed}`;
     game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
@@ -4817,6 +5413,16 @@ export class Stichos {
     game.lifeCount = data.lifeCount;
     game.occupiedNpcId = data.occupiedNpcId ?? null;
     game.occupiedBody = data.occupiedBody ? clone(data.occupiedBody) : null;
+    if (game.originCandidate) {
+      const known =
+        game.npcMemory.get(game.originCandidate.id) ??
+        (game.occupiedNpcId === game.originCandidate.id ? game.occupiedBody : null);
+      if (known) {
+        game.originCandidate.name = known.name;
+        game.originCandidate.appearance = clone(known.appearance);
+        game.originCandidate.start = { x: known.x, y: known.y };
+      }
+    }
     game.bodyPossessions = new Map(
       (data.bodyPossessions ?? []).map((body) => [
         body.npcId,
@@ -4965,6 +5571,20 @@ function validateSave(value: unknown): SaveData {
     ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
   if (!object(value) || value.version !== 1 || !number(value.seed, 0, 0xffffffff, true))
     return fail();
+  let generatedOriginId: string | null = null;
+  if (value.lifeOrigin !== undefined) {
+    try {
+      const origin = restoreLifeOrigin(value.lifeOrigin);
+      generatedOriginId = generateLifeCandidate(
+        value.seed as number,
+        origin.index,
+        origin.customization,
+        (value.worldGeneration ?? 1) as WorldGeneration,
+      ).id;
+    } catch {
+      return fail();
+    }
+  }
   if (value.doorRevision !== undefined && value.doorRevision !== 1) fail();
   if (value.terrainRevision !== undefined && ![1, 2, 3].includes(value.terrainRevision as number))
     return fail();
@@ -5101,10 +5721,11 @@ function validateSave(value: unknown): SaveData {
       !text(value.occupiedNpcId, 160) ||
       !npc(value.occupiedBody) ||
       (value.occupiedBody as Npc).id !== value.occupiedNpcId ||
-      (!(object(value.campaign) && value.campaign.step === CAMPAIGN_LENGTH) &&
+      (generatedOriginId !== value.occupiedNpcId &&
+        !(object(value.campaign) && value.campaign.step === CAMPAIGN_LENGTH) &&
         !['pilgrim', 'refugee', 'guard'].includes((value.occupiedBody as Npc).role)) ||
       (value.removed as string[]).includes(value.occupiedNpcId) ||
-      (value.storyStage as number) < 4
+      (generatedOriginId !== value.occupiedNpcId && (value.storyStage as number) < 4)
     )
       return fail();
   } else if (value.occupiedBody !== undefined && value.occupiedBody !== null) return fail();
