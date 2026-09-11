@@ -1,4 +1,10 @@
-import { InfiniteWorld, appearance, CHUNK_SIZE, type WorldGeneration } from './world.ts';
+import {
+  InfiniteWorld,
+  appearance,
+  CHUNK_SIZE,
+  ORIGIN_CITY_NAME,
+  type WorldGeneration,
+} from './world.ts';
 import { deriveSeed } from '../procedural/random.ts';
 import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
@@ -294,7 +300,7 @@ export class Stichos {
         id: 'first-breath',
         title: 'Twenty stíchoi later',
         description:
-          '3886. Ten Earth years have passed in the priest’s body. Begin with the people keeping this settlement alive.',
+          '3886. Ten Earth years have passed in the priest’s body. Begin with the people keeping Vespera alive.',
         stage: 0,
         complete: false,
         objective: 'Speak with the botanist near the plaza.',
@@ -303,7 +309,7 @@ export class Stichos {
     ];
     this.entry(
       'Theo Bishop · 3886',
-      'The failed transmission is a memory. Ten Earth years, twenty stíchoi, have passed in this priest’s body. Cequin sustains breath; the Sallas secret may yet explain the silence from home.',
+      'Theo comes from the future, with many missions across planets and eras behind him. Ten Earth years, twenty stíchoi, have passed in this priest’s body on the planet Stíchos. He does not know why the transmission failed or what the Sallas family conceals. In Vespera, cequin sustains breath while he looks for evidence.',
     );
     this.refreshNpcs();
     this.visit();
@@ -783,7 +789,7 @@ export class Stichos {
     }
     if (prop.kind === 'radio') {
       this.dialogue = {
-        speaker: 'Cathedral radio',
+        speaker: prop.id === 'origin-radio' ? 'Vespera cathedral radio' : 'Long-range radio',
         role: 'Signal apparatus',
         npcId: prop.id,
         text: this.transferReady
@@ -2249,6 +2255,7 @@ export class Stichos {
     game.fogBounds = null;
     game.lastExplorationPoint = null;
     const exploration = data.exploration;
+    let originLabelMigrated = false;
     // Old saves recorded entered chunks, not sight cells. Reconstruct only that approximate
     // old trail lazily; retain its ordered prefix rather than expanding 100k chunks into cells.
     const legacyCount = exploration?.legacyVisitedCount ?? data.visited.length;
@@ -2271,11 +2278,26 @@ export class Stichos {
               EXPLORATION_CELL_SIZE,
             );
       }
-      for (const site of exploration.sites)
-        game.knownSites.set(site.id, Object.freeze(clone(site)));
+      for (const site of exploration.sites) {
+        const restoredSite = clone(site);
+        // The old label used the planet's name for its starting city. Stable IDs,
+        // positions, fog and world generation still describe the same visited place.
+        if (
+          restoredSite.id === 'origin' &&
+          restoredSite.kind === 'settlement' &&
+          restoredSite.name !== ORIGIN_CITY_NAME
+        ) {
+          restoredSite.name = ORIGIN_CITY_NAME;
+          originLabelMigrated = true;
+        }
+        game.knownSites.set(site.id, Object.freeze(restoredSite));
+      }
       game.knownSiteView = Object.freeze([...game.knownSites.values()]);
     }
-    game.knowledgeRevision = exploration?.revision ?? 0;
+    game.knowledgeRevision = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      (exploration?.revision ?? 0) + Number(originLabelMigrated),
+    );
     game.reputation = [...data.reputation];
     game.storyStage = data.storyStage;
     game.phase = data.phase;
@@ -2290,6 +2312,28 @@ export class Stichos {
     game.correspondenceJobs = new Map(
       (data.correspondenceJobs ?? []).map((job) => [job.sourceId, clone(job)]),
     );
+    // A saved dispatch can point back to the origin. Update only its derived place
+    // label; the recipient, promises, reward and decision remain the same.
+    for (const job of game.correspondenceJobs.values()) {
+      if (job.settlementId !== 'origin' || job.settlementName === ORIGIN_CITY_NAME) continue;
+      const previousName = job.settlementName;
+      job.settlementName = ORIGIN_CITY_NAME;
+      const quest = game.quests.find((q) => q.id === game.dispatchQuestId(job));
+      if (quest) {
+        if (quest.title === `A dispatch for ${previousName}`)
+          quest.title = `A dispatch for ${ORIGIN_CITY_NAME}`;
+        quest.objective = quest.objective.replace(
+          ` in ${previousName}. Choose what to disclose.`,
+          ` in ${ORIGIN_CITY_NAME}. Choose what to disclose.`,
+        );
+      }
+      for (const entry of game.journal)
+        if (entry.title === 'Words for another settlement')
+          entry.text = entry.text.replace(
+            ` for ${job.recipientName} in ${previousName}.`,
+            ` for ${job.recipientName} in ${ORIGIN_CITY_NAME}.`,
+          );
+    }
     if ((data.terrainRevision ?? 1) < 3) {
       // Revisions 2 and 3 widen only the origin cathedral and move its houses.
       // Preserve exact positions everywhere else and every already-clear legacy position.

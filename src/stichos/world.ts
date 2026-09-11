@@ -15,6 +15,9 @@ import type {
   Tile,
 } from './types.ts';
 
+export const PLANET_NAME = 'Stíchos';
+export const ORIGIN_CITY_NAME = 'Vespera';
+export const ORIGIN_CATHEDRAL_NAME = 'Cathedral of Vespera';
 export const CHUNK_SIZE = 16;
 export type WorldGeneration = 1 | 2 | 3;
 export const CITY_SPACING = 640;
@@ -376,7 +379,7 @@ export class InfiniteWorld {
     const y = gy * TOWN_SPACING + (origin ? 0 : Math.floor(rng() * 13) - 6);
     const clan = origin ? 0 : Math.floor(rng() * CLANS.length);
     const name = origin
-      ? 'Stíchos Cathedral'
+      ? ORIGIN_CITY_NAME
       : `${pick(['Vey', 'Mor', 'El', 'Khar', 'Sael', 'Or', 'Cal', 'Thren'], rng)}${pick(['wick', 'mere', 'holt', 'grave', 'gard', 'watch', 'fell', 'haven'], rng)}`;
     const settlement: Settlement = {
       id: origin ? 'origin' : `town:${gx}:${gy}`,
@@ -395,7 +398,11 @@ export class InfiniteWorld {
         y: y - (origin ? 5 : 9),
         halfX: origin ? 11 : 3 + Math.floor(rng() * 2),
         halfY: origin ? 4 : 3,
-        name: settlement.kind === 'cathedral' ? 'Winter cathedral' : 'Assembly hall',
+        name: origin
+          ? ORIGIN_CATHEDRAL_NAME
+          : settlement.kind === 'cathedral'
+            ? 'Winter cathedral'
+            : 'Assembly hall',
       },
     ];
     for (const [side, row] of [
@@ -439,7 +446,7 @@ export class InfiniteWorld {
     // Retain the opening people's seeds and identities along with their exact anchors.
     const clan = origin ? 0 : Math.floor(rng() * CLANS.length);
     const name = origin
-      ? 'Stíchos'
+      ? ORIGIN_CITY_NAME
       : `${pick(['Vey', 'Mor', 'El', 'Khar', 'Sael', 'Or', 'Cal', 'Thren'], rng)}${pick(['wick', 'mere', 'holt', 'grave', 'gard', 'watch', 'fell', 'haven'], rng)}`;
     const mainKind: BuildingKind = city
       ? 'church'
@@ -478,7 +485,7 @@ export class InfiniteWorld {
             ? 3
             : 3 + Math.floor(rng() * 2),
       halfY: origin ? 4 : city ? 4 : rank === 'hamlet' ? 2 : 3,
-      name: names[mainKind],
+      name: origin ? ORIGIN_CATHEDRAL_NAME : names[mainKind],
       kind: mainKind,
     };
     const buildings = [main];

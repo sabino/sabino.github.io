@@ -387,12 +387,14 @@ test('humanoid appearance is deterministic, visibly varied, and respects role an
   assert.equal(appearance(3, 'botanist').weapon, 'staff');
 });
 
-test('generation two terrain, settlement anchors and vaults remain byte-identical after the wider world revision', () => {
+test('generation two terrain, settlement anchors and vaults retain reviewed snapshots after the wider world revision', () => {
+  // Origin display names were intentionally refreshed for the Vespera correction.
+  // The separate pre-rename geometry fixtures below prove those labels did not move the world.
   const fixtures = [
-    [0, 0, 0, '3e2931442c4cdb572e2a5b59f6b55239b40b10d259e24e217457c41981d692b9'],
+    [0, 0, 0, '1dbe670245876907947e46395dca5e9ba6838f34e023529467d23cbde83be9a7'],
     [0, 2, 2, 'bd2db888e3a1e5500b10cd604807627a9657f0854432564b7bbcd0742ab0ac94'],
     [0, -3, -3, '105c011cad1f032ebae2ee89e888ffd6850c6819f634759e5b53aa2f9759a0ae'],
-    [703, 0, 0, '8250d5996178fb67517aacc605739dffc1e48c12d7ccb86b06a16238124909d9'],
+    [703, 0, 0, '983ae4cd9f5c35cd490ce712d48bc9ce3d41d2b9303ac5da6c24e4ab4ec686c0'],
     [703, 2, 2, '2a6836907d520312bf8a6db4495563e34379d440f383a26487acd24dbfc1f24d'],
     [703, 5, 0, '32ca66c4bd89c0f622b5dba061560b661db11031058564542687f89224034635'],
     [1398032707, -3, -3, 'e5c1f7c89f1166517b13cdfe742514e16a2d512da103d9e3017e2adc120fcf62'],
@@ -577,5 +579,44 @@ test('generation three relocates vaults between wider settlements with an access
       .filter((n) => n.id.startsWith(site.id + ':guard:')))
       assert.ok(seen.has(`${npc.x},${npc.y}`));
     assert.ok(world.propsAround(site.entrance.x, 212, 3).some((p) => p.id === site.id + ':notice'));
+  }
+});
+
+test('Vespera labels the city and cathedral while all three generations retain their exact origin geometry', () => {
+  // These pre-rename fixtures omit only prop/settlement display names. NPC names,
+  // seeds, positions, doors, terrain, resources and every other property remain hashed.
+  const fixtures = [
+    [1, 0, 0, '3ab5acf653123c5f9168dc5a2506c38e1d0326cd4dc870b8c6134100ee9026c9'],
+    [1, 0, -1, 'c19d63ddc1a4df468b4ab7ad81bc601f5a3d86e3194d99eae5094a9d8a24b5f8'],
+    [1, -1, -1, '60cd744c9341ce6c1ddbd61078f30e0275637ce23e2b694744c2cd921d38d393'],
+    [1, -1, 0, 'dba16d8f12dc8d6780075f3d9487c8c32ab073f41555090c06c7bf0b9b38f010'],
+    [2, 0, 0, 'fd2487cd9a77e7b8f2ef61e7edcf333646f0bd02e6ed3fe0b7d55574c86da53d'],
+    [2, 0, -1, 'd375b2c56f35b2a283305b3c834a5f0e6b53fa77628ec868786134b90e1e1c92'],
+    [2, -1, -1, '28aaf60351e245a357c590708429991b2fcac28dd3d1280c27ab0773d222eaca'],
+    [2, -1, 0, '52235fa694484d0b60fcd12ba417a9c4a5a2a5f708ccc93567a9029cf515b011'],
+    [3, 0, 0, '86eff48e98f5253d9e8ac6aa86a3c137ed6fac8278552fcf83b0e52c9ada325c'],
+    [3, 0, -1, '928e6bc85a6030f7dddf6d170a2eb2560a8bc65b2d3b5e4799524d85d66dd2d3'],
+    [3, -1, -1, '3cec5188af94fd5082e8d8588729edef545c206ce7bcbb238a30b2b138ded767'],
+    [3, -1, 0, '6911631a51be98c97b5b076ea78ab5845bbe61df51e82bf0cd01aeb4ae531393'],
+  ] as const;
+  for (const [generation, cx, cy, expected] of fixtures) {
+    const chunk = new InfiniteWorld(703, generation).chunk(cx, cy);
+    const geometry = {
+      ...chunk,
+      props: chunk.props.map(({ name: _name, ...p }) => p),
+      settlements: chunk.settlements.map(({ name: _name, ...s }) => s),
+    };
+    assert.equal(createHash('sha256').update(JSON.stringify(geometry)).digest('hex'), expected);
+  }
+  for (const generation of [1, 2, 3] as const) {
+    const world = new InfiniteWorld(703, generation);
+    assert.equal(world.settlementsAround(0, 0, 1)[0].name, 'Vespera');
+    const cathedral = world.propsAround(0, -5, 16).filter((p) => p.id.startsWith('origin:hall:'));
+    assert.ok(cathedral.length >= 3);
+    assert.ok(cathedral.every((p) => p.name === 'Cathedral of Vespera'));
+    assert.equal(
+      world.propsAround(0, 0, 4).find((p) => p.id === 'origin:notice')?.name,
+      'Vespera noticeboard',
+    );
   }
 });

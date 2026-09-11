@@ -1520,3 +1520,100 @@ test('bounded atlas queries match full known-cell filtering across negative seam
     'zoomed-out unbounded traversal still includes the whole known trail',
   );
 });
+
+test('old discovered origin labels migrate to Vespera in every world generation without changing the saved life or fog', () => {
+  for (const generation of [1, 2, 3] as const) {
+    const game = new Stichos(703, generation);
+    walkTo(game, { x: 0, y: 35 });
+    walkTo(game, { x: 0, y: 48 });
+    const current = game.save();
+    assert.ok(
+      game.player.y > 40,
+      'exercise a remembered origin while the body is away from the city',
+    );
+    for (const oldName of ['Stíchos Cathedral', 'Stíchos', 'Stitchos']) {
+      const legacy = JSON.parse(JSON.stringify(current)) as typeof current;
+      const oldOrigin = legacy.exploration.sites.find((s) => s.id === 'origin')!;
+      oldOrigin.name = oldName;
+      const restored = Stichos.restore(legacy),
+        saved = restored.save();
+      assert.equal(restored.world.generation, generation);
+      assert.equal(restored.discoveredSites.find((s) => s.id === 'origin')?.name, 'Vespera');
+      assert.equal(oldOrigin.name, oldName, 'migration does not mutate the caller-owned save');
+      for (const field of [
+        'player',
+        'inventory',
+        'removed',
+        'opened',
+        'quests',
+        'journal',
+        'time',
+        'distanceTraveled',
+        'visited',
+        'reputation',
+        'worldGeneration',
+        'terrainRevision',
+      ] as const)
+        assert.deepEqual(saved[field], legacy[field], `${generation}/${oldName}: ${field}`);
+      assert.deepEqual(saved.exploration.chunks, legacy.exploration.chunks);
+      assert.equal(saved.exploration.legacyVisitedCount, legacy.exploration.legacyVisitedCount);
+      assert.equal(saved.exploration.revision, legacy.exploration.revision + 1);
+      assert.deepEqual(
+        saved.exploration.sites,
+        legacy.exploration.sites.map((s) => (s.id === 'origin' ? { ...s, name: 'Vespera' } : s)),
+      );
+      assert.deepEqual(
+        Stichos.restore(saved).save().exploration,
+        saved.exploration,
+        'normalization is idempotent',
+      );
+    }
+  }
+  const old = new Stichos(703, 1).save();
+  old.exploration.sites.find((s) => s.id === 'origin')!.name = 'Stíchos Cathedral';
+  const { worldGeneration: _generation, ...unversioned } = old;
+  assert.equal(Stichos.restore(unversioned).world.generation, 1);
+  assert.equal(
+    Stichos.restore(unversioned).discoveredSites.find((s) => s.id === 'origin')?.name,
+    'Vespera',
+  );
+  old.exploration.revision = Number.MAX_SAFE_INTEGER;
+  const saturated = Stichos.restore(old).save();
+  assert.equal(saturated.exploration.revision, Number.MAX_SAFE_INTEGER);
+  assert.doesNotThrow(() => Stichos.restore(saturated));
+});
+
+test('an origin-bound saved dispatch renames only derived city labels and preserves the promise', () => {
+  const game = new Stichos(2, 2);
+  const source = game.world.npcsAround(84, 1, 18).find((n) => n.id === 'town:1:0:resident:2')!;
+  assert.ok(source);
+  travelRoads(game, source);
+  game.interact(source.id);
+  game.choose('dispatch:request');
+  const legacy = game.save(),
+    job = legacy.correspondenceJobs[0];
+  assert.equal(job.settlementId, 'origin', 'fixture must be a real generated return dispatch');
+  job.settlementName = 'Stíchos Cathedral';
+  const quest = legacy.quests.find((q) => q.id === `correspondence:${job.sourceId}:${job.number}`)!;
+  quest.title = 'A dispatch for Stíchos Cathedral';
+  quest.objective = quest.objective.replace(' in Vespera.', ' in Stíchos Cathedral.');
+  for (const entry of legacy.journal)
+    if (entry.title === 'Words for another settlement')
+      entry.text = entry.text.replace(' in Vespera.', ' in Stíchos Cathedral.');
+  const restored = Stichos.restore(legacy),
+    result = restored.save();
+  assert.deepEqual(result.correspondenceJobs, [{ ...job, settlementName: 'Vespera' }]);
+  assert.equal(result.quests.find((q) => q.id === quest.id)?.title, 'A dispatch for Vespera');
+  assert.ok(result.quests.find((q) => q.id === quest.id)?.objective.includes(' in Vespera.'));
+  assert.ok(
+    result.journal
+      .find((e) => e.title === 'Words for another settlement')
+      ?.text.includes(' in Vespera.'),
+  );
+  assert.deepEqual(result.player, legacy.player);
+  assert.deepEqual(result.inventory, legacy.inventory);
+  assert.deepEqual(result.reputation, legacy.reputation);
+  assert.equal(result.storyStage, legacy.storyStage);
+  assert.equal(result.correspondenceJobs[0].status, 'active');
+  assert.deepEqual(Stichos.restore(result).save().correspondenceJobs, result.correspondenceJobs);
+});
