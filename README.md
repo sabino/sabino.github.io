@@ -162,6 +162,8 @@ node scripts/browser-production.mjs http://127.0.0.1:CDP_PORT http://localhost:4
 node scripts/browser-peer-rooms.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
 ```
 
+**The published build passed native three-player URL/code joining and all four generated-life offline/continuation checks.** Its full source suite passed 384 tests, followed by 24 focused checks for the final residential-housing correction.
+
 The current generation-four evidence includes **43 automated network tests**, **seven checks with eight actual PeerJS/WebRTC clients**, and **five native Pear integration tests**. They verify exact equipment addresses, shared combat, signed checkpoint persistence, authenticated continuity and actual local-DHT replication. A separate three-browser native-input run created distinct lives and joined the same generation-four world using invitations. [Generation-four transport proof](docs/stichos/GENERATION4-NETWORK-QA.md).
 
 The repaired interface has **207 normal-flow captures**, **126 explicitly staged presentation captures**, **72 generated-life captures** and **five final geometry checks**, with no browser errors in the completed runs. The generated-life route uses ordinary UI creation and checks the resident’s own notebook and HUD. A warm-world native arrival also verified a carried blade while facing north at approximately 60 FPS. [Screen repairs and evidence](docs/stichos/SCREEN-DESIGN-FIXES.md).

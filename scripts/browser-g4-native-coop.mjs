@@ -15,7 +15,10 @@ if (
 )
   throw Error('Use the verified workspace endpoint and the local or published Verso frontend.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, '.dream-loop/g4-native-coop');
+const out = path.join(
+  root,
+  '.dream-loop/g4-native-coop' + (new URL(url).hostname === 'sabino.pro' ? '-public' : ''),
+);
 fs.mkdirSync(out, { recursive: true });
 const started = new Date(),
   results = [],
@@ -222,6 +225,7 @@ async function traveler(name, targetUrl = url, mobile = false) {
 
 async function accept(c, name) {
   await c.wait("window.stichos.state.modal==='creation'", 'creation', 40000);
+  if (c.mobile) await c.click('[data-creation-page=look]');
   await c.fill('#v-create-name', name);
   await c.key('Tab', 'Tab', 9);
   await c.click('#v-accept-life');

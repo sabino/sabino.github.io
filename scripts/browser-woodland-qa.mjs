@@ -106,7 +106,13 @@ async function traveler(name, targetUrl = url, mobile = false) {
   const wait = async (expression, label, timeout = 15000) => {
     const until = Date.now() + timeout;
     while (Date.now() < until) {
-      if (await read(expression).catch(() => false)) return;
+      if (
+        await read(expression).catch((error) => {
+          if (String(error).includes('SyntaxError')) throw error;
+          return false;
+        })
+      )
+        return;
       await delay(70);
     }
     throw Error(`${name}: ${label}`);
@@ -261,8 +267,8 @@ try {
   if (process.env.VERSO_WALK_SOUTH_MS)
     await c.key('s', 'KeyS', 83, Math.min(4000, Number(process.env.VERSO_WALK_SOUTH_MS)));
   await delay(7600);
-  await c.shot('world');
   const fps = await c.read('window.stichos.fps');
+  await c.shot('world');
   console.log('FPS ' + fps);
   await c.key('w', 'KeyW', 87, 450);
   await c.shot('north');
@@ -285,13 +291,14 @@ try {
       y: body.y + ((home.y + 1 - body.y) * 7) / distance,
     };
     const waypoint = await c.read(
-      `(()=>{const desired=${JSON.stringify(desired)}, points=[];for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const x=Math.round(desired.x)+dx,y=Math.round(desired.y)+dy;if(!window.stichos.blocked(x,y))points.push({x,y,d:Math.hypot(x-desired.x,y-desired.y)});}return points.sort((a,b)=>a.d-b.d)[0]})()`,
+      `(()=>{const desired=${JSON.stringify(desired)}, points=[];for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const x=Math.round(desired.x)+dx,y=Math.round(desired.y)+dy;if(!window.stichos.blocked(x,y)&&!window.stichos.props(x,y,2).some(p=>Math.hypot(p.x-x,p.y-0.25-y)<1.1)&&!window.stichos.state.npcs.some(n=>Math.hypot(n.x-x,n.y-0.8-y)<1.4))points.push({x,y,d:Math.hypot(x-desired.x,y-desired.y)});}return points.sort((a,b)=>a.d-b.d)[0]})()`,
     );
     assert(waypoint, 'Visible walking waypoint exists');
+    console.log('Walking via clear ground ' + JSON.stringify(waypoint));
     const p = await screenPoint(waypoint);
     await c.point(p.x, p.y);
     await c.wait(
-      `Math.hypot(window.stichos.state.player.x-${waypoint.x},window.stichos.state.player.y-${waypoint.y})<0.65`,
+      `Math.hypot(window.stichos.state.player.x-(${waypoint.x}),window.stichos.state.player.y-(${waypoint.y}))<0.65`,
       'Actual walk toward the home',
       14000,
     );

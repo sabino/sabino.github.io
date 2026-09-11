@@ -6,6 +6,10 @@ Verso’s primary start is a generated resident in a generated civilization. Geo
 
 The full suite passed **384/384 tests in 79.92 seconds**, with no failures, skips or cancellations, at source `2a083ee`. Formatting and production build passed. The final housing correction at `fcb0c64` then passed **24 focused tests**, covering actual local residential homes, personal story completion/reload, paid worker jobs, ecology, planned parcels and legacy compatibility; TypeScript and formatting passed again. Evidence: `.dream-loop/generation4-release-tests.log`. Public asset identity and final browser verification are recorded in [PAGES.md](PAGES.md).
 
+### Current public deployment
+
+Pages commit `404b771` and successful run `34633591760` serve `app-C_d-KSbm.js` / `app-Cees6plc.css`, service worker `0c5a8a2e0e01ac7429f2`. All 31 non-HTML assets match local SHA-256. The actual public three-browser route passed with three distinct generation-four lives, URL joining, QR display, mobile code-only joining and correct electronic avatar context, with no runtime exceptions or error logs. These are three browser contexts on one machine, not three separately operated Internet connections. The public path also passed all four generated-life persistence/offline checks, including exact saved identity, location, appearance and inventory, correct nested PWA scope, decoded install icons and actual walking with page and service-worker networking disabled. No browser errors occurred. [Deployment details](PAGES.md).
+
 ### Generated lives and equipment through ordinary UI
 
 A three-browser local run created **three distinct generation-four lives** and joined the same electronic world through native room/invitation controls. The host, URL visitor and code visitor each retained their chosen body and saw the other two residents, including their actual clothing tier and carried equipment. The room exposed a share URL and QR. The completed checkpoint at **17:33:48 UTC** had **zero browser errors**. Evidence: [native cooperative lives](../../.dream-loop/g4-native-coop/results.json). It proves that bounded local-browser flow; it is not a replay of every later UI change or a test of three separate Internet connections.
@@ -32,6 +36,10 @@ All four completed repair runs reported **zero browser errors**. An initial sour
 **Eight actual PeerJS/WebRTC clients passed seven generation-four browser checks** in 7.55 seconds. They retained exact equipment/clothing context, reassembled matching 22,030-byte combat frames and verified 21,853-byte signed public checkpoints. Fresh nonce proofs were bound to the actual host DTLS fingerprints; signaling interruption recovered without replacing live sessions or issuing duplicate welcomes. The established generation-three eight-client fixture separately passed six checks. All fixture transports and temporary contexts were closed afterward.
 
 **Five native Pear integration tests passed.** Two actual Corestore/Hypercore and Hyperswarm nodes replicated a wounded electronic hostile’s equipment and clothing over a local test DHT, restarted from disk and continued the original signed feed. Signature, authorization, public-schema, rollback and capacity checks also passed. These are local-DHT interoperability and persistence results; they do not establish Internet NAT reachability, permanent public hosting or automatic host migration. [GENERATION4-NETWORK-QA.md](GENERATION4-NETWORK-QA.md) contains detailed results and reproduction commands.
+
+### Universe art review
+
+Fresh independent reviews of the generated-world art improved from 4.4 to 5.3, 5.6, 6.1 and **6.5/10** for the woodland sample (6.4 for the dry settlement). The **8/10 visual target is not reached**. Structural roof faces, full cross gables, planted compounds and actual orchard trees improved the scenes; repeated undergrowth, rigid town layout and spatial lighting remain the main visual gaps. The latest graded town captures measured approximately **53–54 foreground FPS**, compared with approximately 60 before the additional planting and grade. These are bounded samples in the workspace browser, not a hardware benchmark. Evidence: `.dream-loop/woodland-village/world.png`, `.dream-loop/woodland-round3/world.png`, and the preserved prior captures in `.dream-loop/woodland-before-courtyards/`.
 
 ### Current boundaries
 
