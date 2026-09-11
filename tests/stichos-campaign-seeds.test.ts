@@ -1,3 +1,4 @@
+import { requiredToolFor } from '../src/stichos/labor.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildCampaign, createCampaignState, type CampaignStep } from '../src/stichos/campaign.ts';
@@ -10,6 +11,19 @@ const SEEDS = [0, 1, 703, 0xffffffff];
 const GENERATIONS = [1, 2, 3] as const;
 const key = (p: Point) => `${p.x},${p.y}`;
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/** Finish a real finite work sequence with the appropriate carried tool. */
+function workResource(game: Stichos, prop: Prop) {
+  const kind = requiredToolFor(prop.kind);
+  assert.ok(kind);
+  assert.ok(game.equipTool(kind).ok);
+  for (let stroke = 0; stroke < 12 && !game.removed.has(prop.id); stroke++) {
+    game.interact(prop.id);
+    if (game.removed.has(prop.id)) break;
+    for (let tick = 0; tick < 6; tick++) game.update(0.25, { x: 0, y: 0, run: false });
+  }
+  assert.ok(game.removed.has(prop.id), `Completed timed work at ${prop.id}`);
+}
 const still = { x: 0, y: 0, run: false };
 const axis = (world: InfiniteWorld, value: number) => {
   const spacing = world.generation === 3 ? STOP_SPACING : 80;
@@ -468,7 +482,7 @@ test('generation-one convoy leads consume real local preparations and then expos
           .find((p) => p.id === id)!;
         assert.ok(plant);
         standNear(game, plant, seen);
-        game.interact(plant.id);
+        workResource(game, plant);
         assert.ok(game.removed.has(plant.id), `${seed}: finite local ingredient harvested`);
       }
       game.craft('salve');
@@ -532,7 +546,7 @@ test('new local orders fit finite botanical yields while a larger legacy order f
   for (const id of [`${town.id}:heartleaf`, `${town.id}:heartleaf:2`]) {
     const plant = game.world.propsAround(town.x, town.y, 12).find((p) => p.id === id)!;
     standNear(game, plant, seen);
-    game.interact(plant.id);
+    workResource(game, plant);
     assert.ok(game.removed.has(id));
   }
   const continued = game.freeLife.contract!;

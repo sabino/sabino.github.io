@@ -1,3 +1,4 @@
+import { requiredToolFor } from '../src/stichos/labor.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Stichos, ITEMS, EXPLORATION_CELL_SIZE } from '../src/stichos/session.ts';
@@ -6,6 +7,19 @@ import type { ItemId, Npc, Point, Prop } from '../src/stichos/types.ts';
 
 const still = { x: 0, y: 0, run: false };
 const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/** Finish a real finite work sequence with the appropriate carried tool. */
+function workResource(game: Stichos, prop: Prop) {
+  const kind = requiredToolFor(prop.kind);
+  assert.ok(kind);
+  assert.ok(game.equipTool(kind).ok);
+  for (let stroke = 0; stroke < 12 && !game.removed.has(prop.id); stroke++) {
+    game.interact(prop.id);
+    if (game.removed.has(prop.id)) break;
+    for (let tick = 0; tick < 6; tick++) game.update(0.25, { x: 0, y: 0, run: false });
+  }
+  assert.ok(game.removed.has(prop.id), `Completed timed work at ${prop.id}`);
+}
 
 /** Walk actual session inputs along public terrain, without moving the player by assignment. */
 function walkTo(game: Stichos, target: Point) {
@@ -86,7 +100,7 @@ function prop(game: Stichos, find: (p: Prop) => boolean) {
 
 function gather(game: Stichos, p: Prop) {
   walkTo(game, p);
-  game.interact(p.id);
+  workResource(game, p);
   assert.ok(game.removed.has(p.id), p.id);
 }
 
@@ -292,7 +306,7 @@ test('wild generation-two plants yield exactly their displayed botanical profile
     const item: ItemId = kind === 'mushroom' ? 'rations' : kind;
     const before = game.inventory[item] ?? 0;
     game.drainEvents();
-    game.interact(plant.id);
+    workResource(game, plant);
     assert.equal(game.inventory[item], before + displayed.yield);
     assert.ok(game.removed.has(plant.id));
     assert.ok(
@@ -346,7 +360,7 @@ test('a wild harvest that does not fit leaves the whole plant intact until a con
   assert.equal(restored.capacity - restored.carried, displayed.yield);
   const item = (plant.kind === 'mushroom' ? 'rations' : plant.kind) as ItemId;
   const amount = restored.inventory[item] ?? 0;
-  restored.interact(plant.id);
+  workResource(restored, plant);
   assert.equal(restored.inventory[item], amount + displayed.yield);
   assert.equal(restored.carried, restored.capacity);
   assert.ok(restored.removed.has(plant.id));
@@ -369,7 +383,7 @@ test('legacy wilderness and the origin teaching garden keep their established ce
       const item: ItemId = kind === 'mushroom' ? 'rations' : kind;
       const before = game.inventory[item] ?? 0;
       Object.assign(game.player, { x: plant.x, y: plant.y });
-      game.interact(plant.id);
+      workResource(game, plant);
       assert.equal(game.inventory[item], before + expected);
       assert.ok(game.removed.has(plant.id));
     }

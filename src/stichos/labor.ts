@@ -70,7 +70,7 @@ export const THEO_ESTATE = Object.freeze({
   toolKinds: ['axe', 'pickaxe', 'sickle'] as readonly ToolKind[],
   staffIds: ['origin-botanist', 'origin-engineer', 'origin:resident:5'] as readonly string[],
   description:
-    'Twenty local years have left Theo a residence, working tools, savings and paid ties to the clinic, workshop and household. These people keep their own loyalties.',
+    'Twenty stíchoi have left Theo a residence, working tools, savings and paid ties to the clinic, workshop and household. These people keep their own loyalties.',
 });
 const clamp = (n: number, low: number, high: number) => Math.max(low, Math.min(high, n));
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);

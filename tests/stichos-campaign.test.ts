@@ -1,3 +1,4 @@
+import { requiredToolFor } from '../src/stichos/labor.ts';
 import test from 'node:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,19 @@ import {
 import type { Point, ItemId, Prop } from '../src/stichos/types.ts';
 
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/** Finish a real finite work sequence with the appropriate carried tool. */
+function workResource(game: Stichos, prop: Prop) {
+  const kind = requiredToolFor(prop.kind);
+  assert.ok(kind);
+  assert.ok(game.equipTool(kind).ok);
+  for (let stroke = 0; stroke < 12 && !game.removed.has(prop.id); stroke++) {
+    game.interact(prop.id);
+    if (game.removed.has(prop.id)) break;
+    for (let tick = 0; tick < 6; tick++) game.update(0.25, { x: 0, y: 0, run: false });
+  }
+  assert.ok(game.removed.has(prop.id), `Completed timed work at ${prop.id}`);
+}
 function fixture(name: string, game: Stichos) {
   if (!process.env.VERSO_QA_FIXTURES) return;
   const dir = fileURLToPath(new URL('../.dream-loop/campaign-fixtures/', import.meta.url));
@@ -154,20 +168,52 @@ function click(game: Stichos, target: Point & { id: string }) {
   game.interact(target.id);
   assert.equal(game.dialogue?.npcId, target.id);
 }
+const repairingTools = new Set<string>();
 function gather(game: Stichos, prop: Prop) {
+  const kind = requiredToolFor(prop.kind)!;
+  const tool = game.tools.find((t) => t.kind === kind)!;
+  if (
+    tool &&
+    tool.durability < (kind === 'pickaxe' ? 36 : kind === 'axe' ? 16 : 8) &&
+    !repairingTools.has(kind)
+  ) {
+    repairingTools.add(kind);
+    try {
+      const town = game.world
+        .settlementsAround(game.player.x, game.player.y, 128)
+        .sort((a, b) => distance(a, game.player) - distance(b, game.player))[0]!;
+      assert.ok(town, 'Tool maintenance has a real nearby settlement.');
+      stock(game, { wood: 1, ore: 1 }, town);
+      walk(game, { x: town.x + 4, y: town.y + 5 });
+      assert.ok(
+        game.repairTool(kind).ok,
+        'Repair uses actual wood, ore and wages at the workbench.',
+      );
+    } finally {
+      repairingTools.delete(kind);
+    }
+  }
   walk(game, prop);
-  game.interact(prop.id);
+  workResource(game, prop);
   assert.ok(game.removed.has(prop.id), `Gathered ${prop.id}`);
 }
-function stock(game: Stichos, cost: Partial<Record<ItemId, number>>, town: Point) {
+function stock(game: Stichos, cost: Partial<Record<ItemId, number>>, town: Point, depth = 0) {
+  assert.ok(depth < 20, 'The resource planner resolves a finite dependency chain.');
   for (const [id, n] of Object.entries(cost)) {
     const item = id as ItemId;
+    let attempts = 0;
     while ((game.inventory[item] ?? 0) < n!) {
+      assert.ok(attempts++ < 80, `Bounded procurement for ${item} at ${key(town)}`);
       const recipe = RECIPES.find((r) => r.result === item);
       if (recipe) {
-        stock(game, recipe.cost, town);
+        stock(game, recipe.cost, town, depth + 1);
         if (item === 'lens') walk(game, { x: town.x + 4, y: town.y + 5 });
+        const before = game.inventory[item] ?? 0;
         game.craft(recipe.id);
+        assert.ok(
+          (game.inventory[item] ?? 0) > before,
+          `Actual ${recipe.id} crafting progresses procurement.`,
+        );
         continue;
       }
       const kind =
@@ -206,7 +252,7 @@ function stock(game: Stichos, cost: Partial<Record<ItemId, number>>, town: Point
   }
   // Preparing lenses or medicine can consume another requested raw material.
   if (Object.entries(cost).some(([id, n]) => (game.inventory[id as ItemId] ?? 0) < n!))
-    stock(game, cost, town);
+    stock(game, cost, town, depth + 1);
 }
 function opening(game: Stichos) {
   const actors = game.world.npcsAround(0, 0, 24);
@@ -546,9 +592,17 @@ test('a whole generation-three campaign resolves through actual movement, harves
     assert.equal(game.player.coins, beforeEarly, 'Unperformed work cannot be claimed.');
     game.choose('close');
     const recipe = RECIPES.find((r) => r.result === job.item)!;
+    let batches = 0;
     while (game.freeLife.contract!.progress < job.required) {
+      assert.ok(batches++ < 32, 'A workshop order has a finite number of real batches.');
       stock(game, recipe.cost, { x: 0, y: 0 });
+      if (recipe.result === 'lens') walk(game, { x: 4, y: 5 });
+      const previous = game.freeLife.contract!.progress;
       game.craft(recipe.id);
+      assert.ok(
+        game.freeLife.contract!.progress > previous,
+        'Actual crafting advances the accepted order.',
+      );
     }
     stock(game, { [job.item!]: job.required }, { x: 0, y: 0 });
     const before = game.player.coins;
@@ -569,7 +623,15 @@ test('a whole generation-three campaign resolves through actual movement, harves
   stock(game, { wood: 17, ore: 5, heartleaf: 1, cequin: 4 }, { x: 0, y: 0 });
   walk(game, { x: -13, y: 13 });
   const address = game.nearbyHomes[0]!;
-  assert.equal(game.progress({ kind: 'buy-home', address }).ok, true);
+  assert.ok(
+    game.progression.homes.some((home) => home.id === address.id),
+    'Theo already holds this established residence.',
+  );
+  assert.equal(
+    game.progress({ kind: 'buy-home', address }).ok,
+    false,
+    'The existing residence cannot be purchased twice.',
+  );
   for (const furnitureId of ['woven-cot', 'iron-stove', 'field-bench', 'raised-beds'])
     assert.equal(game.progress({ kind: 'furnish', homeId: address.id, furnitureId }).ok, true);
   assert.equal(game.freeLife.milestones.find((m) => m.id === 'life:home')!.complete, true);
@@ -610,7 +672,9 @@ test('a whole generation-three campaign resolves through actual movement, harves
       false,
       'Growing plants cannot be harvested early.',
     );
+    let growingFrames = 0;
     while (game.time < ready + 0.1) {
+      assert.ok(growingFrames++ < 2400, 'The garden matures within ten simulated minutes.');
       game.update(0.25, { x: 0, y: 0, run: false });
       sustain(game);
     }
@@ -656,13 +720,31 @@ test('multiplayer preflight is read-only and matches actual tool, yield, exhaust
   const plant = game.world.propsAround(0, 0, 16).find((p) => p.id === 'origin:cequin')!;
   walk(game, plant);
   const before = game.save();
-  assert.deepEqual(game.interactionAvailability(plant.id), { ok: true });
+  assert.deepEqual(game.interactionAvailability(plant.id), {
+    ok: true,
+    completes: false,
+    toolKind: 'sickle',
+  });
   assert.deepEqual(game.save(), before);
   game.inventory = { wood: 58 };
   assert.equal(game.interactionAvailability(plant.id).ok, false);
   game.interact(plant.id);
   assert.equal(game.removed.has(plant.id), false);
   game.inventory = {};
+  game.interact(plant.id);
+  assert.equal(
+    game.removed.has(plant.id),
+    false,
+    'The initial stroke cannot claim a shared resource.',
+  );
+  for (let tick = 0; tick < 6; tick++) game.update(0.25, { x: 0, y: 0, run: false });
+  const finishing = game.save();
+  assert.deepEqual(game.interactionAvailability(plant.id), {
+    ok: true,
+    completes: true,
+    toolKind: 'sickle',
+  });
+  assert.deepEqual(game.save(), finishing, 'Final-stroke preflight also remains read-only.');
   game.interact(plant.id);
   assert.equal(game.inventory.cequin, 3);
   assert.equal(game.interactionAvailability(plant.id).ok, false);
@@ -674,8 +756,12 @@ test('multiplayer preflight is read-only and matches actual tool, yield, exhaust
   game.equip('sword');
   assert.equal(game.interactionAvailability(rock.id).ok, false);
   game.equip('staff');
-  assert.equal(game.interactionAvailability(rock.id).ok, true);
-  game.interact(rock.id);
+  assert.equal(game.interactionAvailability(rock.id).ok, false, 'A combat staff cannot mine ore.');
+  assert.ok(game.equipTool('pickaxe').ok);
+  for (let tick = 0; tick < 6; tick++) game.update(0.25, { x: 0, y: 0, run: false });
+  const readyRock = game.interactionAvailability(rock.id);
+  assert.equal(readyRock.ok, true, readyRock.reason);
+  workResource(game, rock);
   assert.equal(game.inventory.ore, 2);
   assert.equal(game.interactionAvailability('unknown').ok, false);
 });
@@ -691,8 +777,20 @@ test('session home addresses are real and stable while physical upgrades and cos
   game.inventory = { wood: 20, ore: 12, heartleaf: 10 };
   const forged = { ...address, x: address.x + 100 };
   assert.equal(game.progress({ kind: 'buy-home', address: forged }).ok, false);
-  assert.equal(game.progression.homes.length, 0);
-  assert.equal(game.progress({ kind: 'buy-home', address }).ok, true);
+  assert.equal(
+    game.progression.homes.length,
+    1,
+    'A forged address cannot alter Theo’s established residence.',
+  );
+  assert.ok(
+    game.progression.homes.some((home) => home.id === address.id),
+    'Theo already holds this established residence.',
+  );
+  assert.equal(
+    game.progress({ kind: 'buy-home', address }).ok,
+    false,
+    'The existing residence cannot be purchased twice.',
+  );
   assert.equal(game.progression.homes.length, 1);
   const prior = game.save();
   assert.equal(game.progress({ kind: 'buy-home', address }).ok, false);
