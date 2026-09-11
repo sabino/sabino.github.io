@@ -63,6 +63,7 @@ test('generated object pixels remain connected, bounded and visually diverse acr
 
 test('cache eviction preserves exact construction and icon uses that same pixel palette', () => {
   const before = artifactPixels('copper moth beneath ice');
+  assert.deepEqual(artifactPixels('  copper moth beneath ice  ').pixels, before.pixels);
   const copy = Array.from(before.pixels),
     palette = [...before.palette];
   for (let i = 0; i < 150; i++) artifactPixels(`cache eviction ${i}`);

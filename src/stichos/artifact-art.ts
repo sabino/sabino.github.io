@@ -1,4 +1,4 @@
-import { generateArtifact } from './artifacts.ts';
+import { generateArtifact, normalizeArtifactDesign } from './artifacts.ts';
 import { deriveSeed, random } from '../procedural/random.ts';
 
 export interface ArtifactPixels {
@@ -25,6 +25,7 @@ const shade = (hex: string, amount: number) => {
 
 /** One connected pixel construction serves the inspection image and every physical body. */
 export function artifactPixels(design: string): ArtifactPixels {
+  design = normalizeArtifactDesign(design);
   const hit = cache.get(design);
   if (hit) {
     cache.delete(design);
