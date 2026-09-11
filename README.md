@@ -6,6 +6,8 @@ Walk beyond the cathedral, follow roads into other settlements, gather plants an
 
 ## Play
 
+**[Play Verso in your browser](https://sabino.pro/games/verso/)**. The published edition supports offline solo play after its first complete load and browser-hosted cooperative rooms through **Together**. To carry progress from localhost, use **Pause → Download save**, then **Pause → Restore a save** on the published site.
+
 Use **Node.js 26** (the verified runtime for this build).
 
 ```sh

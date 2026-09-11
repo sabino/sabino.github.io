@@ -238,7 +238,7 @@ try {
   browser = await connect(version.webSocketDebuggerUrl);
   const c = await traveler('Release traveler');
   await c.move({ x: 3, y: 5 });
-  pass('Published game starts and accepts actual walking input');
+  pass('Game starts and accepts actual walking input');
   await c.click('#s-life');
   await c.click('[data-life-tab="compact"]');
   await c.wait(
@@ -291,7 +291,9 @@ try {
       'Static shop clearly inactive',
     );
     assert(
-      await c.read("[...document.querySelectorAll('[data-purchase]')].every(b=>b.disabled)"),
+      await c.read(
+        "(()=>{const buttons=[...document.querySelectorAll('[data-store-action]')].filter(b=>b.dataset.storeAction.startsWith('buy:'));return buttons.length>0 && buttons.every(b=>b.disabled)})()",
+      ),
       'No active real-money purchase button',
     );
     pass('Static edition presents cosmetic previews with purchases explicitly inactive');

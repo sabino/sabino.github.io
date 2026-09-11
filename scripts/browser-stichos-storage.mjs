@@ -301,7 +301,9 @@ try {
     'Uncached network request succeeded while offline',
   );
   assert(
-    offlineResponses.some((r) => r.fromServiceWorker && new URL(r.url).pathname === '/'),
+    offlineResponses.some(
+      (r) => r.fromServiceWorker && new URL(r.url).pathname === new URL(url).pathname,
+    ),
     'Offline navigation was not served by the service worker',
   );
   await click('#s-continue');
