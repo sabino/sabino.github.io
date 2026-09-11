@@ -738,6 +738,20 @@ export class InfiniteWorld {
     const add = (p: Prop) => {
       if (!contains(p)) return;
       if (p.solid && this.highway(p.x, p.y)) return;
+      if (
+        this.generation === 3 &&
+        ['pine', 'rock'].includes(p.kind) &&
+        p.solid &&
+        !p.id.includes(':timber:') &&
+        !p.id.includes(':ore:') &&
+        [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ].some(([dx, dy]) => this.highway(p.x + dx, p.y + dy))
+      )
+        return;
       chunk.props.push(p);
     };
     for (let y = y0; y < y0 + CHUNK_SIZE; y++)
@@ -775,18 +789,23 @@ export class InfiniteWorld {
             ].every(
               ([dx, dy]) => deriveSeed(this.seed, 'ecology', x + dx, y + dy) / 0xffffffff >= 0.16,
             );
-            if (roll < 0.14 && clearNeighbor)
+            const forestry =
+              this.generation !== 3 ||
+              (Math.max(dx, Math.abs(dy)) >= town.radius - 4 &&
+                this.noise(x, y, 13, 'settlement-greenbelt') > 0.4);
+            if (roll < 0.14 && clearNeighbor && forestry)
               add(
                 this.prop(
                   'pine',
                   x,
                   y,
-                  this.generation === 3 ? 'Courtyard frostwood' : 'Cathedral frostwood',
+                  this.generation === 3 ? 'Shelterbelt frostwood' : 'Cathedral frostwood',
                 ),
               );
-            else if (roll >= 0.14 && roll < 0.16 && clearNeighbor)
+            else if (this.generation !== 3 && roll >= 0.14 && roll < 0.16 && clearNeighbor)
               add(this.prop('rock', x, y, 'Weathered mineral stone'));
-            else if (roll < 0.2) add(this.prop('mushroom', x, y, 'Snowcap colony'));
+            else if (this.generation !== 3 && roll < 0.2)
+              add(this.prop('mushroom', x, y, 'Snowcap colony'));
           }
           continue;
         }
@@ -806,9 +825,17 @@ export class InfiniteWorld {
               { heartleaf: 'Heartleaf', emberroot: 'Emberroot', cequin: 'Cequin' }[kind],
             ),
           );
-        } else if (tile.biome === 'frostwood' && roll < 0.18)
+        } else if (
+          tile.biome === 'frostwood' &&
+          roll < 0.18 &&
+          (this.generation !== 3 || this.noise(x, y, 17, 'forest-stands') > 0.38)
+        )
           add(this.prop('pine', x, y, 'Frostwood pine'));
-        else if (tile.biome === 'highlands' && roll < 0.11)
+        else if (
+          tile.biome === 'highlands' &&
+          roll < 0.11 &&
+          (this.generation !== 3 || this.noise(x, y, 12, 'mineral-outcrops') > 0.48)
+        )
           add(this.prop('rock', x, y, 'Iron-bearing stone'));
         else if (roll > 0.992) add(this.prop('mushroom', x, y, 'Winter fungus'));
         const occupied = chunk.props.some((p) => p.x === x && p.y === y && p.solid);
@@ -914,8 +941,26 @@ export class InfiniteWorld {
       add(this.prop('emberroot', s.x + 3, s.y + 6, 'Emberroot', `${s.id}:emberroot:2`, s.clan));
       add(this.prop('pine', s.x - 5, s.y + 4, 'Cultivated frostwood', `${s.id}:timber:1`, s.clan));
       add(this.prop('pine', s.x - 5, s.y + 6, 'Cultivated frostwood', `${s.id}:timber:2`, s.clan));
-      add(this.prop('rock', s.x + 5, s.y + 6, 'Iron-bearing stone', `${s.id}:ore:1`, s.clan));
-      add(this.prop('rock', s.x + 5, s.y + 7, 'Iron-bearing stone', `${s.id}:ore:2`, s.clan));
+      add(
+        this.prop(
+          'rock',
+          s.x + 5,
+          s.y + 6,
+          this.generation === 3 ? 'Workshop ore stock' : 'Iron-bearing stone',
+          `${s.id}:ore:1`,
+          s.clan,
+        ),
+      );
+      add(
+        this.prop(
+          'rock',
+          s.x + 5,
+          s.y + 7,
+          this.generation === 3 ? 'Workshop ore stock' : 'Iron-bearing stone',
+          `${s.id}:ore:2`,
+          s.clan,
+        ),
+      );
       for (const [dx, dy] of [
         [-4, 5],
         [-4, 7],

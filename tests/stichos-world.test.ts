@@ -599,9 +599,10 @@ test('generation three relocates vaults between wider settlements with an access
   }
 });
 
-test('Vespera labels the city and cathedral while all three generations retain their exact origin geometry', () => {
-  // These pre-rename fixtures omit only prop/settlement display names. NPC names,
-  // seeds, positions, doors, terrain, resources and every other property remain hashed.
+test('Vespera retains legacy origin geometry and generation-three settlement resource zoning', () => {
+  // Display names are excluded. Legacy generation-one/two fixtures remain exact.
+  // Generation three intentionally thins urban trees and removes random urban rocks;
+  // canonical workyards, buildings, NPCs and terrain retain their established positions.
   const fixtures = [
     [1, 0, 0, '3ab5acf653123c5f9168dc5a2506c38e1d0326cd4dc870b8c6134100ee9026c9'],
     [1, 0, -1, 'c19d63ddc1a4df468b4ab7ad81bc601f5a3d86e3194d99eae5094a9d8a24b5f8'],
@@ -611,10 +612,10 @@ test('Vespera labels the city and cathedral while all three generations retain t
     [2, 0, -1, 'd375b2c56f35b2a283305b3c834a5f0e6b53fa77628ec868786134b90e1e1c92'],
     [2, -1, -1, '28aaf60351e245a357c590708429991b2fcac28dd3d1280c27ab0773d222eaca'],
     [2, -1, 0, '52235fa694484d0b60fcd12ba417a9c4a5a2a5f708ccc93567a9029cf515b011'],
-    [3, 0, 0, '86eff48e98f5253d9e8ac6aa86a3c137ed6fac8278552fcf83b0e52c9ada325c'],
-    [3, 0, -1, '928e6bc85a6030f7dddf6d170a2eb2560a8bc65b2d3b5e4799524d85d66dd2d3'],
-    [3, -1, -1, '3cec5188af94fd5082e8d8588729edef545c206ce7bcbb238a30b2b138ded767'],
-    [3, -1, 0, '6911631a51be98c97b5b076ea78ab5845bbe61df51e82bf0cd01aeb4ae531393'],
+    [3, 0, 0, 'cbaba865a6dfb5b24807746b60cdbc0120ce28b0e6ea80a1db7bd7182c749746'],
+    [3, 0, -1, '0a8df87c4d3a07f336882f5398c1b91f4109b8cf05a08be92dfac9cbe592b590'],
+    [3, -1, -1, '6bb42a9f26795139879ea1cc5564a85ce0fcb03b7fcc835a662b11c8faa87d7b'],
+    [3, -1, 0, 'cc7351822dad3a2d31a222a1bb79116c066ae0116fae353899d7e885b1747430'],
   ] as const;
   for (const [generation, cx, cy, expected] of fixtures) {
     const chunk = new InfiniteWorld(703, generation).chunk(cx, cy);
