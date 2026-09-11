@@ -66,6 +66,14 @@ import {
   MAX_WEAPON_SEED,
 } from './equipment.ts';
 import { civilizationFor, civilizationTechnologyTier } from './civilization.ts';
+import {
+  generatePersonalStory,
+  personalStoryView,
+  restorePersonalStories,
+  type PersonalStoryPlan,
+  type PersonalStoryRecord,
+} from './personal-story.ts';
+import { exposureAt } from './exposure.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
 import { resolveForge, type ForgeRecipe, type ForgeResult } from './forge.ts';
 import { generateArtifact, normalizeArtifactDesign, type ArtifactGenome } from './artifacts.ts';
@@ -371,6 +379,8 @@ export class Stichos {
   private notebook = true;
   private originRecord: LifeOriginRecord | null = null;
   private originCandidate: LifeCandidate | null = null;
+  private personalStories = restorePersonalStories(undefined);
+  private personalPlans = new Map<string, PersonalStoryPlan>();
   private production = createProduction();
   private winterState = createCompact();
   private winterPlan: CompactPlan | null = null;
@@ -484,6 +494,16 @@ export class Stichos {
       'Theo Bishop · 3886',
       'Theo comes from the future, with many missions across planets and eras behind him. Ten Earth years, twenty stíchoi, have passed in this priest’s body on the planet Stíchos. He does not know why the transmission failed or what the Sallas family conceals. In Vespera, cequin sustains breath while he looks for evidence.',
     );
+    if (this.universeLife) {
+      this.player.name = 'Unassigned traveler';
+      this.player.bodyName = 'Awaiting a life';
+      this.quests = [];
+      this.journal = [];
+      this.entry(
+        'A world before your arrival',
+        `A foreign awareness approaches an existing life in ${this.world.civilization!.name}. Its household, work and obligations already exist.`,
+      );
+    }
     this.refreshNpcs();
     this.visit();
   }
@@ -493,6 +513,87 @@ export class Stichos {
     return this.notebook;
   }
 
+  get universeLife() {
+    return this.world.generation === 4;
+  }
+  get exposure() {
+    return exposureAt(
+      this.world.tile(this.player.x, this.player.y),
+      this.world.civilization?.axes,
+      this.player.cequinTime > 0,
+    );
+  }
+  private get freeLifeUnlocked() {
+    return this.universeLife || this.campaignState.ending !== null;
+  }
+  itemName(item: ItemId) {
+    return (
+      (this.universeLife
+        ? (this.world.civilization!.lexicon as Partial<Record<ItemId, string>>)[item]
+        : undefined) ?? ITEMS[item].name
+    );
+  }
+  private personalContext() {
+    if (!this.universeLife || !this.originCandidate) return null;
+    const life = this.originCandidate;
+    const identity = `${life.id}@${life.index}`;
+    let plan = this.personalPlans.get(identity);
+    if (!plan) {
+      plan = generatePersonalStory(this.world, life);
+      this.personalPlans.set(identity, plan);
+      if (this.personalPlans.size > 16)
+        this.personalPlans.delete(this.personalPlans.keys().next().value!);
+    }
+    let record = this.personalStories.records.find((r) => r.bodyId === identity);
+    if (!record) {
+      if (this.personalStories.records.length >= 128) this.personalStories.records.shift();
+      record = {
+        bodyId: identity,
+        baselineCommissions: this.freeLifeState.completed,
+        repaid: false,
+        trusted: null,
+        aligned: false,
+      };
+      this.personalStories.records.push(record);
+    }
+    if (record.trusted && !plan.relationships.some((r) => r.npcId === record.trusted))
+      throw new Error('A personal history names an unrelated witness.');
+    return { plan, record };
+  }
+  get personalStory() {
+    const context = this.personalContext();
+    return context
+      ? personalStoryView(
+          context.plan,
+          context.record,
+          this.freeLifeState.completed,
+          this.freeLifeState.knownHosts,
+        )
+      : null;
+  }
+  private syncPersonalStory() {
+    const story = this.personalStory;
+    if (!story) return;
+    for (const obligation of story.obligations) {
+      let quest = this.quests.find((q) => q.id === obligation.id);
+      if (!quest) {
+        quest = {
+          id: obligation.id,
+          title: obligation.title,
+          description: obligation.description,
+          objective: '',
+          target: { ...obligation.target },
+          stage: 0,
+          complete: false,
+        };
+        this.quests.push(quest);
+      }
+      quest.objective = `${obligation.progress}/${obligation.goal} · ${obligation.description}`;
+      quest.target = { ...obligation.target };
+      if (obligation.complete) this.complete(quest.id);
+    }
+  }
+
   get lifeOrigin() {
     return this.originCandidate ? clone(this.originCandidate) : null;
   }
@@ -500,7 +601,11 @@ export class Stichos {
     return this.player.name;
   }
   get originName() {
-    return this.originCandidate?.settlement.name ?? ORIGIN_CITY_NAME;
+    return (
+      this.originCandidate?.settlement.name ??
+      this.world.civilization?.originCityName ??
+      ORIGIN_CITY_NAME
+    );
   }
   lifeCandidate(index: number, customization: LifeCustomization = {}) {
     const candidate = generateLifeCandidate(this.seed, index, customization, this.world.generation);
@@ -621,6 +726,20 @@ export class Stichos {
       'A different morning',
       `${candidate.name} was ${candidate.activity.label.toLowerCase()} when awareness settled into this body. ${candidate.perk} A real home waits in ${candidate.settlement.name}.`,
     );
+    if (this.universeLife) {
+      this.quests = [];
+      const story = this.personalStory!;
+      this.journal = story.history.map((h) => ({
+        title: `${h.title} · age ${h.age}`,
+        text: h.text,
+        time: 0,
+      }));
+      this.entry(
+        'Awareness arrives',
+        `${candidate.name} was ${candidate.activity.label.toLowerCase()}. ${story.mystery}`,
+      );
+      this.syncPersonalStory();
+    }
     this.visited.clear();
     this.fogChunks.clear();
     this.legacyFogChunks.clear();
@@ -689,6 +808,7 @@ export class Stichos {
     };
     this.originCandidate = candidate;
     this.player.name = candidate.name;
+    this.personalPlans.delete(candidate.id);
     this.player.speed = candidate.stats.speed;
     for (const profession of ['botany', 'crafting', 'combat'] as const)
       this.progression.xp[profession] = Math.max(
@@ -706,6 +826,7 @@ export class Stichos {
         furniture: {},
         plots: [null, null],
       });
+    if (this.universeLife) this.syncPersonalStory();
     this.entry(
       'A life left standing',
       `Awareness now lives as ${candidate.name}. The previous body keeps its physical belongings; work sites and commitments remain on this planet.`,
@@ -717,7 +838,7 @@ export class Stichos {
   }
 
   get transferReady() {
-    return this.storyStage >= 4;
+    return this.universeLife ? !!this.personalStory?.complete : this.storyStage >= 4;
   }
   get productionStructures() {
     return this.production.structures.map((s) => {
@@ -1149,12 +1270,10 @@ export class Stichos {
           npc.hp > 0 &&
           !npc.hostile &&
           !this.removed.has(npc.id) &&
-          (this.campaignState.ending !== null ||
-            ['pilgrim', 'refugee', 'guard'].includes(npc.role)) &&
+          (this.freeLifeUnlocked || ['pilgrim', 'refugee', 'guard'].includes(npc.role)) &&
           !(npc.role === 'guard' && this.reputation[npc.clan] < -24) &&
           (distance(npc, center) <= 14 ||
-            (this.campaignState.ending !== null &&
-              this.freeLifeState.knownHosts.includes(npc.id))) &&
+            (this.freeLifeUnlocked && this.freeLifeState.knownHosts.includes(npc.id))) &&
           this.clear(npc),
       )
       .sort((a, b) =>
@@ -1166,7 +1285,7 @@ export class Stichos {
             distance(a, center) - distance(b, center)
           : priority(a) - priority(b) || distance(a, center) - distance(b, center),
       )
-      .slice(0, this.campaignState.ending ? 128 : 3)
+      .slice(0, this.freeLifeUnlocked ? 128 : 3)
       .map((npc) => clone(npc));
   }
   get bodyId() {
@@ -2749,7 +2868,7 @@ export class Stichos {
       if (action.kind === 'buy-home')
         this.entry(
           'A place to return to',
-          `Theo acquired ${action.address.name}. Ownership and the remembered address remain with his identity; the body carries its own equipment.`,
+          `${this.universeLife ? this.player.name : 'Theo'} acquired ${action.address.name}. Ownership and the remembered address remain with his identity; the body carries its own equipment.`,
         );
     }
     return result;
@@ -2842,8 +2961,14 @@ export class Stichos {
     p.stamina = clamp(p.stamina + (running ? -15 : 18) * dt);
     const tile = this.world.tile(p.x, p.y);
     const sheltered = tile.terrain === 'floor';
-    p.breath = clamp(p.breath + (p.cequinTime > 0 ? 0.3 : sheltered ? -0.03 : -0.11) * dt);
-    p.warmth = clamp(p.warmth + (sheltered ? 1.2 : running ? -0.015 : -0.075) * dt);
+    if (this.universeLife) {
+      const exposure = exposureAt(tile, this.world.civilization?.axes, p.cequinTime > 0, running);
+      p.breath = clamp(p.breath + exposure.breathRate * dt);
+      p.warmth = clamp(p.warmth + exposure.warmthRate * dt);
+    } else {
+      p.breath = clamp(p.breath + (p.cequinTime > 0 ? 0.3 : sheltered ? -0.03 : -0.11) * dt);
+      p.warmth = clamp(p.warmth + (sheltered ? 1.2 : running ? -0.015 : -0.075) * dt);
+    }
     if (p.breath <= 0 || p.warmth <= 0) this.hurt((p.breath <= 0 ? 0.9 : 0.35) * dt, false);
     this.refreshClock -= dt;
     if (this.refreshClock <= 0) {
@@ -3121,8 +3246,10 @@ export class Stichos {
         !q.objective.startsWith('Dispatch withdrawn'),
     ).length;
     return {
-      unlocked: this.campaignState.ending !== null,
-      milestones: freeLifeMilestones(this.freeLifeState, this.progression, supplies, dispatches),
+      unlocked: this.freeLifeUnlocked,
+      milestones: this.universeLife
+        ? (this.personalStory?.obligations.map((o) => ({ ...o, rewarded: o.complete })) ?? [])
+        : freeLifeMilestones(this.freeLifeState, this.progression, supplies, dispatches),
       contract: this.freeLifeState.commission ? clone(this.freeLifeState.commission) : null,
       contractsCompleted: this.freeLifeState.completed,
     };
@@ -3138,7 +3265,7 @@ export class Stichos {
         ...clone(n),
         consent: 'Willing while peaceful and alive; a quiet shrine is required.',
         available:
-          this.campaignState.ending !== null &&
+          this.freeLifeUnlocked &&
           !(n.role === 'guard' && this.reputation[n.clan] < -24) &&
           this.clear(n),
       }));
@@ -3179,7 +3306,7 @@ export class Stichos {
       });
   }
   private chooseFreeLife(id: string, board: Prop) {
-    if (!this.campaignState.ending) return;
+    if (!this.freeLifeUnlocked) return;
     const job = this.freeLifeState.commission;
     if (id === 'life:contract' && job?.status !== 'active') {
       const town = this.world
@@ -3210,6 +3337,8 @@ export class Stichos {
         garden,
         (prop) => this.botanicalProfile(prop)?.yield ?? 1,
       );
+      if (this.universeLife && next.item)
+        next.description = next.description.replaceAll(next.item, this.itemName(next.item));
       this.freeLifeState.commission = next;
       this.fieldCommissionSearch = null;
       this.addQuest({
@@ -3253,9 +3382,13 @@ export class Stichos {
     } else if (id === 'life:cancel' && job?.status === 'active') {
       job.status = 'cancelled';
       this.fieldCommissionSearch = null;
-      this.complete(job.id);
       const quest = this.quests.find((q) => q.id === job.id);
-      if (quest) quest.objective = 'Withdrawn without payment.';
+      if (quest)
+        Object.assign(quest, {
+          complete: true,
+          stage: quest.stage + 1,
+          objective: 'Withdrawn without payment.',
+        });
       this.reply('The commission is withdrawn. No fee or reward was claimed.');
     }
   }
@@ -3274,7 +3407,7 @@ export class Stichos {
     this.syncFreeLife();
   }
   private syncFreeLife() {
-    if (!this.campaignState.ending) return;
+    if (!this.freeLifeUnlocked) return;
     const job = this.freeLifeState.commission;
     if (job?.status !== 'active') this.fieldCommissionSearch = null;
     if (job?.status === 'active') {
@@ -3330,6 +3463,10 @@ export class Stichos {
             ? `${job.progress}/${job.required} fresh ${job.item} gathered. No matching plots remain within 128 paces of this board. Return to withdraw without penalty, or gather matching plants farther away; the accepted terms and ${job.reward}-coin reward are unchanged.`
             : `${job.description} ${job.progress}/${job.required} completed. ${job.progress >= job.required ? 'Return to the issuing noticeboard with the requested supplies.' : ''}`,
         });
+    }
+    if (this.universeLife) {
+      this.syncPersonalStory();
+      return;
     }
     for (const milestone of this.freeLife.milestones) {
       let quest = this.quests.find((q) => q.id === milestone.id);
@@ -3422,7 +3559,8 @@ export class Stichos {
       : null;
   }
   private activeCampaignStep(): CampaignStep | null {
-    if (this.storyStage < 4 || this.campaignState.step >= CAMPAIGN_LENGTH) return null;
+    if (this.universeLife || this.storyStage < 4 || this.campaignState.step >= CAMPAIGN_LENGTH)
+      return null;
     this.campaignPlan ??= buildCampaign(this.world);
     return this.campaignPlan.steps[this.campaignState.step] ?? null;
   }
@@ -3692,7 +3830,7 @@ export class Stichos {
       return;
     }
     if ('role' in found) this.rememberIdentity(found);
-    if (!this.campaignOrdinary && this.campaignInteraction(found)) return;
+    if (!this.universeLife && !this.campaignOrdinary && this.campaignInteraction(found)) return;
     this.campaignOrdinary = false;
     if ('role' in found) {
       if (found.hp <= 0 || found.hostile) return;
@@ -3705,6 +3843,7 @@ export class Stichos {
       this.harvest(prop);
       return;
     }
+    if (this.universeLife && this.interactUniverseProp(prop)) return;
     if (prop.kind === 'chest' || prop.kind === 'crate') {
       if (this.opened.has(prop.id)) {
         this.event('dialogue', 'Already searched.');
@@ -3725,12 +3864,14 @@ export class Stichos {
             objective: 'The botanical archive has been recovered.',
           });
         this.entry(
-          'A record beneath the frost',
-          [
-            'These seed records predate Brown’s factories. A Sallas annotation describes cequin sustaining more than breath: a living body may hold an echo after the mind has left. It is a lead, not an explanation.',
-            'The vault’s catalogue records plants exchanged between rival families before the first industrial trials. Someone has struck the original recipients from the ledger. Sallas appears in the surviving margin.',
-            'A preserved botanical drawing shows root systems connected beneath separate beds. The accompanying Sallas note compares their shared signal to a memory carried between living hosts.',
-          ][prop.seed % 3]!,
+          this.universeLife ? 'A record outside the public ledger' : 'A record beneath the frost',
+          this.universeLife
+            ? this.world.civilization!.story.mystery
+            : [
+                'These seed records predate Brown’s factories. A Sallas annotation describes cequin sustaining more than breath: a living body may hold an echo after the mind has left. It is a lead, not an explanation.',
+                'The vault’s catalogue records plants exchanged between rival families before the first industrial trials. Someone has struck the original recipients from the ledger. Sallas appears in the surviving margin.',
+                'A preserved botanical drawing shows root systems connected beneath separate beds. The accompanying Sallas note compares their shared signal to a memory carried between living hosts.',
+              ][prop.seed % 3]!,
         );
         this.event(
           'harvest',
@@ -3961,6 +4102,176 @@ export class Stichos {
     );
   }
 
+  private interactUniverseProp(prop: Prop): boolean {
+    if (
+      !['radio', 'notice', 'workbench', 'bench', 'shrine', 'banner', 'lamp', 'grave'].includes(
+        prop.kind,
+      )
+    )
+      return false;
+    const civilization = this.world.civilization!;
+    const context = this.personalContext();
+    let text = civilization.story.tension;
+    const choices: Dialogue['choices'] = [{ id: 'close', label: 'Continue' }];
+    if (prop.kind === 'radio') {
+      text = context?.record.aligned
+        ? 'Your account of the arrival has its own signed witness entry in this settlement’s records. Your household, work and chosen relationships still need you. Quiet memorials can now steady a voluntary crossing into another living person.'
+        : `${civilization.story.mystery} ${context ? `The interrupted record belongs to ${this.originCandidate!.name}. Settle the household promise, choose a witness, and establish a record of paid work before aligning this terminal.` : 'Choose an existing life to investigate its missing interval.'}`;
+      if (context && prop.id === context.plan.signal.id && !context.record.aligned)
+        choices.unshift({
+          id: 'personal:align',
+          label: 'Record this crossing independently',
+          detail: '1 crafted lens · 2 ore · 1 timber',
+          disabled:
+            !this.personalStory!.obligations.slice(0, 3).every((o) => o.complete) ||
+            !this.has({ lens: 1, ore: 2, wood: 1 }),
+        });
+    } else if (prop.kind === 'notice') {
+      text = prop.id.startsWith('vault:')
+        ? `An abandoned ${civilization.lexicon.archive} lies north. Its real chambers, surviving records and occupants remain there until someone reaches them.`
+        : `${civilization.politics.conflict} Local contracts pay for real gathering, preparation, cultivation and identified road threats. Speak with residents before deciding whose account to trust.`;
+      if (prop.id.startsWith('vault:'))
+        choices.unshift({ id: 'vault:survey', label: 'Mark the archive on my chart' });
+    } else if (prop.kind === 'workbench') {
+      text = `Use this ${civilization.lexicon.workbench.toLowerCase()} to prepare supplies and align a signal lens. The tools, materials and output remain physical possessions.`;
+      choices.unshift(
+        ...RECIPES.map((r) => ({
+          id: `craft:${r.id}`,
+          label: this.itemName(r.result),
+          disabled: !this.has(r.cost),
+          detail: this.costText(r.cost),
+        })),
+      );
+    } else if (prop.kind === 'bench' || prop.kind === 'shrine') {
+      text =
+        prop.kind === 'bench'
+          ? 'A sheltered place restores the body and becomes its remembered resting point.'
+          : this.transferReady
+            ? 'A stable crossing carries awareness into a willing living person. Each body keeps its own pack, coins and equipment where it stands; your unfinished promises remain.'
+            : 'Quiet steadies this borrowed life. An independent witness record at your settlement’s terminal is needed before another voluntary crossing.';
+      choices.unshift({ id: 'rest', label: 'Rest and remember this place' });
+      if (prop.kind === 'shrine' && this.transferReady)
+        for (const person of this.transferCandidates)
+          choices.splice(choices.length - 1, 0, {
+            id: `transfer:${person.id}`,
+            label: `Enter ${person.name}'s body`,
+            detail: `${civilization.roleNames[person.role]} · ${this.world.clans[person.clan].name}`,
+          });
+    } else if (prop.kind === 'grave')
+      text = 'A recorded name, a finished bodily life, and a history no faction owns completely.';
+    this.dialogue = { speaker: prop.name, role: civilization.name, npcId: prop.id, text, choices };
+    if (prop.kind === 'notice' && !prop.id.startsWith('vault:')) this.addFreeLifeChoices(prop);
+    this.event('dialogue');
+    return true;
+  }
+  private talkUniverse(npc: Npc) {
+    const civilization = this.world.civilization!;
+    const context = this.personalContext();
+    const relationship = context?.plan.relationships.find((r) => r.npcId === npc.id);
+    if (npc.role === 'merchant') this.merchant(npc);
+    else
+      this.dialogue = {
+        speaker: npc.name,
+        role: civilization.roleNames[npc.role],
+        npcId: npc.id,
+        text:
+          relationship?.reason ??
+          `I work as a ${civilization.roleNames[npc.role]} with ${this.world.clans[npc.clan].name}. ${civilization.politics.conflict} The noticeboards offer work whose results people can verify.`,
+        choices: [{ id: 'close', label: 'Leave the conversation' }],
+      };
+    this.dialogue!.role = civilization.roleNames[npc.role];
+    if (relationship && context) {
+      this.dialogue!.choices.unshift({
+        id: 'personal:past',
+        label: 'Ask about this life before the arrival',
+      });
+      if (!context.record.trusted)
+        this.dialogue!.choices.unshift({
+          id: 'personal:trust',
+          label: `Trust ${npc.name}'s account`,
+          detail: `A lasting choice; ${this.world.clans[npc.clan].name} gains your confidence.`,
+        });
+      if (npc.id === context.plan.debt.recipient.npcId && !context.record.repaid)
+        this.dialogue!.choices.unshift({
+          id: 'personal:debt',
+          label: `${context.plan.debt.title}: ${context.plan.debt.required} ${this.itemName(context.plan.debt.item)}`,
+          disabled: !this.has({ [context.plan.debt.item]: context.plan.debt.required }),
+          detail: 'The supplies leave your pack and the outstanding obligation is settled.',
+        });
+    }
+    if (npc.role === 'botanist') {
+      const job = this.supplyJobs.get(npc.id);
+      this.dialogue!.choices.unshift({
+        id: job?.active ? 'supply:deliver' : 'supply:accept',
+        label: job?.active
+          ? `Deliver ${job.amount} ${this.itemName(job.item)}`
+          : 'Ask for a local supply job',
+      });
+    }
+    this.event('dialogue');
+  }
+  private choosePersonalStory(choiceId: string, npc?: Npc, prop?: Prop) {
+    const context = this.personalContext();
+    if (!context) return;
+    const { plan, record } = context;
+    const relationship = npc && plan.relationships.find((r) => r.npcId === npc.id);
+    if (choiceId === 'personal:past' && relationship) {
+      this.reply(`${relationship.reason} ${plan.mystery}`);
+      return;
+    }
+    if (choiceId === 'personal:trust' && npc && relationship && !record.trusted) {
+      record.trusted = npc.id;
+      this.changeReputation(npc.clan, 6);
+      for (const other of plan.relationships)
+        if (other.clan !== npc.clan && other.stance === 'rival')
+          this.changeReputation(other.clan, -2);
+      this.entry(
+        'A witness chosen',
+        `${this.player.name} chose ${npc.name}'s account. ${relationship.reason}`,
+      );
+      this.syncPersonalStory();
+      this.reply(
+        'Your confidence is recorded. The chosen faction remembers it; the other accounts still exist.',
+      );
+      return;
+    }
+    if (choiceId === 'personal:debt' && npc?.id === plan.debt.recipient.npcId && !record.repaid) {
+      if (!this.spend({ [plan.debt.item]: plan.debt.required })) return;
+      record.repaid = true;
+      this.changeReputation(npc.clan, 8);
+      this.entry(
+        'A household promise honored',
+        `${plan.debt.required} ${this.itemName(plan.debt.item)} were delivered to ${npc.name}. The advance is settled once, without erasing the relationship.`,
+      );
+      this.syncPersonalStory();
+      this.reply(
+        'The supplies are received. The household promise is settled; your name now has a kept commitment behind it.',
+      );
+      return;
+    }
+    if (
+      choiceId === 'personal:align' &&
+      prop?.id === plan.signal.id &&
+      !record.aligned &&
+      this.personalStory!.obligations.slice(0, 3).every((o) => o.complete)
+    ) {
+      if (!this.spend({ lens: 1, ore: 2, wood: 1 })) return;
+      record.aligned = true;
+      this.opened.add(prop.id);
+      this.player.coins += plan.reward.coins;
+      this.awardXp(plan.reward.xp);
+      this.effect('mind', prop, this.world.clans[this.player.clan].color, 2.4);
+      this.entry(
+        'The arrival has a witness',
+        `${this.player.name}'s missing interval now has an independent record, vouched for by ${plan.relationships.find((r) => r.npcId === record.trusted)!.name}. ${plan.case.outcome} Voluntary mind travel is stable at quiet memorials; the world and its work continue.`,
+      );
+      this.syncPersonalStory();
+      this.reply(
+        `${plan.case.outcome} ${plan.reward.coins} coins fund the next journey. Voluntary mind transfer is now possible at a quiet memorial; every body retains its own possessions.`,
+      );
+    }
+  }
+
   private talk(npc: Npc) {
     const job = this.orders.find(
       (o) => o.workerId === npc.id && o.status === 'working' && o.journey?.phase !== 'ready',
@@ -3976,6 +4287,10 @@ export class Stichos {
         choices: [{ id: 'close', label: 'Let them continue working' }],
       };
       this.event('dialogue');
+      return;
+    }
+    if (this.universeLife) {
+      this.talkUniverse(npc);
       return;
     }
     const choices = [{ id: 'close', label: 'Leave the conversation' }];
@@ -4076,6 +4391,10 @@ export class Stichos {
       this.event('dialogue', 'Move closer to continue.');
       return;
     }
+    if (choiceId.startsWith('personal:') && this.universeLife) {
+      this.choosePersonalStory(choiceId, npc, prop);
+      return;
+    }
     if (choiceId.startsWith('life:') && prop?.kind === 'notice') {
       this.chooseFreeLife(choiceId, prop);
       return;
@@ -4091,9 +4410,10 @@ export class Stichos {
         const complete = this.opened.has(`${siteId}:cache`);
         this.quests.push({
           id: `${siteId}:survey`,
-          title: 'Beneath the frost',
-          description:
-            'An abandoned seed vault preserves a botanical archive. Its chambers are occupied by raiders.',
+          title: this.universeLife ? 'An archive off the public chart' : 'Beneath the frost',
+          description: this.universeLife
+            ? `An abandoned ${this.world.civilization!.lexicon.archive} holds records outside the public ledger. Its chambers are occupied by raiders.`
+            : 'An abandoned seed vault preserves a botanical archive. Its chambers are occupied by raiders.',
           stage: complete ? 1 : 0,
           complete,
           target: site.reward,
@@ -5075,7 +5395,7 @@ export class Stichos {
       this.occupiedNpcId = target.id;
       this.rememberIdentity(previous);
       this.rememberIdentity(target);
-      if (this.campaignState.ending && !this.freeLifeState.hostProfessions.includes(target.role))
+      if (this.freeLifeUnlocked && !this.freeLifeState.hostProfessions.includes(target.role))
         this.freeLifeState.hostProfessions.push(target.role);
       this.lifeCount++;
       this.player.x = target.x;
@@ -5092,7 +5412,7 @@ export class Stichos {
       this.player.phase = 0;
       this.entry(
         'Another person’s breath',
-        `Theo’s mind entered ${target.name}, a living ${target.role}, at (${target.x.toFixed(1)}, ${target.y.toFixed(1)}). ${previous.name}’s body and belongings remained at (${previousPosition.x.toFixed(1)}, ${previousPosition.y.toFixed(1)}). This host carries their own pack, coins and equipment. Theo’s memories and unfinished promises remain.`,
+        `${this.universeLife ? this.player.name + '’s awareness' : 'Theo’s mind'} entered ${target.name}, a living ${this.universeLife ? this.world.civilization!.roleNames[target.role] : target.role}, at (${target.x.toFixed(1)}, ${target.y.toFixed(1)}). ${previous.name}’s body and belongings remained at (${previousPosition.x.toFixed(1)}, ${previousPosition.y.toFixed(1)}). This host carries their own pack, coins and equipment. ${this.universeLife ? 'The traveler’s' : 'Theo’s'} memories and unfinished promises remain.`,
       );
     } else {
       // Without an answering mind, the clinic revives the current body at its rest anchor.
@@ -5120,7 +5440,7 @@ export class Stichos {
     this.event(
       'transfer',
       target
-        ? `Theo now breathes through ${target.name}’s body.`
+        ? `${this.universeLife ? this.player.name : 'Theo'} now breathes through ${target.name}’s body.`
         : `The clinic restores ${this.player.bodyName}’s breath.`,
     );
   }
@@ -5378,6 +5698,7 @@ export class Stichos {
       seed: this.seed,
       player: this.player,
       lifeOrigin: this.originRecord ?? undefined,
+      personalStories: this.personalStories.records.length ? this.personalStories : undefined,
       production: this.production.structures.length ? this.production : undefined,
       notebook: this.notebook,
       campaign: this.campaignState,
@@ -5613,6 +5934,7 @@ export class Stichos {
       game.winterLaborBaseline = ledger.laborBaseline;
     }
     game.freeLifeState = restoreFreeLife(data.freeLife);
+    game.personalStories = restorePersonalStories(data.personalStories);
     if (data.freeLife === undefined)
       game.freeLifeState.knownHosts = [...game.npcMemory.values()]
         .filter((n) => n.hp > 0 && !n.hostile && !game.removed.has(n.id))
@@ -5778,6 +6100,7 @@ function validateSave(value: unknown): SaveData {
     ['hairStyle', 'hat'].every((k) => number(v[k], 0, 100, true)) &&
     typeof v.cloak === 'boolean' &&
     (v.weaponSeed === undefined || number(v.weaponSeed, 0, MAX_WEAPON_SEED, true)) &&
+    (v.technology === undefined || number(v.technology, 0, 3, true)) &&
     (v.artifactDesign === undefined || validArtifactDesign(v.artifactDesign)) &&
     ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
   if (!object(value) || value.version !== 1 || !number(value.seed, 0, 0xffffffff, true))
@@ -6058,6 +6381,8 @@ function validateSave(value: unknown): SaveData {
   }
   if (value.freeLife !== undefined) {
     const freeLife = restoreFreeLife(value.freeLife);
+    const personal = restorePersonalStories(value.personalStories);
+    if (personal.records.some((r) => r.baselineCommissions > freeLife.completed)) return fail();
     if (
       freeLife.knownHosts.some(
         (id) => !(value.npcs as Npc[]).some((n) => n.id === id) && id !== value.occupiedNpcId,
