@@ -26,7 +26,7 @@ The game's present-day waking scene is not the first arrival on Stíchos. Theo h
 
 World layout, settlement details, local people, resources, and encounters vary with the seed. The author's narrative anchors remain coherent across seeds. The user explicitly prioritized humanoids for this iteration; the previous arbitrary-species experiment remains a separate reference implementation.
 
-Physical belongings stay with each inhabited body. The traveler's experience, memories, promises, and discoveries survive a transfer. The first time a generated resident is inhabited, their role and seed supply finite possessions; returning to them restores their actual remaining belongings. Clinic recovery treats the same body and is shown differently from entering another person.
+Physical belongings stay with each inhabited body. Theo’s physical notebook belongs to the original priest and remains with that body during a transfer. Another host can recall its contents but cannot open a paper book they do not carry; returning to the priest restores the actual notebook. The unique volume is separate from stackable supplies and satchel capacity. The traveler's experience, memories, promises, and discoveries survive a transfer. The first time a generated resident is inhabited, their role and seed supply finite possessions; returning to them restores their actual remaining belongings. Clinic recovery treats the same body and is shown differently from entering another person.
 
 ## Label compatibility
 

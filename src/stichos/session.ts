@@ -136,6 +136,7 @@ type SupplyJob = {
 };
 type BodyPossessions = {
   npcId: string;
+  notebook: boolean;
   inventory: Partial<Record<ItemId, number>>;
   coins: number;
   weapons: Weapon[];
@@ -251,6 +252,7 @@ export class Stichos {
   occupiedNpcId: string | null = null;
   private occupiedBody: Npc | null = null;
   private bodyPossessions = new Map<string, BodyPossessions>();
+  private notebook = true;
   private npcMemory = new Map<string, Npc>();
   private npcRuntime = new Map<string, Npc>();
   private supplyJobs = new Map<string, SupplyJob>();
@@ -313,6 +315,11 @@ export class Stichos {
     );
     this.refreshNpcs();
     this.visit();
+  }
+
+  /** A unique physical object belonging to the priest, separate from remembered pages. */
+  get hasNotebook() {
+    return this.notebook;
   }
 
   get transferReady() {
@@ -1897,6 +1904,7 @@ export class Stichos {
       if (previous.hp <= 0) this.removed.add(previous.id);
       this.bodyPossessions.set(previous.id, {
         npcId: previous.id,
+        notebook: this.notebook,
         inventory: clone(this.inventory),
         coins: this.player.coins,
         weapons: [...this.weapons],
@@ -1906,6 +1914,7 @@ export class Stichos {
       const belongings = this.bodyPossessions.get(target.id) ?? this.initialPossessions(target);
       this.bodyPossessions.delete(target.id);
       this.inventory = clone(belongings.inventory);
+      this.notebook = belongings.notebook;
       this.player.coins = belongings.coins;
       this.weapons.clear();
       for (const weapon of belongings.weapons) this.weapons.add(weapon);
@@ -1966,6 +1975,7 @@ export class Stichos {
           : npc.appearance.weapon;
     return {
       npcId: npc.id,
+      notebook: npc.id === `body:theo-priest:${this.seed}`,
       inventory:
         npc.role === 'guard'
           ? { cequin: 2, rations: 2, bandage: 1 }
@@ -2207,6 +2217,7 @@ export class Stichos {
       worldGeneration: this.world.generation,
       seed: this.seed,
       player: this.player,
+      notebook: this.notebook,
       inventory: this.inventory,
       removed: [...this.removed],
       opened: [...this.opened],
@@ -2235,6 +2246,8 @@ export class Stichos {
     const data = validateSave(value);
     const game = new Stichos(data.seed, data.worldGeneration ?? 1);
     game.player = clone(data.player);
+    const priestBodyId = `body:theo-priest:${data.seed}`;
+    game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
     game.inventory = { ...data.inventory };
     for (const id of data.removed) game.removed.add(id);
     for (const id of data.opened) game.opened.add(id);
@@ -2306,7 +2319,13 @@ export class Stichos {
     game.occupiedNpcId = data.occupiedNpcId ?? null;
     game.occupiedBody = data.occupiedBody ? clone(data.occupiedBody) : null;
     game.bodyPossessions = new Map(
-      (data.bodyPossessions ?? []).map((body) => [body.npcId, clone(body)]),
+      (data.bodyPossessions ?? []).map((body) => [
+        body.npcId,
+        {
+          ...clone(body),
+          notebook: body.notebook ?? body.npcId === priestBodyId,
+        },
+      ]),
     );
     game.supplyJobs = new Map(data.supplyJobs.map((job) => [job.npcId, clone(job)]));
     game.correspondenceJobs = new Map(
@@ -2548,8 +2567,13 @@ function validateSave(value: unknown): SaveData {
     )
       return fail();
   } else if (value.occupiedBody !== undefined && value.occupiedBody !== null) return fail();
+  const priestBodyId = `body:theo-priest:${value.seed}`;
+  const currentBodyId = value.occupiedNpcId ?? priestBodyId;
+  // There is no notebook trade/drop mechanic. The one physical volume stays with
+  // its original body; old saves omit these flags and derive the same ownership.
+  if (value.notebook !== undefined && value.notebook !== (currentBodyId === priestBodyId))
+    return fail();
   if (value.bodyPossessions !== undefined) {
-    const currentBodyId = value.occupiedNpcId ?? `body:theo-priest:${value.seed}`;
     if (
       !Array.isArray(value.bodyPossessions) ||
       !value.bodyPossessions.every(
@@ -2557,6 +2581,7 @@ function validateSave(value: unknown): SaveData {
           object(body) &&
           text(body.npcId, 160) &&
           body.npcId !== currentBodyId &&
+          (body.notebook === undefined || body.notebook === (body.npcId === priestBodyId)) &&
           (value.npcs as Npc[]).some((n) => n.id === body.npcId) &&
           object(body.inventory) &&
           Object.entries(body.inventory).every(

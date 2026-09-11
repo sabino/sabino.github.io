@@ -1617,3 +1617,124 @@ test('an origin-bound saved dispatch renames only derived city labels and preser
   assert.equal(result.correspondenceJobs[0].status, 'active');
   assert.deepEqual(Stichos.restore(result).save().correspondenceJobs, result.correspondenceJobs);
 });
+
+test('the unique physical notebook stays with the priest while remembered records survive changing bodies', () => {
+  const game = new Stichos(3886, 3);
+  assert.equal(game.hasNotebook, true);
+  const openingPack = structuredClone(game.inventory);
+  assert.equal(
+    game.carried,
+    Object.values(openingPack).reduce((sum, n) => sum + (n ?? 0), 0),
+    'the notebook uses no stack or capacity',
+  );
+  game.storyStage = 4;
+  const shrine = prop(game, (p) => p.kind === 'shrine');
+  walkTo(game, shrine);
+  const priest = game.save(),
+    first = game.transferCandidate!;
+  game.reincarnate(first.id);
+  assert.equal(game.hasNotebook, false);
+  assert.equal(game.save().notebook, false);
+  const priestBodyId = `body:theo-priest:${priest.seed}`;
+  assert.equal(game.save().bodyPossessions.find((b) => b.npcId === priestBodyId)?.notebook, true);
+  assert.ok(
+    priest.journal.every((entry) =>
+      game.journal.some((j) => j.title === entry.title && j.text === entry.text),
+    ),
+    'remembered pages remain known without the physical book',
+  );
+  assert.deepEqual(game.quests, priest.quests);
+  const restored = Stichos.restore(game.save());
+  assert.equal(restored.hasNotebook, false);
+  walkTo(restored, shrine);
+  restored.reincarnate(priestBodyId);
+  assert.equal(restored.occupiedNpcId, priestBodyId);
+  assert.equal(restored.hasNotebook, true);
+  assert.deepEqual(restored.inventory, priest.inventory);
+  assert.equal(restored.save().bodyPossessions.find((b) => b.npcId === first.id)?.notebook, false);
+  assert.equal(
+    Number(restored.save().notebook) +
+      restored.save().bodyPossessions.filter((b) => b.notebook).length,
+    1,
+  );
+  const again = Stichos.restore(restored.save());
+  assert.equal(again.hasNotebook, true);
+  again.reincarnate(first.id);
+  assert.equal(again.hasNotebook, false);
+  assert.equal(
+    Number(again.save().notebook) + again.save().bodyPossessions.filter((b) => b.notebook).length,
+    1,
+    'repeated swaps never duplicate the physical volume',
+  );
+});
+
+test('legacy notebook ownership follows the original body identity across every saved world generation', () => {
+  const withoutNotebook = (save: ReturnType<Stichos['save']>) => {
+    const { notebook: _book, ...old } = save;
+    return {
+      ...old,
+      bodyPossessions: old.bodyPossessions.map(({ notebook: _owned, ...body }) => body),
+    };
+  };
+  for (const generation of [1, 2, 3] as const) {
+    const game = new Stichos(3886, generation);
+    assert.equal(Stichos.restore(withoutNotebook(game.save())).hasNotebook, true);
+    game.storyStage = 4;
+    const shrine = prop(game, (p) => p.kind === 'shrine');
+    walkTo(game, shrine);
+    const priestBodyId = `body:theo-priest:${game.save().seed}`,
+      host = game.transferCandidate!;
+    game.reincarnate(host.id);
+    const legacy = withoutNotebook(game.save());
+    legacy.player.bodyName = 'The priest'; // A copied display name must not confer ownership.
+    const restored = Stichos.restore(legacy);
+    assert.equal(restored.occupiedNpcId, host.id);
+    assert.equal(restored.hasNotebook, false);
+    assert.equal(
+      restored.save().bodyPossessions.find((b) => b.npcId === priestBodyId)?.notebook,
+      true,
+    );
+    const { bodyPossessions: _ledger, ...older } = legacy;
+    const withoutLedger = Stichos.restore(older);
+    assert.equal(withoutLedger.hasNotebook, false);
+    walkTo(withoutLedger, shrine);
+    withoutLedger.reincarnate(priestBodyId);
+    assert.equal(
+      withoutLedger.hasNotebook,
+      true,
+      'even the pre-ledger save restores the priest’s own book on return',
+    );
+    assert.equal(Stichos.restore(withoutNotebook(withoutLedger.save())).hasNotebook, true);
+    assert.equal(Stichos.restore(restored.save()).hasNotebook, false);
+  }
+  const old = withoutNotebook(new Stichos(3886, 1).save());
+  const { worldGeneration: _generation, ...unversioned } = old;
+  assert.equal(Stichos.restore(unversioned).hasNotebook, true);
+});
+
+test('notebook save flags reject duplicate or malformed ownership and do not reduce satchel capacity', () => {
+  const game = new Stichos(3886, 2);
+  game.inventory = { cequin: 60 };
+  assert.equal(game.carried, 60);
+  assert.equal(game.hasNotebook, true);
+  assert.equal(Stichos.restore(game.save()).carried, 60);
+  for (const notebook of [false, null, 0, 1, 'true'])
+    assert.throws(() => Stichos.restore({ ...game.save(), notebook }));
+  game.storyStage = 4;
+  const shrine = prop(game, (p) => p.kind === 'shrine');
+  walkTo(game, shrine);
+  game.reincarnate();
+  const host = game.save();
+  assert.throws(
+    () => Stichos.restore({ ...host, notebook: true }),
+    'a generated host cannot receive a duplicated book',
+  );
+  for (const notebook of [false, null, 0, 'true'])
+    assert.throws(() =>
+      Stichos.restore({
+        ...host,
+        bodyPossessions: host.bodyPossessions.map((b) => ({ ...b, notebook })),
+      }),
+    );
+  assert.equal(Stichos.restore(host).hasNotebook, false);
+});
