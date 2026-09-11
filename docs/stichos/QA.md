@@ -1,3 +1,19 @@
+# Latest development checkpoint · 2026-09-11
+
+The served production build is `app-C8vFBFI2.js`, with 22 offline assets under service-worker version `3196174c0e7538eae009`. The cooperative/payment server has been restarted and its health endpoint responds successfully.
+
+The final full automated suite passed **269/269** in 58.44 seconds, including seed topology, full campaign with timed tool work and earned repairs, physical tool and artifact ownership, new labor model, resource zoning, multiplayer claims and payment verification. Detailed output: `.dream-loop/final-inventions-tests.log`. The subsequent core checkpoint `13de2c4` separately passed 15 focused artifact/labor tests and TypeScript: it rejects unsafe imported coordinates before world generation, lets E continue an active mining job beside a closer workbench, and grants the established residence once to eligible legacy saves without changing wealth or existing furnishings. Historical checks follow.
+
+The action-earned campaign completed all 24 leads over 12,113.9 tiles, 74 harvested resources and 4,087.68 simulated seconds (68.1 minutes). This is a rushed automated route, not four hours of verified human story play. The earlier four-hour continuing-life endurance pass predates the latest timed tool system.
+
+A real-input browser pass on `app-D-2s3gz4.js` started a fresh life and verified five groups: actual residence/240coins/three tools/three named staff; individual trust and exact paid reservation; wrong-tool rejection and repeated mining with wear; actual delivery after 60 seconds of world time and exact depletion/output; mobile closure and persisted ownership/tool condition/order status after reload. It reported no runtime exceptions. Screenshots and detailed results: `.dream-loop/stichos-labor-browser/`. Harness: `scripts/browser-stichos-labor.mjs`.
+
+The generalized artifact grammar tests 512 distinct connected assemblies with geometry/material-derived properties. Icons, carried forms and stowed forms share the same indexed pixels. Canvas checks preserved north-facing torso/head occlusion in 270 construction cases, and actual axe/pickaxe/sickle rendering passed 180 cases. Human pixel variations and construction contact sheets are in `.dream-loop/stichos-artifacts/`.
+
+Current scope limits: hired job travel is not yet animated; household orders run solo; shared rooms validate claims but do not own combat, tool condition or inventory authority; inactive hostile bodies still use conventional weapon AI despite retaining their artifact visuals. A wrapping globe, large-scale warfare, public accounts and activated real-money billing remain unfinished. Stripe integration is prepared and mocked; no real charge was made.
+
+---
+
 # Stíchos browser QA
 
 **PASS** — a generation-3 atlas and village journey, the earlier opening campaign and body-specific mind transfer, and a generation-2 vault/dispatch expedition completed through real browser input. The latest atlas check used `app-DHCdk53y.js` / service worker `f58d84fdadaa2ae9f891`. The opening and possession checks used `app-C7Uk0xX8.js` / service worker `fb8fa2a70d25b402a3ce`; the expedition used `app-BQLDpW6p.js` / `3cdc9cff1bf20984bc80`, at `http://localhost:4174/`.
