@@ -1,3 +1,4 @@
+import type { Peer } from './multiplayer-protocol';
 import type { Stichos } from './session.ts';
 import type { Effect, Npc, Point, Prop, Tile } from './types.ts';
 import { random, deriveSeed } from '../procedural/random.ts';
@@ -12,6 +13,7 @@ import {
   rect,
 } from './art.ts';
 import type { CivilBuildingKind, Sprite } from './art.ts';
+import { drawHomeDecoration, homeDecorations } from './progression-art.ts';
 
 interface Building {
   id: string;
@@ -101,7 +103,14 @@ export class StichosRenderer {
   draw(
     game: Stichos,
     // pointer is an optional destination in world tile coordinates, like player/NPC positions.
-    options: { reducedMotion?: boolean; transfer?: number; pointer?: Point | null } = {},
+    options: {
+      reducedMotion?: boolean;
+      transfer?: number;
+      pointer?: Point | null;
+      peers?: readonly Peer[];
+      playerAppearance?: Stichos['player']['appearance'];
+      emotes?: ReadonlyMap<string, { text: string; until: number }>;
+    } = {},
   ) {
     const ctx = this.ctx,
       unit = this.unit,
@@ -249,6 +258,32 @@ export class StichosRenderer {
         depth: prop.y + (prop.kind === 'door' ? 0.45 : 0),
         draw: () => this.prop(game, prop),
       });
+    for (const home of game.progression.homes) {
+      if (Math.hypot(home.x - this.camera.x, home.y - this.camera.y) > radius + 16) continue;
+      for (const decoration of homeDecorations(home, game.time, game.world)) {
+        const p = this.worldToScreen(decoration);
+        if (
+          p.x < -unit * 2 ||
+          p.x > this.width + unit * 2 ||
+          p.y < -unit ||
+          p.y > this.height + unit * 3
+        )
+          continue;
+        drawables.push({
+          depth: decoration.y,
+          draw: () =>
+            drawHomeDecoration(
+              ctx,
+              decoration,
+              p.x,
+              p.y,
+              scale,
+              game.time,
+              !!options.reducedMotion,
+            ),
+        });
+      }
+    }
     const playerScreen = this.worldToScreen(game.player);
     for (const npc of game.npcs) {
       if (npc.id === game.occupiedNpcId) continue;
@@ -263,7 +298,24 @@ export class StichosRenderer {
       this.npcPrevious.set(npc.id, { x: npc.x, y: npc.y });
       drawables.push({ depth: npc.y, draw: () => this.person(game, npc, false) });
     }
-    drawables.push({ depth: game.player.y, draw: () => this.person(game, game.player, true) });
+    drawables.push({
+      depth: game.player.y,
+      draw: () =>
+        this.person(
+          game,
+          options.playerAppearance
+            ? { ...game.player, appearance: options.playerAppearance }
+            : game.player,
+          true,
+        ),
+    });
+    for (const peer of options.peers ?? []) {
+      if (Math.hypot(peer.x - game.player.x, peer.y - game.player.y) > radius) continue;
+      drawables.push({
+        depth: peer.y,
+        draw: () => this.remotePerson(peer, options.emotes?.get(peer.id)),
+      });
+    }
     drawables.sort((a, b) => a.depth - b.depth).forEach((item) => item.draw());
     for (const prop of props) {
       const p = this.worldToScreen(prop);
@@ -693,6 +745,55 @@ export class StichosRenderer {
     ctx.globalAlpha = alpha;
     ctx.drawImage(this.contactTexture, p.x - width + 4, p.y - height + 2, width * 2, height * 2);
     ctx.restore();
+  }
+  private remotePrevious = new Map<string, Point & { last: number }>();
+  private remotePerson(peer: Peer, emote?: { text: string; until: number }) {
+    const time = performance.now();
+    let shown = this.remotePrevious.get(peer.id);
+    if (!shown || Math.hypot(shown.x - peer.x, shown.y - peer.y) > 8)
+      shown = { ...peer, last: time };
+    const elapsed = Math.min(0.1, Math.max(0, (time - shown.last) / 1000));
+    const walking = Math.hypot(shown.x - peer.x, shown.y - peer.y) > 0.02;
+    const blend = 1 - Math.exp(-elapsed * 18);
+    shown.x += (peer.x - shown.x) * blend;
+    shown.y += (peer.y - shown.y) * blend;
+    shown.last = time;
+    this.remotePrevious.set(peer.id, shown);
+    if (this.remotePrevious.size > 24)
+      this.remotePrevious.delete(this.remotePrevious.keys().next().value!);
+    const p = this.worldToScreen(shown),
+      scale = (this.unit / 32) * 1.35,
+      ctx = this.ctx;
+    this.shadow(p, 7 * scale, 3 * scale, 0.38);
+    ctx.strokeStyle = '#84c9c7';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, 10 * scale, 5 * scale, 0, 0, TAU);
+    ctx.stroke();
+    const facing = humanoidDirection(peer.heading);
+    drawHumanoid(
+      ctx,
+      peer.appearance,
+      p.x,
+      p.y,
+      scale,
+      facing.face,
+      peer.phase,
+      walking,
+      0,
+      false,
+      facing.weaponBehindBody,
+    );
+    const label = emote && emote.until > time ? `${peer.name} · ${emote.text}` : peer.name;
+    ctx.font = '11px Georgia,serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const y = p.y - 48 * scale * peer.appearance.height;
+    const width = ctx.measureText(label).width + 12;
+    ctx.fillStyle = '#102e39e8';
+    ctx.fillRect(p.x - width / 2, y - 14, width, 17);
+    ctx.fillStyle = '#abe2dc';
+    ctx.fillText(label, p.x, y);
   }
   private person(game: Stichos, person: Npc | Stichos['player'], player: boolean) {
     const p = this.worldToScreen(person),

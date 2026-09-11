@@ -1,0 +1,168 @@
+.s-life-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.s-life-tabs button[aria-current='page'] {
+  border-color: #bfad80;
+  background: #364542;
+  color: #efe2bc;
+}
+.s-life-balance {
+  color: #bca979;
+  font-size: 13px;
+  border-bottom: 1px solid #465450;
+  padding-bottom: 12px;
+}
+.s-life-message:empty {
+  display: none;
+}
+.s-life-message {
+  padding: 10px 14px;
+  background: #263f38;
+  border-left: 3px solid #bda778;
+}
+.s-life-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin: 18px 0 26px;
+}
+.s-life-grid article,
+.s-home-detail {
+  background: linear-gradient(140deg, #253733, #1b2927);
+  border: 1px solid #46554c;
+  border-radius: 5px;
+  padding: 18px;
+}
+.s-life-grid h3,
+.s-life-grid h4 {
+  text-transform: capitalize;
+  margin: 8px 0;
+  color: #e7ddbf;
+  font:
+    500 21px Georgia,
+    serif;
+}
+.s-life-grid small {
+  color: #baa984;
+  display: block;
+  font-size: 12px;
+}
+.s-life-grid p {
+  font-size: 14px !important;
+  line-height: 1.55 !important;
+  margin: 10px 0 !important;
+}
+.s-life-grid progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #a8c393;
+}
+.s-life-action button {
+  display: block;
+  width: 100%;
+  margin: 10px 0 5px;
+}
+.s-life-action button small {
+  margin-top: 4px;
+  color: inherit;
+}
+.s-life-action > small {
+  line-height: 1.5;
+  color: #aaa997;
+}
+.s-life-grid button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.s-style-grid canvas {
+  display: block;
+  margin: 0 auto;
+  image-rendering: pixelated;
+  background: radial-gradient(ellipse, #52625766, transparent 70%);
+}
+.s-home-detail {
+  padding: 20px;
+}
+.s-life-grid select,
+#s-home-select {
+  max-width: 100%;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #677264;
+  background: #253631;
+  color: #e5ddc4;
+}
+.s-room-people {
+  border-block: 1px solid #4c5d53;
+  margin: 18px 0;
+}
+.s-room-people p {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.s-room-people span {
+  font-size: 13px;
+  color: #afc0ae;
+}
+.s-room-status {
+  color: #c6d7b1 !important;
+}
+#s-room-form label {
+  display: block;
+  margin: 12px 0;
+}
+#s-room-form input,
+#s-room-invitation {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+}
+#s-room-return {
+  margin-top: 16px;
+}
+#s-life-return {
+  margin-top: 12px;
+}
+.s-header nav {
+  gap: 6px;
+}
+.s-header nav button {
+  padding-inline: 10px;
+}
+@media (max-width: 760px) {
+  .s-header .s-brand span {
+    display: none;
+  }
+  .s-header .s-location {
+    display: none;
+  }
+  .s-header nav {
+    gap: 3px;
+  }
+  .s-header nav button {
+    padding: 8px;
+    font-size: 11px;
+  }
+  .s-header nav kbd {
+    display: none;
+  }
+  .s-life-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+  .s-home-detail {
+    padding: 12px;
+  }
+  .s-life-tabs button {
+    font-size: 12px;
+    padding: 9px;
+  }
+  .s-room-people p {
+    flex-direction: column;
+    gap: 2px;
+  }
+}
