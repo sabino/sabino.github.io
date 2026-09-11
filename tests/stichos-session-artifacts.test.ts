@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Stichos } from '../src/stichos/session.ts';
 import { generateArtifact, type ArtifactDelivery } from '../src/stichos/artifacts.ts';
+import { artifactToolKind } from '../src/stichos/labor.ts';
 import type { Npc, Point } from '../src/stichos/types.ts';
 
 const designs = new Map<ArtifactDelivery, string>();
@@ -189,13 +190,16 @@ test('artifacts remain with the original physical body and its notebook after re
   let game = prepared(design);
   game.storyStage = 4;
   game.createArtifact(design);
-  const priest = game.bodyId;
+  const priest = game.bodyId,
+    tools = structuredClone(game.tools);
   move(game, { x: 0, y: 5 });
   move(game, { x: 0, y: 0 });
   move(game, { x: -1, y: -1 });
   const target = game.transferCandidates.find((n) => n.role === 'pilgrim')!;
   game.reincarnate(target.id);
   assert.equal(game.artifacts.length, 0);
+  assert.equal(game.tools.length, 0);
+  assert.equal(game.workProgress, null);
   assert.equal(game.hasNotebook, false);
   const saved = game.save();
   assert.equal(saved.npcs.find((n) => n.id === priest)!.appearance.artifactDesign, design);
@@ -203,6 +207,7 @@ test('artifacts remain with the original physical body and its notebook after re
   move(game, { x: -1, y: -1 });
   game.reincarnate(priest);
   assert.equal(game.activeArtifact!.design, design);
+  assert.deepEqual(game.tools, tools);
   assert.equal(game.displayAppearance.artifactDesign, design);
   assert.equal(game.hasNotebook, true);
 });
@@ -236,11 +241,14 @@ test('artifact saves regenerate designs and reject forged graphs, invalid equipm
 });
 
 test('gathering implements affect both real harvest and capacity preflight', () => {
-  const design = designs.get('projectile')!,
+  const design = Array.from({ length: 1000 }, (_, i) => `session-gather:${i}`).find(
+      (d) => artifactToolKind(generateArtifact(d)) === 'pickaxe',
+    )!,
     game = prepared(design);
   const bonus = generateArtifact(design).properties.harvest;
   assert.ok(bonus > 0);
   game.createArtifact(design);
+  const durability = game.artifacts[0].durability!;
   const rock = game.world.propsAround(0, 0, 30).find((p) => p.kind === 'rock')!;
   const neighbor = [
     { x: rock.x + 1, y: rock.y },
@@ -255,9 +263,22 @@ test('gathering implements affect both real harvest and capacity preflight', () 
   assert.equal(game.removed.has(rock.id), false);
   game.inventory = { wood: 57 - bonus };
   assert.equal(game.interactionAvailability(rock.id).ok, true);
-  game.interact(rock.id);
+  for (let i = 0; i < 10 && !game.removed.has(rock.id); i++) {
+    game.interact(rock.id);
+    for (let j = 0; j < 16; j++) game.update(0.1, { x: 0, y: 0, run: false });
+  }
   assert.equal(game.inventory.ore, 2 + bonus);
   assert.equal(game.carried, 60);
+  assert.ok(game.artifacts[0].durability! < durability);
+  const restored = Stichos.restore(game.save());
+  assert.equal(restored.artifacts[0].durability, game.artifacts[0].durability);
+  Object.assign(restored.player, { x: 4, y: 5 });
+  restored.inventory = { wood: 1, ore: 1 };
+  const coins = restored.player.coins;
+  assert.equal(restored.repairArtifact(design).ok, true);
+  assert.equal(restored.artifacts[0].durability, durability);
+  assert.equal(restored.player.coins, coins - 4);
+  assert.deepEqual(restored.inventory, {});
 });
 
 test('salvage clears physical equipment, replaces one slot with a real material and cannot duplicate it', () => {
@@ -274,4 +295,14 @@ test('salvage clears physical equipment, replaces one slot with a real material 
   assert.equal(game.salvageArtifact(design).ok, false);
   assert.equal(game.inventory.ore, ore + 1);
   assert.equal(Stichos.restore(game.save()).artifacts.length, 0);
+});
+
+test('an implement chooses a visible delivery pose even on an unarmed body without rewriting its ordinary belongings', () => {
+  const design = designs.get('projectile')!,
+    g = prepared(design);
+  g.player.appearance.weapon = 'none';
+  g.createArtifact(design);
+  assert.equal(g.player.appearance.weapon, 'none');
+  assert.equal(g.displayAppearance.weapon, 'bow');
+  assert.equal(g.displayAppearance.artifactDesign, design);
 });

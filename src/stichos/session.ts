@@ -5,6 +5,23 @@ import {
   ORIGIN_CITY_NAME,
   type WorldGeneration,
 } from './world.ts';
+import {
+  seededTool,
+  requiredToolFor,
+  resourceWork,
+  applyToolStroke,
+  workerProfile,
+  assignLabor,
+  finishLabor,
+  validateLaborOrders,
+  artifactToolKind,
+  THEO_ESTATE,
+  type ToolKind,
+  type ToolState,
+  type WorkProgress,
+  type LaborKind,
+  type LaborOrder,
+} from './labor.ts';
 import { deriveSeed } from '../procedural/random.ts';
 import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
@@ -298,8 +315,21 @@ export class Stichos {
     propId?: string;
     failedAtRemovedSize?: number;
   } | null = null;
+  private toolPacks = new Map<string, { tools: ToolState[]; equipped: ToolKind | null }>();
+  private currentWork:
+    | (WorkProgress & { requiredStrokes: number; toolKind: ToolKind; bodyId: string })
+    | null = null;
+  private orders: LaborOrder[] = [];
+  private laborSerial = 0;
+  private sharedWorld = false;
+  private estateTrust: Record<string, boolean> = Object.fromEntries(
+    THEO_ESTATE.staffIds.map((id) => [id, true]),
+  );
   private inventionSerial = 0;
-  private artifactPacks = new Map<string, { designs: string[]; equipped: string | null }>();
+  private artifactPacks = new Map<
+    string,
+    { designs: string[]; equipped: string | null; wear?: Record<string, number> }
+  >();
   private forgedWeapons = new Map<
     string,
     Partial<Record<Weapon, { seed: number; ownerSeed: number; recipe: ForgeRecipe }>>
@@ -341,11 +371,12 @@ export class Stichos {
       speed: 3,
       level: 1,
       xp: 0,
-      coins: 18,
+      coins: THEO_ESTATE.coins,
       attackCooldown: 0,
       wardCooldown: 0,
       cequinTime: 0,
     };
+    this.initializeEstate();
     this.player.appearance.weapon = 'staff';
     this.player.appearance.coat = '#8d5847';
     this.player.appearance.cloak = true;
@@ -528,9 +559,288 @@ export class Stichos {
     if (forged) look.weaponSeed = forged.seed;
     else delete look.weaponSeed;
     const artifact = this.artifactPacks.get(bodyId)?.equipped;
-    if (artifact) look.artifactDesign = artifact;
-    else delete look.artifactDesign;
+    if (artifact) {
+      look.artifactDesign = artifact;
+      const delivery = generateArtifact(artifact).delivery;
+      look.weapon = delivery === 'projectile' ? 'bow' : delivery === 'pulse' ? 'staff' : 'sword';
+    } else delete look.artifactDesign;
     return look;
+  }
+  private initializeEstate() {
+    const owner = `body:theo-priest:${this.seed}`,
+      seed = this.player.appearance.seed;
+    this.toolPacks.set(owner, {
+      tools: THEO_ESTATE.toolKinds.map((kind) => ({
+        kind,
+        seed,
+        durability: seededTool(seed, kind).maxDurability,
+      })),
+      equipped: 'sickle',
+    });
+    const door = this.world
+      .propsAround(THEO_ESTATE.x, THEO_ESTATE.y, 8)
+      .find(
+        (p) =>
+          p.building === THEO_ESTATE.residenceId && p.kind === 'door' && p.id.endsWith(':door:1'),
+      );
+    if (door)
+      this.progression.homes.push({
+        id: THEO_ESTATE.residenceId,
+        buildingId: THEO_ESTATE.residenceId,
+        settlementId: 'origin',
+        name: THEO_ESTATE.residenceName,
+        x: door.x,
+        y: door.y,
+        purchasedAt: 0,
+        furniture: {},
+        plots: [null, null],
+      });
+  }
+  get estate() {
+    return {
+      residence: this.progression.homes.find((h) => h.id === THEO_ESTATE.residenceId) ?? null,
+      staffIds: [...THEO_ESTATE.staffIds],
+      description: THEO_ESTATE.description,
+    };
+  }
+  get tools() {
+    const pack = this.toolPacks.get(this.bodyId);
+    return (pack?.tools ?? []).map((tool) => ({
+      ...tool,
+      profile: seededTool(tool.seed, tool.kind),
+      equipped: pack?.equipped === tool.kind,
+    }));
+  }
+  get workProgress() {
+    return this.currentWork && this.currentWork.bodyId === this.bodyId
+      ? { ...this.currentWork }
+      : null;
+  }
+  equipTool(kind: ToolKind) {
+    const pack = this.toolPacks.get(this.bodyId);
+    if (this.phase !== 'playing' || !pack?.tools.some((t) => t.kind === kind))
+      return { ok: false, message: 'This body does not carry that tool.' };
+    if (pack.equipped !== kind || this.activeArtifact) this.currentWork = null;
+    pack.equipped = kind;
+    this.clearArtifact();
+    return { ok: true, message: `Equipped ${kind} for work.` };
+  }
+  buyTool(kind: ToolKind) {
+    if (
+      !THEO_ESTATE.toolKinds.includes(kind) ||
+      this.phase !== 'playing' ||
+      !this.progressionContext().nearWorkbench
+    )
+      return { ok: false, message: 'Choose a tool at a workbench.' };
+    const pack = this.toolPacks.get(this.bodyId) ?? { tools: [], equipped: null };
+    if (pack.tools.some((t) => t.kind === kind))
+      return { ok: false, message: 'Repair the tool this body already carries.' };
+    if (this.player.coins < 18 || !this.has({ wood: 2, ore: 2 }))
+      return { ok: false, message: 'A tool costs 18 coins, two wood and two ore.' };
+    this.player.coins -= 18;
+    this.spend({ wood: 2, ore: 2 });
+    const seed = this.player.appearance.seed;
+    pack.tools.push({ kind, seed, durability: seededTool(seed, kind).maxDurability });
+    pack.equipped = kind;
+    this.toolPacks.set(this.bodyId, pack);
+    return { ok: true, message: `Built a ${kind} for this body.` };
+  }
+  repairTool(kind: ToolKind) {
+    const tool = this.toolPacks.get(this.bodyId)?.tools.find((t) => t.kind === kind);
+    if (!tool || this.phase !== 'playing' || !this.progressionContext().nearWorkbench)
+      return { ok: false, message: 'Bring the tool to a workbench.' };
+    const profile = seededTool(tool.seed, kind);
+    if (tool.durability === profile.maxDurability)
+      return { ok: false, message: 'This tool needs no repair.' };
+    if (!this.has({ wood: 1, ore: 1 }) || this.player.coins < 4)
+      return { ok: false, message: 'Repair costs one wood, one ore and four coins.' };
+    this.spend({ wood: 1, ore: 1 });
+    this.player.coins -= 4;
+    tool.durability = profile.maxDurability;
+    return { ok: true, message: `Repaired ${profile.name}.` };
+  }
+  private workTool(prop: Prop): ToolState | null {
+    const required = requiredToolFor(prop.kind),
+      artifact = this.activeArtifact;
+    if (artifact)
+      return artifactToolKind(artifact) === required
+        ? {
+            kind: required!,
+            seed: this.player.appearance.seed,
+            durability:
+              seededTool(this.player.appearance.seed, required!).maxDurability -
+              (this.artifactPacks.get(this.bodyId)?.wear?.[artifact.design] ?? 0),
+          }
+        : null;
+    const pack = this.toolPacks.get(this.bodyId);
+    return pack?.equipped === required
+      ? (pack.tools.find((t) => t.kind === required) ?? null)
+      : null;
+  }
+  private workPreview(prop: Prop) {
+    const tool = this.workTool(prop);
+    if (!tool)
+      return {
+        ok: false as const,
+        reason: `Equip a ${requiredToolFor(prop.kind)} suited to this resource.`,
+      };
+    return applyToolStroke({
+      prop,
+      tool,
+      work: this.currentWork?.bodyId === this.bodyId ? this.currentWork : null,
+      stamina: this.player.stamina,
+      now: this.time,
+    });
+  }
+  get staff() {
+    return THEO_ESTATE.staffIds
+      .map((id) => this.laborWorker(id))
+      .filter((n): n is Npc => !!n)
+      .map((npc) => ({
+        ...workerProfile(npc, this.reputation),
+        trusted: this.estateTrust[npc.id] !== false,
+        x: npc.x,
+        y: npc.y,
+      }));
+  }
+  private laborWorker(id: string) {
+    return (
+      this.npcs.find((n) => n.id === id) ??
+      this.npcMemory.get(id) ??
+      this.world.npcsAround(0, 0, 24).find((n) => n.id === id)
+    );
+  }
+  chooseEstateTrust(workerId: string, trusted: boolean) {
+    if (
+      this.phase !== 'playing' ||
+      !THEO_ESTATE.staffIds.includes(workerId) ||
+      typeof trusted !== 'boolean'
+    )
+      return { ok: false, message: 'Choose a named household relationship.' };
+    this.estateTrust[workerId] = trusted;
+    return {
+      ok: true,
+      message: trusted
+        ? 'Retained this paid working relationship; their judgment remains their own.'
+        : 'Released this person from future household assignments. Existing paid work retains its terms.',
+    };
+  }
+  setSharedWorld(active: boolean) {
+    this.sharedWorld = active;
+  }
+  get laborOrders() {
+    return clone(this.orders);
+  }
+  laborPreview(workerId: string, kind: LaborKind) {
+    const worker = this.laborWorker(workerId);
+    if (this.sharedWorld)
+      return {
+        ok: false as const,
+        message: 'This worker cannot accept that order.',
+        reason: 'Collective resource orders require a solo world.',
+      };
+    if (
+      this.phase !== 'playing' ||
+      !worker ||
+      !THEO_ESTATE.staffIds.includes(workerId) ||
+      this.estateTrust[workerId] === false ||
+      this.occupiedNpcId === workerId ||
+      this.removed.has(workerId)
+    )
+      return {
+        ok: false as const,
+        message: 'This worker cannot accept that order.',
+        reason: 'This trusted, living worker is not available.',
+      };
+    if (
+      this.orders.filter((o) => o.status === 'working').length >= 64 ||
+      this.laborSerial >= Number.MAX_SAFE_INTEGER
+    )
+      return {
+        ok: false as const,
+        message: 'This worker cannot accept that order.',
+        reason: 'The labor ledger is full.',
+      };
+    const result = assignLabor({
+      worker,
+      reputation: this.reputation,
+      kind,
+      props: this.world.propsAround(worker.x, worker.y, 24),
+      removed: this.removed,
+      orders: this.orders,
+      now: this.time,
+      serial: this.laborSerial + 1,
+      coins: this.player.coins,
+      yieldFor: (p) => this.baseLaborYield(p),
+    });
+    return {
+      ...result,
+      message: result.ok ? `Agree ${result.wages} coins for finite resource work.` : result.reason,
+    };
+  }
+  private baseLaborYield(prop: Prop) {
+    if (!['cequin', 'heartleaf', 'emberroot', 'mushroom'].includes(prop.kind)) return 2;
+    if (this.world.generation === 1 || prop.id.startsWith('origin:'))
+      return prop.kind === 'cequin' ? 3 : 2;
+    return plantProfile(prop.seed, prop.kind as PlantKind).yield;
+  }
+  hireLabor(workerId: string, kind: LaborKind) {
+    const preview = this.laborPreview(workerId, kind);
+    if (!preview.ok) return { ok: false, message: preview.reason };
+    this.player.coins -= preview.wages;
+    this.laborSerial++;
+    this.orders = this.orders.filter((o) => o.status === 'working').slice(-63);
+    this.orders.push(preview.order);
+    this.rememberNpc(this.laborWorker(workerId)!);
+    return {
+      ok: true,
+      message: `${preview.order.workerName} accepted ${preview.wages} coins. Collect after ${Math.ceil(preview.order.endsAt - this.time)} seconds of lived time.`,
+    };
+  }
+  collectLabor(orderId: string) {
+    if (this.sharedWorld)
+      return { ok: false, message: 'Collective resource orders require a solo world.' };
+    const order = this.orders.find((o) => o.id === orderId),
+      worker = order && this.laborWorker(order.workerId);
+    if (
+      this.phase !== 'playing' ||
+      !order ||
+      !worker ||
+      this.occupiedNpcId === worker.id ||
+      this.removed.has(worker.id)
+    )
+      return { ok: false, message: 'The worker is unavailable.' };
+    if (
+      distance(worker, this.player) > 4 &&
+      !(this.estate.residence && distance(this.estate.residence, this.player) <= 10)
+    )
+      return { ok: false, message: 'Collect beside the worker or at the established residence.' };
+    const result = finishLabor(order, {
+      worker,
+      props: order.allocations.flatMap((a) => this.world.propsAround(a.x, a.y, 1)),
+      removed: this.removed,
+      now: this.time,
+    });
+    if (!result.ok) return { ok: false, message: result.reason };
+    if (
+      this.carried + Object.values(result.output).reduce((sum, n) => sum + (n ?? 0), 0) >
+      this.capacity
+    )
+      return { ok: false, message: 'Make room before collecting the complete order.' };
+    for (const id of result.consumeIds) this.removed.add(id);
+    this.gain(result.output);
+    Object.assign(order, result.order);
+    return { ok: true, message: `${worker.name} delivered the agreed resources.` };
+  }
+  cancelLabor(orderId: string) {
+    const order = this.orders.find((o) => o.id === orderId);
+    if (!order || order.status !== 'working')
+      return { ok: false, message: 'This assignment has already ended.' };
+    order.status = 'cancelled';
+    return {
+      ok: true,
+      message: 'Assignment withdrawn. Agreed wages already paid are not refunded.',
+    };
   }
   artifactDesign(index = 0) {
     const offset = Number.isSafeInteger(index) && index >= 0 ? index : 0;
@@ -545,6 +855,18 @@ export class Stichos {
       design,
       genome: generateArtifact(design),
       equipped: pack?.equipped === design,
+      toolKind: artifactToolKind(generateArtifact(design)),
+      ...(artifactToolKind(generateArtifact(design))
+        ? {
+            durability:
+              seededTool(this.player.appearance.seed, artifactToolKind(generateArtifact(design))!)
+                .maxDurability - (pack?.wear?.[design] ?? 0),
+            maxDurability: seededTool(
+              this.player.appearance.seed,
+              artifactToolKind(generateArtifact(design))!,
+            ).maxDurability,
+          }
+        : {}),
     }));
   }
   get activeArtifact(): ArtifactGenome | null {
@@ -655,6 +977,24 @@ export class Stichos {
     this.event('heal', message);
     return { ok: true, message, genome };
   }
+  repairArtifact(design: string) {
+    const item = this.artifacts.find((a) => a.design === design),
+      pack = this.artifactPacks.get(this.bodyId);
+    if (
+      this.phase !== 'playing' ||
+      !item?.toolKind ||
+      !pack ||
+      !this.progressionContext().nearWorkbench
+    )
+      return { ok: false, message: 'Bring this gathering implement to a workbench.' };
+    if (!pack.wear?.[design]) return { ok: false, message: 'This implement needs no repair.' };
+    if (this.player.coins < 4 || !this.has({ wood: 1, ore: 1 }))
+      return { ok: false, message: 'Repair costs four coins, one wood and one ore.' };
+    this.player.coins -= 4;
+    this.spend({ wood: 1, ore: 1 });
+    delete pack.wear[design];
+    return { ok: true, message: `Repaired ${item.genome.name}.` };
+  }
   salvageArtifact(design: string) {
     let genome: ArtifactGenome;
     try {
@@ -668,6 +1008,7 @@ export class Stichos {
     const item: ItemId = genome.cost.items.ore ? 'ore' : 'wood';
     pack.designs = pack.designs.filter((value) => value !== genome.design);
     if (pack.equipped === genome.design) pack.equipped = null;
+    if (pack.wear) delete pack.wear[genome.design];
     if (!pack.designs.length) this.artifactPacks.delete(this.bodyId);
     this.inventory[item] = (this.inventory[item] ?? 0) + 1;
     const message = `Salvaged ${genome.name} into one ${item}.`;
@@ -1454,7 +1795,12 @@ export class Stichos {
   }
 
   /** Read-only preflight for atomic multiplayer claims; the local transaction rechecks all rules. */
-  interactionAvailability(propId: string): { ok: boolean; reason?: string } {
+  interactionAvailability(propId: string): {
+    ok: boolean;
+    reason?: string;
+    completes?: boolean;
+    toolKind?: ToolKind;
+  } {
     if (this.phase !== 'playing') return { ok: false, reason: 'This body cannot act.' };
     const prop = this.world
       .propsAround(this.player.x, this.player.y, 2.2)
@@ -1465,13 +1811,8 @@ export class Stichos {
       return { ok: false, reason: 'Already gathered.' };
     if (['chest', 'crate'].includes(prop.kind) && this.opened.has(prop.id))
       return { ok: false, reason: 'Already searched.' };
-    if (
-      ['pine', 'rock'].includes(prop.kind) &&
-      (this.activeArtifact
-        ? this.activeArtifact.properties.harvest <= 0
-        : this.player.appearance.weapon !== 'staff')
-    )
-      return { ok: false, reason: 'Equip a staff or a gathering implement for timber and ore.' };
+    const work = requiredToolFor(prop.kind) ? this.workPreview(prop) : null;
+    if (work && !work.ok) return { ok: false, reason: work.reason };
     const amount = ['chest', 'crate'].includes(prop.kind)
       ? prop.id.startsWith('vault:')
         ? 6
@@ -1489,7 +1830,10 @@ export class Stichos {
     )
       return { ok: false, reason: 'Step clear of the doorway before closing it.' };
     if (this.carried + amount > this.capacity) return { ok: false, reason: 'Your pack is full.' };
-    return { ok: true };
+    return {
+      ok: true,
+      ...(work?.ok ? { completes: work.complete, toolKind: requiredToolFor(prop.kind)! } : {}),
+    };
   }
 
   get campaign() {
@@ -1980,15 +2324,44 @@ export class Stichos {
   }
 
   private harvest(prop: Prop) {
-    if (
-      (prop.kind === 'pine' || prop.kind === 'rock') &&
-      (this.activeArtifact
-        ? this.activeArtifact.properties.harvest <= 0
-        : this.player.appearance.weapon !== 'staff')
-    ) {
-      this.event('dialogue', 'Equip a staff or a gathering implement for timber and ore.');
+    const availability = this.interactionAvailability(prop.id);
+    if (!availability.ok) {
+      this.event('dialogue', availability.reason);
       return;
     }
+    const stroke = this.workPreview(prop);
+    if (!stroke.ok) {
+      this.event('dialogue', stroke.reason);
+      return;
+    }
+    const toolKind = requiredToolFor(prop.kind)!;
+    this.currentWork = {
+      ...stroke.work,
+      requiredStrokes: resourceWork(prop)!.requiredStrokes,
+      toolKind,
+      bodyId: this.bodyId,
+    };
+    this.player.stamina -= stroke.staminaCost;
+    if (this.activeArtifact) {
+      const pack = this.artifactPacks.get(this.bodyId)!;
+      pack.wear ??= {};
+      pack.wear[this.activeArtifact.design] =
+        seededTool(stroke.tool.seed, toolKind).maxDurability - stroke.tool.durability;
+    } else {
+      const pack = this.toolPacks.get(this.bodyId)!;
+      pack.tools = pack.tools.map((t) => (t.kind === toolKind ? stroke.tool : t));
+    }
+    this.effect('harvest', prop, '#dfc69b', 0.65);
+    const effect = this.effects.at(-1);
+    if (effect) effect.tool = { kind: toolKind, seed: stroke.tool.seed };
+    if (!stroke.complete) {
+      this.event(
+        'harvest',
+        `${toolKind}: ${stroke.work.strokes}/${this.currentWork.requiredStrokes} strokes.`,
+      );
+      return;
+    }
+    this.currentWork = null;
     const item: ItemId =
       prop.kind === 'pine'
         ? 'wood'
@@ -2876,6 +3249,7 @@ export class Stichos {
       this.phase = 'lost';
       this.dialogue = null;
       this.arrows = [];
+      this.currentWork = null;
       this.enemyIntents.clear();
       this.entry(
         'The body falls quiet',
@@ -3099,6 +3473,7 @@ export class Stichos {
     this.phase = 'playing';
     this.dialogue = null;
     this.arrows = [];
+    this.currentWork = null;
     this.enemyIntents.clear();
     this.effects = [];
     this.refreshNpcs();
@@ -3375,11 +3750,19 @@ export class Stichos {
       campaign: this.campaignState,
       progression: this.progression,
       freeLife: this.freeLifeState,
+      labor: {
+        serial: this.laborSerial,
+        trust: this.estateTrust,
+        orders: this.orders,
+        tools: [...this.toolPacks].map(([bodyId, pack]) => ({ bodyId, ...pack })),
+        work: this.currentWork,
+      },
       inventionSerial: this.inventionSerial,
       artifactPacks: [...this.artifactPacks].map(([bodyId, pack]) => ({
         bodyId,
         designs: [...pack.designs],
         equipped: pack.equipped,
+        wear: { ...pack.wear },
       })),
       forgedWeapons: [...this.forgedWeapons].flatMap(([bodyId, weapons]) =>
         Object.entries(weapons).map(([kind, record]) => ({ bodyId, kind, ...record })),
@@ -3416,11 +3799,23 @@ export class Stichos {
     game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
     game.inventory = { ...data.inventory };
     game.progression = restoreProgression(data.progression, data.seed);
+    if (data.labor) {
+      game.laborSerial = data.labor.serial;
+      game.estateTrust = { ...data.labor.trust };
+      game.orders = clone(data.labor.orders);
+      game.toolPacks = new Map(
+        data.labor.tools.map((pack) => [
+          pack.bodyId,
+          { tools: clone(pack.tools), equipped: pack.equipped },
+        ]),
+      );
+      game.currentWork = data.labor.work ? clone(data.labor.work) : null;
+    }
     game.inventionSerial = data.inventionSerial ?? 0;
     game.artifactPacks = new Map(
       (data.artifactPacks ?? []).map((pack) => [
         pack.bodyId,
-        { designs: [...pack.designs], equipped: pack.equipped },
+        { designs: [...pack.designs], equipped: pack.equipped, wear: { ...pack.wear } },
       ]),
     );
     for (const record of data.forgedWeapons ?? []) {
@@ -3935,7 +4330,7 @@ function validateSave(value: unknown): SaveData {
     for (const pack of value.artifactPacks) {
       if (
         !object(pack) ||
-        Object.keys(pack).some((key) => !['bodyId', 'designs', 'equipped'].includes(key)) ||
+        Object.keys(pack).some((key) => !['bodyId', 'designs', 'equipped', 'wear'].includes(key)) ||
         !text(pack.bodyId, 160) ||
         owners.has(pack.bodyId as string) ||
         !Array.isArray(pack.designs) ||
@@ -3967,11 +4362,119 @@ function validateSave(value: unknown): SaveData {
           return fail();
         }
       }
+      if (pack.wear !== undefined) {
+        if (!object(pack.wear)) return fail();
+        const ownerAppearance =
+          pack.bodyId === currentBodyId
+            ? (value.player as Player).appearance
+            : (value.npcs as Npc[]).find((n) => n.id === pack.bodyId)?.appearance;
+        if (!ownerAppearance) return fail();
+        for (const [design, wear] of Object.entries(pack.wear)) {
+          if (!pack.designs.includes(design)) return fail();
+          const kind = artifactToolKind(generateArtifact(design));
+          if (!kind || !number(wear, 0, seededTool(ownerAppearance.seed, kind).maxDurability, true))
+            return fail();
+        }
+      }
       if (
         pack.equipped !== null &&
         (typeof pack.equipped !== 'string' ||
           !pack.designs.includes(pack.equipped) ||
           generateArtifact(pack.equipped).category !== 'implement')
+      )
+        return fail();
+    }
+  }
+  if (value.labor !== undefined) {
+    const labor = value.labor;
+    if (
+      !object(labor) ||
+      !number(labor.serial, 0, Number.MAX_SAFE_INTEGER, true) ||
+      !object(labor.trust) ||
+      Object.keys(labor.trust).some(
+        (id) =>
+          !THEO_ESTATE.staffIds.includes(id) ||
+          typeof (labor.trust as Record<string, unknown>)[id] !== 'boolean',
+      ) ||
+      !Array.isArray(labor.tools) ||
+      labor.tools.length > (value.npcs as Npc[]).length + 2
+    )
+      return fail();
+    const orders = validateLaborOrders(labor.orders);
+    if (
+      orders.some(
+        (o) =>
+          o.serial > (labor.serial as number) ||
+          o.startedAt > (value.time as number) ||
+          !THEO_ESTATE.staffIds.includes(o.workerId),
+      )
+    )
+      return fail();
+    const world = new InfiniteWorld(
+      value.seed as number,
+      (value.worldGeneration ?? 1) as WorldGeneration,
+    );
+    for (const order of orders)
+      for (const a of order.allocations) {
+        const prop = world.propsAround(a.x, a.y, 1).find((p) => p.id === a.propId);
+        if (!prop || prop.kind !== a.kind || prop.x !== a.x || prop.y !== a.y) return fail();
+        const expected = ['pine', 'rock'].includes(prop.kind)
+          ? 2
+          : world.generation === 1 || prop.id.startsWith('origin:')
+            ? prop.kind === 'cequin'
+              ? 3
+              : 2
+            : plantProfile(prop.seed, prop.kind as PlantKind).yield;
+        if (expected !== a.amount) return fail();
+      }
+    const owners = new Set<string>();
+    for (const pack of labor.tools) {
+      if (
+        !object(pack) ||
+        !text(pack.bodyId, 160) ||
+        owners.has(pack.bodyId) ||
+        (pack.bodyId !== priestBodyId &&
+          pack.bodyId !== currentBodyId &&
+          !(value.bodyPossessions as BodyPossessions[] | undefined)?.some(
+            (b) => b.npcId === pack.bodyId,
+          )) ||
+        !Array.isArray(pack.tools) ||
+        pack.tools.length > 3
+      )
+        return fail();
+      owners.add(pack.bodyId);
+      const kinds = new Set<string>();
+      for (const tool of pack.tools) {
+        if (
+          !object(tool) ||
+          !THEO_ESTATE.toolKinds.includes(tool.kind as ToolKind) ||
+          kinds.has(tool.kind as string) ||
+          !number(tool.seed, -0xffffffff, 0xffffffff, true)
+        )
+          return fail();
+        kinds.add(tool.kind as string);
+        if (
+          !number(
+            tool.durability,
+            0,
+            seededTool(tool.seed as number, tool.kind as ToolKind).maxDurability,
+            true,
+          )
+        )
+          return fail();
+      }
+      if (pack.equipped !== null && !kinds.has(pack.equipped as string)) return fail();
+    }
+    if (labor.work !== null) {
+      const work = labor.work;
+      if (
+        !object(work) ||
+        work.bodyId !== currentBodyId ||
+        !text(work.propId, 160) ||
+        !THEO_ESTATE.toolKinds.includes(work.toolKind as ToolKind) ||
+        !number(work.requiredStrokes, 2, 9, true) ||
+        !number(work.strokes, 1, (work.requiredStrokes as number) - 1, true) ||
+        !number(work.lastStrokeAt, 0, value.time as number)
       )
         return fail();
     }
