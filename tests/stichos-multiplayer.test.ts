@@ -6,6 +6,7 @@ import { createCoopServer } from '../server/coop.mjs';
 import { InfiniteWorld, appearance } from '../src/stichos/world.ts';
 import { MultiplayerConnection } from '../src/stichos/multiplayer.ts';
 import { resolveForge } from '../src/stichos/forge.ts';
+import { generateArtifact } from '../src/stichos/artifacts.ts';
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const look = () => ({ ...appearance(42, 'pilgrim', 1), weapon: 'staff' });
@@ -455,4 +456,51 @@ test('forged item appearance travels with the peer while invalid seeds cannot re
   invalid.send(identity({ appearance: { ...look(), weaponSeed: -1 } }));
   assert.equal((await invalid.next('error')).code, 'invalid_join');
   assert.equal(server.hub.rooms.size, 1, 'invalid equipment cannot create another room');
+});
+
+test('arbitrary canonical artifact designs reach other peers without accepting malformed design state', async (t) => {
+  const { server, url } = await serverFixture(t);
+  const artifact = generateArtifact('Céquin · Vespera/3886/body/73');
+  const owner = await join(url, { appearance: { ...look(), artifactDesign: artifact.design } });
+  const observer = await join(url, { room: owner.welcome.room });
+  const shown = observer.welcome.peers.find((p: any) => p.id === owner.welcome.peerId);
+  assert.equal(shown.appearance.artifactDesign, artifact.design);
+  assert.deepEqual(generateArtifact(shown.appearance.artifactDesign).parts, artifact.parts);
+  const member = server.hub.rooms.get(owner.welcome.room).members.get(owner.welcome.peerId);
+  for (const artifactDesign of [
+    '',
+    'x'.repeat(65),
+    'hidden\ncontrol',
+    '  not canonical  ',
+    123,
+    null,
+  ]) {
+    owner.send({
+      type: 'pose',
+      x: 0,
+      y: 5,
+      heading: 0,
+      phase: 0,
+      appearance: { ...look(), artifactDesign },
+    });
+    assert.equal((await owner.next('error')).code, 'invalid_pose');
+    assert.equal(member.appearance.artifactDesign, artifact.design);
+    assert.equal(member.appearance.seed, look().seed);
+  }
+  const unicode = '🌱'.repeat(64);
+  owner.send({
+    type: 'pose',
+    x: 0,
+    y: 5,
+    heading: 0,
+    phase: 0,
+    appearance: { ...look(), artifactDesign: unicode },
+  });
+  assert.equal((await observer.next('pose')).peer.appearance.artifactDesign, unicode);
+  owner.send({ type: 'pose', x: 0, y: 5, heading: 0, phase: 0, appearance: look() });
+  assert.equal((await observer.next('pose')).peer.appearance.artifactDesign, undefined);
+  const invalid = await wire(url);
+  invalid.send(identity({ appearance: { ...look(), artifactDesign: '\u0000' } }));
+  assert.equal((await invalid.next('error')).code, 'invalid_join');
+  assert.equal(server.hub.rooms.size, 1);
 });

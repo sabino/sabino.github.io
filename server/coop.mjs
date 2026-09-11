@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import WebSocket, { WebSocketServer } from 'ws';
 import { InfiniteWorld } from '../src/stichos/world.ts';
+import { normalizeArtifactDesign } from '../src/stichos/artifacts.ts';
 import { MULTIPLAYER_PROTOCOL, MAX_ROOM_PLAYERS } from '../src/stichos/multiplayer-protocol.ts';
 
 const MAX_COORDINATE = Number.MAX_SAFE_INTEGER - 4096;
@@ -22,10 +23,19 @@ const point = (value) =>
   finite(value.x, -MAX_COORDINATE, MAX_COORDINATE) &&
   finite(value.y, -MAX_COORDINATE, MAX_COORDINATE);
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const artifactDesignValid = (value) => {
+  if (value === undefined) return true;
+  try {
+    return normalizeArtifactDesign(value) === value;
+  } catch {
+    return false;
+  }
+};
 const appearanceValid = (value) =>
   object(value) &&
   integer(value.seed, -0xffffffff, 0xffffffff) &&
   (value.weaponSeed === undefined || integer(value.weaponSeed, 0, 0xffffffff)) &&
+  artifactDesignValid(value.artifactDesign) &&
   ['skin', 'hair', 'coat', 'trim', 'trousers'].every(
     (key) =>
       typeof value[key] === 'string' &&
@@ -55,6 +65,7 @@ const copyAppearance = (value) => ({
     ].map((key) => [key, value[key]]),
   ),
   ...(value.weaponSeed === undefined ? {} : { weaponSeed: value.weaponSeed }),
+  ...(value.artifactDesign === undefined ? {} : { artifactDesign: value.artifactDesign }),
 });
 const publicPeer = (member) => ({
   id: member.id,
