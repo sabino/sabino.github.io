@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A continuous procedural browser RPG about botanical civilizations, clan loyalties, and mind travel.",
+  "description": "A procedural multiplayer browser RPG of unique lives, generated civilizations, crafting, and mind travel.",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build && node scripts/build-offline.mjs",

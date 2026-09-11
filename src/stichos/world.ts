@@ -660,8 +660,10 @@ export class InfiniteWorld {
             : 'snow';
       if (s.architecture) tile.architecture = s.architecture;
       if (Math.abs(dx) <= 3 && Math.abs(dy) <= 3) tile.terrain = 'floor';
-      if (!highway && Math.abs(dx) >= 2 && Math.abs(dx) <= 4 && dy >= 4 && dy <= 8)
+      if (!highway && Math.abs(dx) >= 2 && Math.abs(dx) <= 4 && dy >= 4 && dy <= 8) {
         tile.terrain = 'grass';
+        if (this.generation === 4) tile.cultivated = true;
+      }
       for (const b of buildings)
         if (Math.abs(x - b.x) <= b.halfX && Math.abs(y - b.y) <= b.halfY) {
           const edge = Math.abs(x - b.x) === b.halfX || Math.abs(y - b.y) === b.halfY;

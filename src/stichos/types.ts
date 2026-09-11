@@ -92,6 +92,7 @@ export interface Tile extends Point {
   buildingKind?: BuildingKind;
   architecture?: ArchitecturalCulture;
   ecology?: TileEcology;
+  cultivated?: boolean;
   site?: string;
   clan?: number;
 }
