@@ -1,0 +1,21 @@
+{
+  "name": "verso-pear-world-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Optional native Hypercore/Hyperswarm replica for signed public Verso world checkpoints.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types index.mjs",
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "corestore": "^7.12.5",
+    "hyperswarm": "^4.17.1"
+  },
+  "devDependencies": {
+    "@hyperswarm/testnet": "^3.1.4"
+  }
+}
