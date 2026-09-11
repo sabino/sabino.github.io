@@ -70,7 +70,7 @@ Save/Continue preserved generation 3, the actual destination, explored bounds, d
 
 ## Physical notebook and user-paced introduction
 
-The final notebook pass ran from 04:05:36 to 04:06:18 UTC on 11 September 2026 against `app-axVwoH2K.js`, `app-CAfFo9Z7.css`, and service worker `014e7138aae1bb9a737b` at `http://localhost:4174/`. All thirteen real-input checks passed in a fresh isolated browser context, with zero console or runtime errors.
+The final notebook pass ran from 05:17:40 to 05:18:29 UTC on 11 September 2026 against the frozen paper-materials build `app-xdAHfhHA.js` and `app-DimBOn-j.css` at `http://localhost:4174/`. All thirteen real-input checks passed in a fresh isolated browser context, with zero console or runtime errors.
 
 The six introductory beats stayed on their selected page during 6.2 seconds of waiting, without advancing body time. Back and Continue worked through all six pages and explicitly returned to present-day Vespera. Replaying the introduction from the notebook and skipping back preserved the current body, inventory, simulation time, and selected leaf.
 
@@ -108,7 +108,7 @@ The previously reported sidebar tracking issue is fixed and browser-verified. No
 
 Screenshots and detailed results: [full route evidence](../../.dream-loop/stichos-qa/) and [latest expedition](../../.dream-loop/stichos-expedition/). Browser errors: 0. Desktop: 1600×1000. Round05 captured the actual mobile world, satchel and journal at 390×844 without horizontal overflow.
 
-The full-route sample was 53.9 foreground RAF FPS. Round05 measured 55.6 FPS at default zoom and 50.1 FPS at minimum zoom0.65 near the cathedral. After the expedition, the dense forest at (−80,40) measured 58.0 foreground FPS at zoom0.65, with 519 unique organic sprites in the viewport plus sprite-margin footprint. CPU profiles accompany both wide-view samples. These observations describe this isolated browser session rather than a controlled hardware benchmark. [Round05 scene](../../.dream-loop/stichos/round-05.png), [equipment panel](../../.dream-loop/stichos/round-05-gear.png), and [dense forest](../../.dream-loop/stichos-expedition/10-dense-forest-minimum-zoom.png) are preserved separately. Audio listening quality, prolonged combat balance, browser-driven death recovery, and the southern-wall visual cutaway remain unverified.
+The full-route sample was 53.9 foreground RAF FPS. Round05 measured 55.6 FPS at default zoom and 50.1 FPS at minimum zoom0.65 near the cathedral. After the expedition, the dense forest at (−80,40) measured 58.0 foreground FPS at zoom0.65, with 519 unique organic sprites in the viewport plus sprite-margin footprint. CPU profiles accompany both wide-view samples. These observations describe this isolated browser session rather than a controlled hardware benchmark. [Round05 scene](../../.dream-loop/stichos/round-05.png), [equipment panel](../../.dream-loop/stichos/round-05-gear.png), and [dense forest](../../.dream-loop/stichos-expedition/10-dense-forest-minimum-zoom.png) are preserved separately. Audio listening quality, prolonged combat balance, and the southern-wall visual cutaway remain unverified. Browser-driven combat death and stable-signal mind recovery were subsequently verified in [Recovery QA](RECOVERY-QA.md); clinic revival remains a separate unverified browser branch.
 
 ## Repeat
 
