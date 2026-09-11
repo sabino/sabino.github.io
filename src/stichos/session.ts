@@ -8,6 +8,29 @@ import {
 import { deriveSeed } from '../procedural/random.ts';
 import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
+import {
+  createProgression,
+  restoreProgression,
+  grantPractice,
+  skillBonuses,
+  upgradeBonuses,
+  homeEffects,
+  applyCosmetic,
+  previewProgression,
+  applyProgression,
+  type ProgressionAction,
+  type ProgressionState,
+  type HomeAddress,
+} from './progression.ts';
+import {
+  buildCampaign,
+  createCampaignState,
+  validateCampaignState,
+  CAMPAIGN_ACTS,
+  CAMPAIGN_LENGTH,
+  type CampaignPlan,
+  type CampaignStep,
+} from './campaign.ts';
 import type {
   Dialogue,
   Effect,
@@ -253,6 +276,11 @@ export class Stichos {
   private occupiedBody: Npc | null = null;
   private bodyPossessions = new Map<string, BodyPossessions>();
   private notebook = true;
+  private campaignState = createCampaignState();
+  private campaignPlan: CampaignPlan | null = null;
+  private campaignOrdinary = false;
+  progression: ProgressionState;
+  private cosmeticEntitlements: string[] = [];
   private npcMemory = new Map<string, Npc>();
   private npcRuntime = new Map<string, Npc>();
   private supplyJobs = new Map<string, SupplyJob>();
@@ -271,6 +299,7 @@ export class Stichos {
     if (!Number.isSafeInteger(seed)) throw new Error('A world seed must be a safe integer.');
     if (![1, 2, 3].includes(generation)) throw new Error('Unknown world generation.');
     this.seed = seed >>> 0;
+    this.progression = createProgression(this.seed);
     this.world = new InfiniteWorld(this.seed, generation);
     this.restAnchor = { ...this.world.spawn };
     this.player = {
@@ -436,14 +465,135 @@ export class Stichos {
           npc.hp > 0 &&
           !npc.hostile &&
           !this.removed.has(npc.id) &&
-          ['pilgrim', 'refugee', 'guard'].includes(npc.role) &&
+          (this.campaignState.ending !== null ||
+            ['pilgrim', 'refugee', 'guard'].includes(npc.role)) &&
           !(npc.role === 'guard' && this.reputation[npc.clan] < -24) &&
           distance(npc, center) <= 14 &&
           this.clear(npc),
       )
       .sort((a, b) => priority(a) - priority(b) || distance(a, center) - distance(b, center))
-      .slice(0, 3)
+      .slice(0, this.campaignState.ending ? 12 : 3)
       .map((npc) => clone(npc));
+  }
+  get bodyId() {
+    return this.occupiedNpcId ?? `body:theo-priest:${this.seed}`;
+  }
+  get displayAppearance() {
+    return applyCosmetic(
+      this.player.appearance,
+      this.progression,
+      this.bodyId,
+      this.cosmeticEntitlements,
+    );
+  }
+  setCosmeticEntitlements(ids: readonly string[]) {
+    this.cosmeticEntitlements = [...new Set(ids.filter((id) => typeof id === 'string'))].slice(
+      0,
+      64,
+    );
+  }
+  get nearbyHomes(): HomeAddress[] {
+    const homes = new Map<string, HomeAddress>();
+    for (const prop of this.world.propsAround(this.player.x, this.player.y, 12)) {
+      if (prop.kind !== 'door') continue;
+      const tile = this.world.tile(prop.x, prop.y);
+      if (
+        !tile.building ||
+        !['house', 'inn'].includes(
+          tile.buildingKind ?? (tile.building.includes(':house:') ? 'house' : ''),
+        )
+      )
+        continue;
+      const town = this.world
+        .settlementsAround(prop.x, prop.y, 64)
+        .find((t) => tile.building!.startsWith(`${t.id}:`));
+      if (!town) continue;
+      const southDoor =
+        this.world
+          .propsAround(prop.x, prop.y, 24)
+          .find(
+            (p) => p.kind === 'door' && p.building === tile.building && p.id.endsWith(':door:1'),
+          ) ?? prop;
+      const address = {
+        id: tile.building,
+        buildingId: tile.building,
+        settlementId: town.id,
+        name: `${town.name} · ${tile.buildingKind === 'inn' ? 'inn rooms' : 'house'} ${tile.building.split(':').at(-1)}`,
+        x: southDoor.x,
+        y: southDoor.y,
+      };
+      const previous = homes.get(tile.building);
+      if (!previous) homes.set(tile.building, address);
+    }
+    return [...homes.values()].sort((a, b) => distance(a, this.player) - distance(b, this.player));
+  }
+  private nearHome() {
+    return this.progression.homes.find((home) => distance(home, this.player) <= 10);
+  }
+  private progressionContext() {
+    return {
+      bodyId: this.bodyId,
+      position: this.player,
+      time: this.time,
+      capacity: this.capacity,
+      nearWorkbench:
+        !!this.nearProp('workbench') ||
+        !!(this.nearHome() && homeEffects(this.nearHome()!).hasWorkbench),
+      ownedWeapons: [...this.weapons],
+      verifiedEntitlements: this.cosmeticEntitlements,
+    };
+  }
+  progressionPreview(action: ProgressionAction) {
+    if (this.phase !== 'playing') return { ok: false, message: 'This body cannot act.' };
+    if (action.kind === 'buy-home') {
+      const real = this.nearbyHomes.find((home) => home.id === action.address.id);
+      if (!real || JSON.stringify(real) !== JSON.stringify(action.address))
+        return { ok: false, message: 'Choose an actual nearby house or inn doorway.' };
+    }
+    return previewProgression(
+      this.progression,
+      { coins: this.player.coins, inventory: this.inventory },
+      action,
+      this.progressionContext(),
+    );
+  }
+  progress(action: ProgressionAction) {
+    const preview = this.progressionPreview(action);
+    if (!preview.ok) {
+      this.event('dialogue', preview.message);
+      return preview;
+    }
+    const wallet = { coins: this.player.coins, inventory: this.inventory };
+    const result = applyProgression(this.progression, wallet, action, this.progressionContext());
+    if (result.ok) {
+      this.player.coins = wallet.coins;
+      this.event('quest', result.message);
+      if (action.kind === 'buy-home')
+        this.entry(
+          'A place to return to',
+          `Theo acquired ${action.address.name}. Ownership and the remembered address remain with his identity; the body carries its own equipment.`,
+        );
+    }
+    return result;
+  }
+  restAtHome(homeId: string) {
+    const home = this.progression.homes.find((h) => h.id === homeId);
+    if (
+      this.phase !== 'playing' ||
+      !home ||
+      distance(home, this.player) > 10 ||
+      this.nearbyThreat()
+    )
+      return false;
+    const bonus = homeEffects(home);
+    this.player.hp = clamp(this.player.hp + 35 + bonus.healthRestBonus, 0, this.player.maxHp);
+    this.player.warmth = clamp(this.player.warmth + 45 + bonus.warmthRestBonus);
+    this.player.breath = clamp(this.player.breath + 50);
+    this.player.stamina = 100;
+    this.time += 30;
+    this.restAnchor = { x: this.player.x, y: this.player.y };
+    this.event('heal', 'Rested in your home.');
+    return true;
   }
   get capacity() {
     return CAPACITY;
@@ -453,7 +603,15 @@ export class Stichos {
   }
 
   weaponProfile(kind: Weapon): WeaponProfile {
-    return generatedWeaponProfile(this.player.appearance.seed, kind, this.player.level);
+    const profile = generatedWeaponProfile(this.player.appearance.seed, kind, this.player.level);
+    const skill = skillBonuses(this.progression),
+      upgrade = upgradeBonuses(this.progression, this.bodyId, kind);
+    return {
+      ...profile,
+      damage: profile.damage + skill.damageBonus + upgrade.damageBonus,
+      range: profile.range + upgrade.rangeBonus,
+      cooldown: profile.cooldown * skill.cooldownMultiplier * upgrade.cooldownMultiplier,
+    };
   }
 
   update(dt: number, input: Input) {
@@ -720,6 +878,308 @@ export class Stichos {
     );
   }
 
+  /** Read-only preflight for atomic multiplayer claims; the local transaction rechecks all rules. */
+  interactionAvailability(propId: string): { ok: boolean; reason?: string } {
+    if (this.phase !== 'playing') return { ok: false, reason: 'This body cannot act.' };
+    const prop = this.world
+      .propsAround(this.player.x, this.player.y, 2.2)
+      .find((p) => p.id === propId);
+    if (!prop || distance(prop, this.player) > 1.8)
+      return { ok: false, reason: 'Move closer to interact.' };
+    if (this.removed.has(prop.id) && prop.kind !== 'door')
+      return { ok: false, reason: 'Already gathered.' };
+    if (['chest', 'crate'].includes(prop.kind) && this.opened.has(prop.id))
+      return { ok: false, reason: 'Already searched.' };
+    if (['pine', 'rock'].includes(prop.kind) && this.player.appearance.weapon !== 'staff')
+      return { ok: false, reason: 'Equip the staff to gather timber or ore.' };
+    const amount = ['chest', 'crate'].includes(prop.kind)
+      ? prop.id.startsWith('vault:')
+        ? 6
+        : 3
+      : ['cequin', 'heartleaf', 'emberroot', 'mushroom'].includes(prop.kind)
+        ? this.botanicalProfile(prop)!.yield
+        : ['pine', 'rock'].includes(prop.kind)
+          ? 2
+          : 0;
+    if (this.carried + amount > this.capacity) return { ok: false, reason: 'Your pack is full.' };
+    return { ok: true };
+  }
+
+  get campaign() {
+    const state = this.campaignState;
+    const step = this.activeCampaignStep();
+    return {
+      act: Math.min(5, Math.floor(state.step / 4)),
+      step: state.step,
+      title: step?.title ?? (state.ending ? 'A choice made awake' : 'The radio is still silent'),
+      actTitle: CAMPAIGN_ACTS[Math.min(5, Math.floor(state.step / 4))],
+      completed: state.step,
+      total: CAMPAIGN_LENGTH,
+      ending: state.ending,
+      started: state.started,
+    };
+  }
+  get campaignObjective() {
+    const step = this.activeCampaignStep();
+    return step
+      ? clone({ ...step, target: this.campaignTarget(step), puzzle: this.campaignState.puzzle })
+      : null;
+  }
+  private activeCampaignStep(): CampaignStep | null {
+    if (this.storyStage < 4 || this.campaignState.step >= CAMPAIGN_LENGTH) return null;
+    this.campaignPlan ??= buildCampaign(this.world);
+    return this.campaignPlan.steps[this.campaignState.step] ?? null;
+  }
+  private campaignGuards(step: CampaignStep) {
+    if (!step.vault) return [];
+    return this.world
+      .npcsAround(step.vault.x, step.vault.y, 24)
+      .filter((n) => n.id.startsWith(`${step.vault!.id}:guard:`))
+      .map((n) => this.npcs.find((a) => a.id === n.id) ?? this.npcMemory.get(n.id) ?? n);
+  }
+  private campaignTarget(step: CampaignStep): Point & { id: string } {
+    if (step.kind === 'puzzle' && this.campaignState.puzzle >= 0 && this.campaignState.puzzle < 4)
+      return step.lamps![this.campaignState.puzzle];
+    if (step.kind === 'encounter' && this.campaignState.choices[step.id] === 'fight') {
+      const guard = this.campaignGuards(step).find((n) => n.hp > 0 && !this.removed.has(n.id));
+      if (guard) return { id: guard.id, x: guard.x, y: guard.y };
+    }
+    const original = step.target;
+    const changed = this.npcs.find((n) => n.id === original.id) ?? this.npcMemory.get(original.id);
+    if (
+      this.removed.has(original.id) ||
+      original.id === this.occupiedNpcId ||
+      (changed && (changed.hp <= 0 || changed.hostile))
+    )
+      return { id: `${step.town.id}:notice`, x: step.town.x - 2, y: step.town.y + 1 };
+    if (changed) return { id: changed.id, x: changed.x, y: changed.y };
+    return original;
+  }
+  private syncCampaign() {
+    const step = this.activeCampaignStep();
+    if (!step) return;
+    this.campaignState.started = true;
+    const target = this.campaignTarget(step);
+    const objective =
+      step.kind === 'puzzle'
+        ? this.campaignPuzzleClue(step)
+        : `${step.text}${step.cost ? ` Required: ${this.costText(step.cost)}.` : ''} Destination: ${step.town.name}.`;
+    const existing = this.quests.find((q) => q.id === step.id);
+    if (existing)
+      Object.assign(existing, { complete: false, target: { x: target.x, y: target.y }, objective });
+    else
+      this.addQuest({
+        id: step.id,
+        title: `${step.act + 1}.${(this.campaignState.step % 4) + 1} · ${step.title}`,
+        description: `${CAMPAIGN_ACTS[step.act]}. ${step.text}`,
+        objective,
+        stage: 0,
+        complete: false,
+        target: { x: target.x, y: target.y },
+      });
+  }
+  private campaignPuzzleClue(step: CampaignStep) {
+    const channels = ['low', 'middle', 'high'];
+    const sequence = step
+      .lamps!.map((lamp, i) => `${i + 1}. ${lamp.name} ${channels[lamp.channel]}`)
+      .join(' → ');
+    return `Coil sequence: ${sequence}. ${this.campaignState.puzzle < 0 ? 'Begin at the radio.' : this.campaignState.puzzle < 4 ? `${this.campaignState.puzzle}/4 aligned. Tune the next plaza lamp.` : '4/4 aligned. Return to the radio and close the circuit.'}`;
+  }
+  private campaignInteraction(found: Npc | Prop) {
+    this.syncCampaign();
+    const step = this.activeCampaignStep();
+    if (!step) return false;
+    const target = this.campaignTarget(step);
+    const lamp = step.kind === 'puzzle' ? step.lamps!.find((l) => l.id === found.id) : undefined;
+    if (found.id !== target.id && found.id !== step.target.id && !lamp) return false;
+    if ('role' in found && (found.hp <= 0 || found.hostile)) return false;
+    if (
+      step.kind === 'archive' &&
+      'kind' in found &&
+      ['chest', 'crate'].includes(found.kind) &&
+      !this.opened.has(found.id)
+    )
+      return false;
+    const choices: Dialogue['choices'] = [];
+    const add = (id: string, label: string, detail?: string, disabled = false) =>
+      choices.push({ id: `campaign:${id}`, label, detail, disabled });
+    let text = step.text;
+    if (target.id !== step.target.id && !lamp && step.kind !== 'encounter')
+      text +=
+        ' The intended witness is no longer available in their former role. Their deposited record and practical arrangements remain at this noticeboard; the absence itself is recorded.';
+    if (step.kind === 'talk' || step.kind === 'archive') add('read', 'Read the independent record');
+    if (step.kind === 'delivery')
+      add(
+        'deliver',
+        'Deliver the requested supplies',
+        this.costText(step.cost!),
+        !this.has(step.cost!),
+      );
+    if (step.kind === 'choice' || step.kind === 'ending')
+      for (const c of step.choices!) add(c.id, c.label, c.text);
+    if (step.kind === 'decode') for (const [id, label] of step.options!) add(id, label);
+    if (step.kind === 'encounter') {
+      add(
+        'parley',
+        'Provide medicine and food for safe passage',
+        this.costText(step.cost!),
+        !this.has(step.cost!),
+      );
+      if (step.vault) add('fight', 'Take responsibility for confronting both guards');
+      else
+        add('shelter', 'Fund shelter for the displaced convoy', '40 coins', this.player.coins < 40);
+    }
+    if (step.kind === 'puzzle') {
+      text += ` ${this.campaignPuzzleClue(step)}`;
+      if (lamp) {
+        for (const [i, label] of ['low', 'middle', 'high'].entries())
+          add(`coil:${i}`, `Tune the ${label} channel`, undefined, this.campaignState.puzzle < 0);
+      } else if (this.campaignState.puzzle === 4) add('align', 'Close the circuit and listen');
+      else
+        add(
+          'begin',
+          this.campaignState.puzzle < 0 ? 'Begin the coil alignment' : 'Restart the alignment',
+        );
+    }
+    add('ordinary', 'Other business here');
+    choices.push({ id: 'close', label: 'Close the conversation' });
+    this.dialogue = {
+      speaker: 'name' in found ? found.name : step.title,
+      role: `Act ${step.act + 1} · ${CAMPAIGN_ACTS[step.act]}`,
+      npcId: found.id,
+      text,
+      choices,
+    };
+    this.event('dialogue');
+    return true;
+  }
+  private chooseCampaign(choiceId: string, found: Npc | Prop) {
+    if (choiceId === 'campaign:ordinary') {
+      this.dialogue = null;
+      this.campaignOrdinary = true;
+      this.interact(found.id);
+      return;
+    }
+    const step = this.activeCampaignStep();
+    if (!step) return;
+    const id = choiceId.slice('campaign:'.length),
+      target = this.campaignTarget(step);
+    const lamp = step.lamps?.find((l) => l.id === found.id);
+    if (found.id !== target.id && found.id !== step.target.id && !lamp) return;
+    if ((step.kind === 'talk' || step.kind === 'archive') && id === 'read') {
+      this.advanceCampaign();
+      return;
+    }
+    if (step.kind === 'delivery' && id === 'deliver') {
+      if (this.spend(step.cost!)) this.advanceCampaign();
+      return;
+    }
+    if (step.kind === 'choice' || step.kind === 'ending') {
+      const choice = step.choices!.find((c) => c.id === id);
+      if (!choice) return;
+      for (const [clan, delta] of choice.trust) this.changeReputation(clan, delta);
+      if (step.kind === 'ending') this.campaignState.ending = id as 'return-link' | 'stay';
+      this.advanceCampaign(id, choice.text);
+      return;
+    }
+    if (step.kind === 'decode') {
+      if (id === step.answer) this.advanceCampaign(id);
+      else
+        this.reply(
+          'That claim does not fit the independent records. Reopen this discussion and compare the dated evidence before answering.',
+        );
+      return;
+    }
+    if (step.kind === 'encounter') {
+      if (id === 'parley' && this.spend(step.cost!)) {
+        for (const npc of this.campaignGuards(step))
+          if (npc.hp > 0 && !this.removed.has(npc.id)) {
+            npc.hostile = false;
+            npc.cooldown = 0;
+            this.npcMemory.set(npc.id, clone(npc));
+            this.npcRuntime.set(npc.id, npc);
+            const intent = this.enemyIntents.get(npc.id);
+            if (intent) intent.warning.age = intent.warning.duration;
+            this.enemyIntents.delete(npc.id);
+          }
+        this.advanceCampaign(
+          'parley',
+          'The guards accepted medicine and food. Their lives remain in the world.',
+        );
+      } else if (id === 'shelter' && !step.vault && this.player.coins >= 40) {
+        this.player.coins -= 40;
+        this.advanceCampaign('shelter');
+      } else if (id === 'fight' && step.vault) {
+        this.campaignState.choices[step.id] = 'fight';
+        this.dialogue = null;
+        this.syncCampaign();
+        this.checkCampaignEncounter();
+      }
+      return;
+    }
+    if (step.kind === 'puzzle') {
+      if (id === 'begin' && found.id === step.target.id) {
+        this.campaignState.puzzle = 0;
+        this.dialogue = null;
+        this.syncCampaign();
+        this.event('quest', 'The coil sequence is ready. Follow its order and channel settings.');
+      } else if (id === 'align' && found.id === step.target.id && this.campaignState.puzzle === 4)
+        this.advanceCampaign();
+      else if (lamp && id.startsWith('coil:') && this.campaignState.puzzle >= 0) {
+        const expected = step.lamps![this.campaignState.puzzle];
+        if (expected?.id === lamp.id && Number(id.slice(5)) === expected.channel) {
+          this.campaignState.puzzle++;
+          this.effect('mind', found, '#a4e6ee', 1);
+          this.event('quest', 'The coil answers in sequence.');
+        } else {
+          this.campaignState.puzzle = 0;
+          this.player.stamina = Math.max(0, this.player.stamina - 10);
+          this.event('quest', 'The alignment broke. Start again from the first listed coil.');
+        }
+        this.dialogue = null;
+        this.syncCampaign();
+      }
+    }
+  }
+  private checkCampaignEncounter() {
+    const step = this.activeCampaignStep();
+    if (step?.kind === 'encounter' && this.campaignState.choices[step.id] === 'fight') {
+      const guards = this.campaignGuards(step);
+      if (guards.length === 2 && guards.every((n) => n.hp <= 0 || this.removed.has(n.id)))
+        this.advanceCampaign(
+          'fight',
+          'Both guards died. Passage is open, and their deaths remain part of the account.',
+        );
+      else this.syncCampaign();
+    }
+  }
+  private advanceCampaign(choice?: string, consequence?: string) {
+    const step = this.activeCampaignStep();
+    if (!step) return;
+    this.complete(step.id);
+    const quest = this.quests.find((q) => q.id === step.id);
+    if (quest) quest.objective = step.result;
+    if (choice) this.campaignState.choices[step.id] = choice;
+    this.campaignState.evidence.push(step.id);
+    this.player.coins += step.reward.coins;
+    this.awardXp(step.reward.xp);
+    this.entry(step.title, `${step.result}${consequence ? ` ${consequence}` : ''}`);
+    this.campaignState.step++;
+    this.campaignState.puzzle = -1;
+    this.dialogue = null;
+    this.event(
+      'quest',
+      `${step.title} resolved. ${step.reward.coins} coins and ${step.reward.xp} experience.`,
+    );
+    if (this.campaignState.step === CAMPAIGN_LENGTH) {
+      this.complete('beyond-the-signal');
+      this.entry(
+        'The country remains',
+        'The return investigation is complete. Theo may keep travelling, support or oppose the six families, maintain homes and clinics, and inhabit any nearby willing, living person at a quiet shrine. Each body retains its own belongings.',
+      );
+    } else this.syncCampaign();
+  }
+
   interact(id?: string) {
     if (this.phase !== 'playing') return;
     const found = id
@@ -731,6 +1191,8 @@ export class Stichos {
       this.event('dialogue', 'Move closer to interact.');
       return;
     }
+    if (!this.campaignOrdinary && this.campaignInteraction(found)) return;
+    this.campaignOrdinary = false;
     if ('role' in found) {
       if (found.hp <= 0 || found.hostile) return;
       this.talk(found);
@@ -774,6 +1236,8 @@ export class Stichos {
           `Recovered three ${ITEMS[archiveHerb].name.toLowerCase()}, two ore, rations, twelve coins, and an archive note.`,
         );
       } else this.event('harvest', 'Recovered two timber, plant rations, and five coins.');
+      const step = this.activeCampaignStep();
+      if (step?.kind === 'archive' && step.target.id === prop.id) this.advanceCampaign();
       return;
     }
     if (prop.kind === 'door') {
@@ -911,10 +1375,10 @@ export class Stichos {
     if (this.world.generation === 1 || prop.id.startsWith('origin:'))
       return {
         ...profile,
-        yield: prop.kind === 'cequin' ? 3 : 2,
+        yield: (prop.kind === 'cequin' ? 3 : 2) + skillBonuses(this.progression).harvestExtra,
         description: `${profile.description} Cultivated harvest.`,
       };
-    return profile;
+    return { ...profile, yield: profile.yield + skillBonuses(this.progression).harvestExtra };
   }
 
   private harvest(prop: Prop) {
@@ -937,6 +1401,7 @@ export class Stichos {
     const amount = botanical?.yield ?? (item === 'cequin' ? 3 : 2);
     if (!this.gain({ [item]: amount })) return;
     this.removed.add(prop.id);
+    if (botanical) grantPractice(this.progression, 'botany', 3);
     this.effect('harvest', prop, '#d2efa8');
     this.event(
       'harvest',
@@ -1038,6 +1503,10 @@ export class Stichos {
     if (!npc && !prop) {
       this.dialogue = null;
       this.event('dialogue', 'Move closer to continue.');
+      return;
+    }
+    if (choiceId.startsWith('campaign:')) {
+      this.chooseCampaign(choiceId, npc ?? prop!);
       return;
     }
     if (choiceId === 'vault:survey' && prop?.kind === 'notice' && prop.id.startsWith('vault:')) {
@@ -1282,6 +1751,7 @@ export class Stichos {
         complete: false,
         objective: 'Explore Stíchos. A quiet shrine now permits voluntary mind travel.',
       });
+      this.syncCampaign();
       this.reply(
         'A voice returns in fragments: memory, breath, a coordinate inside the mind. The link holds. At a quiet shrine you can attempt a voluntary transfer. Outside, the same cold country stretches on.',
       );
@@ -1709,6 +2179,7 @@ export class Stichos {
       this.enemyIntents.delete(npc.id);
     }
     const wasFriendly = !npc.hostile && npc.role !== 'raider';
+    if (!wasFriendly && npc.hp > 0) grantPractice(this.progression, 'combat', 2);
     npc.hp = Math.max(0, npc.hp - amount);
     npc.hostile = true;
     if (enchantment === 'stagger') npc.cooldown = Math.max(npc.cooldown, 1.35);
@@ -1728,6 +2199,7 @@ export class Stichos {
     if (npc.hp <= 0) {
       this.removed.add(npc.id);
       if (npc.role === 'raider') {
+        grantPractice(this.progression, 'combat', 6);
         this.player.coins += 4;
         this.awardXp(16);
       } else {
@@ -1739,6 +2211,7 @@ export class Stichos {
       }
     }
     this.npcMemory.set(npc.id, clone(npc));
+    this.checkCampaignEncounter();
   }
 
   private hurt(amount: number, feedback = true) {
@@ -1779,8 +2252,10 @@ export class Stichos {
       p.cequinTime = Math.min(600, p.cequinTime + 180);
       p.breath = clamp(p.breath + 35);
     }
-    if (item === 'salve') p.hp = clamp(p.hp + 35, 0, p.maxHp);
-    if (item === 'bandage') p.hp = clamp(p.hp + 20, 0, p.maxHp);
+    if (item === 'salve')
+      p.hp = clamp(p.hp + 35 + skillBonuses(this.progression).medicineBonus, 0, p.maxHp);
+    if (item === 'bandage')
+      p.hp = clamp(p.hp + 20 + skillBonuses(this.progression).medicineBonus, 0, p.maxHp);
     if (item === 'tonic') {
       p.warmth = clamp(p.warmth + 55);
       p.breath = clamp(p.breath + 25);
@@ -1798,7 +2273,7 @@ export class Stichos {
     if (this.phase !== 'playing') return;
     const recipe = RECIPES.find((r) => r.id === recipeId);
     if (!recipe) return;
-    if (recipe.id === 'lens' && !this.nearProp('workbench')) {
+    if (recipe.id === 'lens' && !this.progressionContext().nearWorkbench) {
       this.event('dialogue', 'A signal lens must be aligned at a workbench.');
       return;
     }
@@ -1807,14 +2282,21 @@ export class Stichos {
       return;
     }
     const used = Object.values(recipe.cost).reduce((sum, n) => sum + (n ?? 0), 0);
-    if (this.carried - used + recipe.amount > CAPACITY) {
+    const home = this.nearHome();
+    const amount =
+      recipe.amount +
+      (recipe.id === 'lens'
+        ? 0
+        : skillBonuses(this.progression).craftExtra + (home ? homeEffects(home).craftExtra : 0));
+    if (this.carried - used + amount > CAPACITY) {
       this.event('dialogue', 'Your pack is full.');
       return;
     }
     this.spend(recipe.cost);
-    this.gain({ [recipe.result]: recipe.amount });
+    this.gain({ [recipe.result]: amount });
+    grantPractice(this.progression, 'crafting', 4);
     this.effect('harvest', this.player, '#d5dca4');
-    this.event('harvest', `Prepared ${recipe.amount} ${recipe.name.toLowerCase()}.`);
+    this.event('harvest', `Prepared ${amount} ${recipe.name.toLowerCase()}.`);
   }
 
   equip(weapon: Weapon) {
@@ -2210,6 +2692,7 @@ export class Stichos {
   }
 
   save() {
+    this.syncCampaign();
     for (const npc of this.npcs) this.rememberNpc(npc);
     return clone({
       version: 1,
@@ -2218,6 +2701,8 @@ export class Stichos {
       seed: this.seed,
       player: this.player,
       notebook: this.notebook,
+      campaign: this.campaignState,
+      progression: this.progression,
       inventory: this.inventory,
       removed: [...this.removed],
       opened: [...this.opened],
@@ -2249,6 +2734,7 @@ export class Stichos {
     const priestBodyId = `body:theo-priest:${data.seed}`;
     game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
     game.inventory = { ...data.inventory };
+    game.progression = restoreProgression(data.progression, data.seed);
     for (const id of data.removed) game.removed.add(id);
     for (const id of data.opened) game.opened.add(id);
     game.weapons.clear();
@@ -2313,6 +2799,9 @@ export class Stichos {
     );
     game.reputation = [...data.reputation];
     game.storyStage = data.storyStage;
+    game.campaignState = data.campaign
+      ? validateCampaignState(data.campaign)
+      : createCampaignState();
     game.phase = data.phase;
     game.restAnchor = { ...data.restAnchor };
     game.lifeCount = data.lifeCount;
@@ -2391,6 +2880,7 @@ export class Stichos {
     if (!game.clear(game.player) || !game.clear(game.restAnchor))
       throw new Error('Saved position is inside blocked terrain.');
     game.refreshNpcs();
+    game.syncCampaign();
     game.revealExploration();
     game.events = [];
     game.dialogue = null;
@@ -2561,7 +3051,8 @@ function validateSave(value: unknown): SaveData {
       !text(value.occupiedNpcId, 160) ||
       !npc(value.occupiedBody) ||
       (value.occupiedBody as Npc).id !== value.occupiedNpcId ||
-      !['pilgrim', 'refugee', 'guard'].includes((value.occupiedBody as Npc).role) ||
+      (!(object(value.campaign) && value.campaign.step === CAMPAIGN_LENGTH) &&
+        !['pilgrim', 'refugee', 'guard'].includes((value.occupiedBody as Npc).role)) ||
       (value.removed as string[]).includes(value.occupiedNpcId) ||
       (value.storyStage as number) < 4
     )
@@ -2672,6 +3163,14 @@ function validateSave(value: unknown): SaveData {
         value.correspondenceJobs.length
     )
       return fail();
+  }
+  if (value.campaign !== undefined) {
+    const campaign = validateCampaignState(value.campaign);
+    if (campaign.started !== (value.storyStage as number) >= 4) return fail();
+    for (let i = 0; i < campaign.step; i++) {
+      const id = `sallas:${i.toString().padStart(2, '0')}`;
+      if (!(value.quests as Quest[]).some((q) => q.id === id && q.complete)) return fail();
+    }
   }
   return value as unknown as SaveData;
 }
