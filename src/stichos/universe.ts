@@ -1,7 +1,8 @@
+import { civilizationFor } from './civilization.ts';
 /** Everyone uses this address space. A seed is an address, never a private universe. */
 export const UNIVERSE_ID = 'verso-1';
 export const STICHOS_SEED = 0x53544943;
-export type Geography = 1 | 2 | 3;
+export type Geography = 1 | 2 | 3 | 4;
 export interface PlanetAddress {
   seed: number;
   generation: Geography;
@@ -12,7 +13,7 @@ export interface RoomInvitation extends PlanetAddress {
   public?: boolean;
 }
 /** A shared meeting frequency lets strangers on the same planet find one another. */
-export function publicRoomCode(seed: number, generation: Geography = 3) {
+export function publicRoomCode(seed: number, generation: Geography = 4) {
   return `U${generation}${(seed >>> 0).toString(36).toUpperCase().padStart(7, '0')}`;
 }
 export interface Planet extends PlanetAddress {
@@ -31,8 +32,9 @@ function mix(value: number) {
   n = Math.imul(n ^ (n >>> 15), 0x846ca68b);
   return (n ^ (n >>> 16)) >>> 0;
 }
-export function planetAt(seed: number, generation: Geography = 3): Planet {
+export function planetAt(seed: number, generation: Geography = 4): Planet {
   seed >>>= 0;
+  const civilization = generation >= 4 ? civilizationFor(seed) : undefined;
   const h = mix(seed),
     a = ['Ae', 'Mira', 'Or', 'Vela', 'Thes', 'Iri', 'Cal', 'Sere'];
   const b = ['neth', 'lios', 'vane', 'dara', 'mora', 'thia', 'las', 'phos'];
@@ -46,18 +48,26 @@ export function planetAt(seed: number, generation: Geography = 3): Planet {
     y: ((mix(h) & 0xffff) / 65535) * 1100 - 550,
     color: ['#82b9cb', '#b9b68b', '#b098c6', '#8ebfa5', '#c68e79'][h % 5],
     radius: 9 + ((h >>> 8) % 9),
-    climate: [
-      'Frostwood and glacial seas',
-      'Highland tundra and winter marsh',
-      'Icebound botanical settlements',
-      'Cold forests and mineral ridges',
-    ][h % 4],
-    signal: [
-      'Botanical societies',
-      'Six family territories',
-      'Industrial radio traffic',
-      'Unmapped rural settlements',
-    ][(h >>> 2) % 4],
+    climate: civilization
+      ? civilization.axes.organics > 0.7
+        ? 'Lush forests, wetlands and highland ecologies'
+        : civilization.axes.scarcity > 0.65
+          ? 'Mineral deserts, temperate valleys and glacial highlands'
+          : 'Forests, inland seas and varied regional climates'
+      : [
+          'Frostwood and glacial seas',
+          'Highland tundra and winter marsh',
+          'Icebound botanical settlements',
+          'Cold forests and mineral ridges',
+        ][h % 4],
+    signal: civilization
+      ? `${civilization.eraName} · ${civilization.politics.governance}`
+      : [
+          'Botanical societies',
+          'Six family territories',
+          'Industrial radio traffic',
+          'Unmapped rural settlements',
+        ][(h >>> 2) % 4],
   };
 }
 export function sectorPlanets(sector = 0): Planet[] {
@@ -98,7 +108,7 @@ export function readRoomLink(raw: string): RoomInvitation | null {
       !Number.isInteger(seed) ||
       seed < 0 ||
       seed > 0xffffffff ||
-      ![1, 2, 3].includes(generation)
+      ![1, 2, 3, 4].includes(generation)
     )
       return null;
     if (endpoint !== 'peer:') {
@@ -136,7 +146,7 @@ export function knownWorlds(): KnownWorld[] {
           Number.isInteger(p.seed) &&
           p.seed >= 0 &&
           p.seed <= 0xffffffff &&
-          [1, 2, 3].includes(p.generation) &&
+          [1, 2, 3, 4].includes(p.generation) &&
           Number.isFinite(p.visitedAt),
       )
       .slice(-128);

@@ -606,7 +606,7 @@ export async function discoverRoom(endpoint: string, room: string): Promise<Room
           Number.isInteger(m.info.seed) &&
           m.info.seed >= 0 &&
           m.info.seed <= 0xffffffff &&
-          [1, 2, 3].includes(m.info.generation)
+          [1, 2, 3, 4].includes(m.info.generation)
         )
           finish(undefined, m.info);
         else if (m.type === 'error') finish(Error(m.reason));

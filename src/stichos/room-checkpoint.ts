@@ -103,7 +103,7 @@ export function validRoomWorldCheckpoint(v: unknown): v is RoomWorldCheckpoint {
       typeof v.room === 'string' &&
       /^[A-Z0-9]{4,16}$/.test(v.room) &&
       integer(v.seed, 0, 0xffffffff) &&
-      [1, 2, 3].includes(v.generation as number) &&
+      [1, 2, 3, 4].includes(v.generation as number) &&
       strings(v.removed) &&
       strings(v.opened) &&
       validSharedCombatCheckpoint(v.combat) &&

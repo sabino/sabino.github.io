@@ -1,9 +1,11 @@
+import { makeRegionalBuilding } from './architecture.ts';
+import { regionalGroundColor, blendColor } from './biome-art.ts';
 import type { Peer } from './multiplayer-protocol';
 import type { ProductionMachine } from './multiplayer-protocol';
 import type { ProductionKind } from './production';
 import { drawProduction } from './production-art';
 import type { Stichos } from './session.ts';
-import type { Effect, Npc, Point, Prop, Tile } from './types.ts';
+import type { Effect, Npc, Point, Prop, Tile, ArchitecturalCulture } from './types.ts';
 import { random, deriveSeed } from '../procedural/random.ts';
 import {
   StichosArt,
@@ -28,6 +30,7 @@ interface Building {
   maxY: number;
   clan: number;
   cathedral: boolean;
+  architecture?: ArchitecturalCulture;
   kind?: CivilBuildingKind | 'church';
 }
 interface Roof {
@@ -230,6 +233,7 @@ export class StichosRenderer {
               const kind = tile.buildingKind;
               b = {
                 id: tile.building,
+                architecture: tile.architecture,
                 minX: x,
                 maxX: x,
                 minY: y,
@@ -452,7 +456,11 @@ export class StichosRenderer {
           for (const tile of tiles) {
             const p = { x: (tile.x - cx * 16) * 32 + 16, y: (tile.y - cy * 16) * 32 + 16 };
             this.transition(game, tile, ctx, 32, p);
-            if (tile.terrain === 'grass' && tile.biome === 'settlement')
+            if (
+              tile.terrain === 'grass' &&
+              tile.biome === 'settlement' &&
+              (game.world.generation < 4 || tile.cultivated)
+            )
               this.garden(game, tile, ctx, 32, p);
           }
           this.grounds.set(key, canvas);
@@ -480,6 +488,33 @@ export class StichosRenderer {
     p = this.worldToScreen(tile),
   ) {
     const type = terrainClass(tile.terrain);
+    if (tile.ecology && !tile.building) {
+      const rng = random(deriveSeed(tile.seed, 'regional-edge'));
+      for (const [dx, dy] of [
+        [0, -1],
+        [1, 0],
+        [0, 1],
+        [-1, 0],
+      ]) {
+        const neighbor = game.world.tile(tile.x + dx, tile.y + dy);
+        if (neighbor.building || neighbor.terrain === 'wall' || neighbor.terrain === tile.terrain)
+          continue;
+        const tint = blendColor(regionalGroundColor(tile), regionalGroundColor(neighbor), 0.58);
+        for (let n = 0; n < 9; n++) {
+          const along = -u / 2 + rng() * u,
+            depth = ((1 + rng() * 3) * u) / 32;
+          rect(
+            ctx,
+            p.x + (dx ? dx * (u / 2 - depth) : along),
+            p.y + (dy ? dy * (u / 2 - depth) : along),
+            (u / 32) * (1 + rng() * 3),
+            (u / 32) * (1 + rng() * 2),
+            tint,
+          );
+        }
+      }
+      return;
+    }
     if (type === 'snow' || tile.building) return;
     const rng = random(deriveSeed(tile.seed, 'edge'));
     const s = u / 32;
@@ -763,7 +798,13 @@ export class StichosRenderer {
     const monumentalDoor =
       building?.cathedral ?? (game.world.generation < 3 && !!prop.building?.endsWith(':hall'));
     const p = this.worldToScreen(prop),
-      s = (this.unit / 32) * (prop.kind === 'door' && monumentalDoor ? 2.2 : 1);
+      s =
+        (this.unit / 32) *
+        (prop.kind === 'door' && monumentalDoor
+          ? building?.architecture && (building.architecture.technology ?? 0) > 0.57
+            ? 1.35
+            : 2.2
+          : 1);
     if (prop.kind === 'door') p.y += this.unit * 0.5;
     if (p.x < -96 * s || p.x > this.width + 96 * s || p.y < -32 * s || p.y > this.height + 160 * s)
       return;
@@ -774,6 +815,9 @@ export class StichosRenderer {
       game.world.clans[prop.clan ?? 0]?.color ?? '#68837c',
       prop.kind === 'door' ? building?.kind : undefined,
       game.world.generation >= 3 && /:ore:\d+$/.test(prop.id),
+      prop.vegetation,
+      prop.mineral,
+      building?.architecture,
     );
     // These planted resource trees are visibly pruned, with the same trunk footprint.
     const verticalScale = s * (prop.kind === 'pine' && /:timber:\d+$/.test(prop.id) ? 0.65 : 1);
@@ -1712,6 +1756,16 @@ export class StichosRenderer {
   }
 
   private makeRoof(b: Building, worldSeed: number): Roof {
+    if (b.architecture && b.kind) {
+      const sprite = makeRegionalBuilding(
+        b.kind,
+        deriveSeed(worldSeed, b.id),
+        b.maxX - b.minX + 1,
+        b.maxY - b.minY + 1,
+        b.architecture,
+      );
+      return { sprite, width: sprite.image.width, height: sprite.image.height };
+    }
     if (b.cathedral) return this.makeCathedral(b, worldSeed);
     if (b.kind && b.kind !== 'church') {
       const sprite = makeCivilBuilding(
@@ -2232,10 +2286,18 @@ export class StichosRenderer {
     }
     ctx.drawImage(this.atmosphereLayer, 0, 0, this.width, this.height);
     const time = reduced ? 0 : game.time;
+    const local = game.world.tile(game.player.x, game.player.y);
+    const frozen = game.world.generation < 4 || local.temperature < 1;
+    const rainy = !frozen && (local.ecology?.moisture ?? 0) > 0.68;
+    const arid = !frozen && (local.ecology?.moisture ?? 1) < 0.3;
     const rng = random(deriveSeed(game.world.seed, 'snowfall'));
-    for (let i = 0; i < Math.min(220, (this.width * this.height) / 5400); i++) {
+    for (
+      let i = 0;
+      i < Math.min(220, (this.width * this.height) / (frozen || rainy ? 5400 : 28000));
+      i++
+    ) {
       const depth = 0.45 + rng() * 0.85,
-        speed = 8 + rng() * 13;
+        speed = (8 + rng() * 13) * (rainy ? 4 : 1);
       const x =
         fract(
           rng() +
@@ -2247,7 +2309,14 @@ export class StichosRenderer {
           rng() + (time * speed) / this.height - (this.camera.y * this.unit * depth) / this.height,
         ) * this.height;
       ctx.globalAlpha = 0.16 + depth * 0.35;
-      rect(ctx, x, y, depth > 1 ? 2 : 1, depth > 1 ? 3 : 1, '#eff6fa');
+      rect(
+        ctx,
+        x,
+        y,
+        depth > 1 && frozen ? 2 : 1,
+        rainy ? 5 : depth > 1 && frozen ? 3 : 1,
+        frozen ? '#eff6fa' : rainy ? '#88b4c3' : arid ? '#c4b18a' : '#adc592',
+      );
     }
     ctx.restore();
   }

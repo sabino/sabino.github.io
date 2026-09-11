@@ -75,7 +75,7 @@ export function createCampaignState(): CampaignState {
 export function buildCampaign(world: InfiniteWorld): CampaignPlan {
   const origin = world.settlementsAround(0, 0, 1)[0]!;
   const all = new Map<string, Settlement>();
-  if (world.generation === 3) {
+  if (world.generation >= 3) {
     for (const town of world.settlementsAround(0, 0, 1500)) all.set(town.id, town);
   } else {
     for (const x of [-160, 0, 160])
@@ -98,7 +98,7 @@ export function buildCampaign(world: InfiniteWorld): CampaignPlan {
     return selected;
   };
   const towns = [origin, chooseTown(1), chooseTown(0), chooseTown(2), chooseTown(5), origin];
-  const spacing = world.generation === 3 ? STOP_SPACING : 80;
+  const spacing = world.generation >= 3 ? STOP_SPACING : 80;
   const usedVaults = new Set<string>();
   const chooseVault = (town: Settlement) => {
     const gx = Math.floor(town.x / spacing),

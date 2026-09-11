@@ -71,7 +71,7 @@ export interface SavedRoom {
 export interface SavedWorldSummary {
   room: string;
   seed: number;
-  generation: 1 | 2 | 3;
+  generation: 1 | 2 | 3 | 4;
   revision: number;
   updatedAt: number;
   owned: boolean;

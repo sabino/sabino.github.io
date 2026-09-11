@@ -381,15 +381,15 @@ export function buildCompact(world: InfiniteWorld): CompactPlan {
     for (const town of world.settlementsAround(x, y, radius))
       if (town.rank !== 'hamlet') all.set(town.id, town);
   };
-  if (world.generation === 3) add(0, 0, 2048);
+  if (world.generation >= 3) add(0, 0, 2048);
   else for (let y = -480; y <= 480; y += 160) for (let x = -480; x <= 480; x += 160) add(x, y, 128);
   // A rare missing family widens the real metadata search, never substitutes a different clan.
   for (let ring = 1; ring <= 3 && new Set([...all.values()].map((t) => t.clan)).size < 6; ring++) {
-    const stride = world.generation === 3 ? 1280 : 640;
+    const stride = world.generation >= 3 ? 1280 : 640;
     for (let y = -ring; y <= ring; y++)
       for (let x = -ring; x <= ring; x++)
         if (Math.max(Math.abs(x), Math.abs(y)) === ring)
-          add(x * stride, y * stride, world.generation === 3 ? 2048 : 128);
+          add(x * stride, y * stride, world.generation >= 3 ? 2048 : 128);
   }
   const towns = Array.from({ length: 6 }, (_, clan) => {
     const candidates = [...all.values()].filter((t) => t.clan === clan);

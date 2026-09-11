@@ -1,5 +1,20 @@
+import {
+  makeRegionalGround,
+  makeRegionalTree,
+  makeRegionalRock,
+  regionalGroundColor,
+} from './biome-art.ts';
 import { random, deriveSeed } from '../procedural/random.ts';
-import type { Appearance, BuildingKind, PropKind, Terrain, Tile } from './types.ts';
+import type {
+  Appearance,
+  ArchitecturalCulture,
+  BuildingKind,
+  PropKind,
+  Terrain,
+  Tile,
+  TreeForm,
+  RockMaterial,
+} from './types.ts';
 import { drawWeapon, weaponGenome } from './equipment.ts';
 import { drawArtifact } from './artifact-art.ts';
 import { humanoidGenome, tailoringGenome } from './humanoid-genome.ts';
@@ -595,6 +610,11 @@ export class StichosArt {
     return this.cache.size;
   }
   ground(tile: Tile): Sprite {
+    if (tile.ecology)
+      return this.get(
+        `regional-ground:${tile.terrain}:${tile.seed % 32}:${regionalGroundColor(tile)}:${tile.architecture?.wallMaterial}:${!!tile.building}`,
+        () => makeRegionalGround(tile),
+      );
     const terrain = tile.terrain === 'wall' ? 'floor' : tile.terrain;
     const variant = tile.seed % 16;
     return this.get(`ground:${terrain}:${variant}:${!!tile.building}:${!!tile.site}`, () =>
@@ -605,6 +625,9 @@ export class StichosArt {
           const rng = random(deriveSeed(variant, terrain, Number(!!tile.building)));
           const choose = (a: string[]) => a[Math.floor(rng() * a.length)];
           const base: Record<Terrain, string> = {
+            sand: '#b3a173',
+            mud: '#54645c',
+            basalt: '#4c535b',
             snow: '#bccce0',
             grass: '#5b7783',
             road: '#738392',
@@ -809,7 +832,51 @@ export class StichosArt {
     tint = '#687e80',
     doorStyle?: CivilBuildingKind | 'church',
     stockpile = false,
+    vegetation?: TreeForm,
+    mineral?: RockMaterial,
+    culture?: ArchitecturalCulture,
   ): Sprite {
+    if (kind === 'door' && culture && (culture.technology ?? 0) > 0.57)
+      return this.get(
+        `regional-door:${seed}:${opened}:${culture.wallColor}:${culture.accentColor}`,
+        () =>
+          image(
+            42,
+            62,
+            (ctx) => {
+              const rim = color(culture.wallColor, -28),
+                metal = color(culture.wallColor, -9),
+                accent = color(culture.accentColor, 32);
+              rect(ctx, 4, 7, 34, 54, rim);
+              rect(ctx, 5, 8, 32, 51, '#142936');
+              for (const side of [-1, 1]) {
+                const xx = 21 + side * (opened ? 16 : 8) - 7;
+                rect(ctx, xx, 11, 14, 47, metal);
+                rect(ctx, xx + 1, 12, 12, 2, color(metal, 27));
+                rect(ctx, xx + 2, 17, 10, 13, '#385667');
+                rect(ctx, xx + 3, 18, 8, 1, '#91b6bb');
+                rect(ctx, xx + 2, 35, 10, 16, color(metal, -15));
+                line(ctx, xx + 3, 36, xx + 9, 46, color(metal, 5));
+                rect(ctx, xx + 3, 52, 8, 2, accent);
+              }
+              for (const x of [3, 37]) {
+                rect(ctx, x, 7, 3, 51, rim);
+                rect(ctx, x, 11, 1, 39, accent);
+              }
+              rect(ctx, 10, 4, 22, 4, rim);
+              rect(ctx, 14, 5, 14, 1, accent);
+              rect(ctx, 1, 60, 40, 2, color(metal, 15));
+            },
+            21,
+            61,
+          ),
+      );
+    if (kind === 'pine' && vegetation)
+      return this.get(`regional-tree:${vegetation}:${seed}`, () =>
+        makeRegionalTree(vegetation, seed),
+      );
+    if (kind === 'rock' && mineral && !stockpile)
+      return this.get(`regional-rock:${mineral}:${seed}`, () => makeRegionalRock(mineral, seed));
     if (kind === 'rock' && stockpile)
       return this.get(`ore-stock:${seed >>> 0}`, () =>
         image(
