@@ -74,6 +74,8 @@ export type NpcRole =
   | 'raider'
   | 'pilgrim';
 export interface Appearance {
+  /** Body-owned forged item seed; never changes this person's anatomy. */
+  weaponSeed?: number;
   seed: number;
   skin: string;
   hair: string;

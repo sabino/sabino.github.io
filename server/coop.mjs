@@ -25,6 +25,7 @@ const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const appearanceValid = (value) =>
   object(value) &&
   integer(value.seed, -0xffffffff, 0xffffffff) &&
+  (value.weaponSeed === undefined || integer(value.weaponSeed, 0, 0xffffffff)) &&
   ['skin', 'hair', 'coat', 'trim', 'trousers'].every(
     (key) =>
       typeof value[key] === 'string' &&
@@ -36,8 +37,8 @@ const appearanceValid = (value) =>
   integer(value.hat, 0, 100) &&
   typeof value.cloak === 'boolean' &&
   ['staff', 'sword', 'bow', 'none'].includes(value.weapon);
-const copyAppearance = (value) =>
-  Object.fromEntries(
+const copyAppearance = (value) => ({
+  ...Object.fromEntries(
     [
       'seed',
       'skin',
@@ -52,7 +53,9 @@ const copyAppearance = (value) =>
       'cloak',
       'weapon',
     ].map((key) => [key, value[key]]),
-  );
+  ),
+  ...(value.weaponSeed === undefined ? {} : { weaponSeed: value.weaponSeed }),
+});
 const publicPeer = (member) => ({
   id: member.id,
   name: member.name,

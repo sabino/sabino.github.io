@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import { createCoopServer } from '../server/coop.mjs';
 import { InfiniteWorld, appearance } from '../src/stichos/world.ts';
 import { MultiplayerConnection } from '../src/stichos/multiplayer.ts';
+import { resolveForge } from '../src/stichos/forge.ts';
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const look = () => ({ ...appearance(42, 'pilgrim', 1), weapon: 'staff' });
@@ -387,4 +388,47 @@ test('the actual browser client preserves gather and loot actions when given ful
       'x',
       'y',
     ]);
+});
+
+test('forged item appearance travels with the peer while invalid seeds cannot replace its body or weapon', async (t) => {
+  const { server, url } = await serverFixture(t);
+  const forged = resolveForge(42, { kind: 'staff', material: 1, core: 'warmth', span: 'long' })!;
+  const owner = await join(url, { appearance: { ...look(), weaponSeed: forged.seed } });
+  const observer = await join(url, { room: owner.welcome.room });
+  const shown = observer.welcome.peers.find((p: any) => p.id === owner.welcome.peerId);
+  assert.equal(shown.appearance.weaponSeed, forged.seed);
+  assert.equal(shown.appearance.seed, look().seed);
+  const member = server.hub.rooms.get(owner.welcome.room).members.get(owner.welcome.peerId);
+  for (const weaponSeed of [-1, 0x100000000, 3.5, '42']) {
+    owner.send({
+      type: 'pose',
+      x: 0,
+      y: 5,
+      heading: 0,
+      phase: 0,
+      appearance: { ...look(), weaponSeed },
+    });
+    assert.equal((await owner.next('error')).code, 'invalid_pose');
+    assert.equal(member.appearance.weaponSeed, forged.seed);
+    assert.equal(member.appearance.seed, look().seed);
+  }
+  owner.send({
+    type: 'pose',
+    x: 0,
+    y: 5,
+    heading: 0,
+    phase: 0,
+    appearance: { ...look(), weaponSeed: 0xffffffff },
+  });
+  assert.equal((await observer.next('pose')).peer.appearance.weaponSeed, 0xffffffff);
+  owner.send({ type: 'pose', x: 0, y: 5, heading: 0, phase: 0, appearance: look() });
+  assert.equal(
+    (await observer.next('pose')).peer.appearance.weaponSeed,
+    undefined,
+    'unforged legacy appearance still works',
+  );
+  const invalid = await wire(url);
+  invalid.send(identity({ appearance: { ...look(), weaponSeed: -1 } }));
+  assert.equal((await invalid.next('error')).code, 'invalid_join');
+  assert.equal(server.hub.rooms.size, 1, 'invalid equipment cannot create another room');
 });
