@@ -209,6 +209,7 @@ try {
   await waitFor('window.stichos.state.transfer', 'opening');
   await click('#s-skip');
   await waitFor('!window.stichos.state.transfer', 'world');
+  await key('s', 'KeyS', 83, 3500);
   await pause();
   const saved = await read('window.stichos.state');
   await click('#s-save-file');
@@ -223,10 +224,14 @@ try {
   assert(filename === download.suggestedFilename, 'Invalid filename');
   const exported = JSON.parse(fs.readFileSync(path.join(hostDir, filename), 'utf8'));
   assert(
-    exported.player.x === saved.player.x && exported.seed === saved.seed,
+    exported.player.x === saved.player.x &&
+      exported.player.y === saved.player.y &&
+      exported.seed === saved.seed &&
+      exported.worldGeneration === saved.worldGeneration &&
+      exported.exploration?.revision === saved.explorationRevision,
     'Export does not match live game',
   );
-  pass('Actual JSON download matches live position and seed', filename);
+  pass('Actual JSON download matches live position, seed, generation, and exploration', filename);
   await click('#s-resume');
   await key('s', 'KeyS', 83, 750);
   assert(
@@ -239,10 +244,14 @@ try {
   assert(
     restored.player.x === saved.player.x &&
       restored.player.y === saved.player.y &&
-      JSON.stringify(restored.inventory) === JSON.stringify(saved.inventory),
-    'Imported save did not restore exact position/inventory',
+      JSON.stringify(restored.inventory) === JSON.stringify(saved.inventory) &&
+      restored.worldGeneration === saved.worldGeneration &&
+      restored.explorationRevision === saved.explorationRevision &&
+      JSON.stringify(restored.exploredBounds) === JSON.stringify(saved.exploredBounds) &&
+      JSON.stringify(restored.discoveredSites) === JSON.stringify(saved.discoveredSites),
+    'Imported save did not restore exact position, inventory, generation, and exploration',
   );
-  pass('File chooser restores downloaded position, inventory, and world');
+  pass('File chooser restores downloaded position, inventory, world, and atlas knowledge');
   const bad = {
     'broken.json': '{"x":',
     'wrong-version.json': '{"version":999}',

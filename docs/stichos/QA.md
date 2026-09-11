@@ -38,10 +38,10 @@ Evidence: [possession results and screenshots](../../.dream-loop/stichos-possess
 
 ## Save files and offline play
 
-The isolated storage pass was repeated on production `app-BQLDpW6p.js` / service worker `3cdc9cff1bf20984bc80`. Seven checks passed:
+The isolated storage pass was repeated on production `app-DHCdk53y.js` / service worker `f58d84fdadaa2ae9f891` after the generation-3 atlas update. Seven checks passed:
 
-- Actual Download save JSON matched the live seed and position.
-- The file chooser restored that downloaded position, inventory, and world.
+- Actual Download save JSON matched the live seed, position, generation, and exploration revision after real walking.
+- The file chooser restored that downloaded position, inventory, generation, explored bounds, exploration revision, and discovered places.
 - Corrupt JSON, an unsupported save version, and an oversized file each preserved the active life.
 - Offline service-worker reload, saved continuation, and real walking worked. The cache held 18 assets; an uncached network request was blocked during the offline check.
 - No runtime exceptions occurred.

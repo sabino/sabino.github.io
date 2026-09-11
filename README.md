@@ -109,6 +109,7 @@ The browser harness uses actual input in an isolated Agent Workspace Chromium an
 
 ```sh
 node scripts/browser-stichos-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
+node scripts/browser-stichos-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/ --atlas
 ```
 
 The QA report distinguishes what was verified in the browser from simulation tests. Save download/import, invalid-file preservation, and service-worker offline reload and play are also exercised by `scripts/browser-stichos-storage.mjs`. Physical gamepads are not currently integrated into Stíchos. This is an expanding playable foundation, with an opening investigation and repeatable local work; the full Sallas story, large-scale war simulation, multiplayer, and richer long-term quest generation are not finished.
