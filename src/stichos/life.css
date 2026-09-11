@@ -339,3 +339,178 @@
     height: 130px;
   }
 }
+.s-invention-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0 20px;
+}
+.s-invention-sheet {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px 18px;
+  border: 1px solid #82917566;
+  background: #21342e88;
+}
+.s-invention-drawing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.s-invention-drawing img {
+  width: 200px;
+  height: 220px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.s-invention-stats {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.s-invention-stats div {
+  min-width: 68px;
+}
+.s-invention-stats dt {
+  color: #a0afa5;
+  font-size: 11px;
+}
+.s-invention-stats dd {
+  margin: 4px 0;
+  font-size: 22px;
+  color: #e3d4aa;
+}
+.s-invention-parts {
+  margin: 16px 0;
+}
+.s-invention-part-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.s-invention-part-list span {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid #82917533;
+}
+.s-invention-owned {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.s-invention-owned article {
+  padding: 12px;
+  border: 1px solid #82917555;
+  min-width: 0;
+}
+.s-invention-owned article button {
+  width: 100%;
+}
+.s-invention-owned [data-invention-inspect] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 0;
+  padding: 4px;
+  margin-bottom: 10px;
+}
+.s-invention-owned img {
+  width: 88px;
+  height: 100px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.s-invention-owned strong {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .s-invention-sheet {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+  .s-invention-drawing img {
+    height: 170px;
+  }
+  .s-invention-owned,
+  .s-invention-part-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.s-pack-inventions {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.s-pack-inventions button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+}
+.s-pack-inventions img,
+.s-active-invention img {
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+.s-pack-inventions small {
+  display: block;
+  color: #b8baa6;
+  font-size: 10px;
+}
+.s-active-invention {
+  border: 1px solid #6e785d;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.s-tool-preview {
+  width: 88px;
+  height: 100px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  display: block;
+  margin: 0 auto 8px;
+}
+.s-tool-grid article > small {
+  display: block;
+}
+.s-tool-grid button,
+.s-staff-grid article > button {
+  margin: 4px 4px 4px 0;
+}
+.s-pack-tools {
+  display: flex;
+  gap: 3px;
+  margin-top: 10px;
+}
+.s-pack-tools button {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  font-size: 10px;
+  flex: 1;
+}
+.s-pack-tools button[aria-pressed='true'] {
+  border-color: #dbc791;
+  background: #3c534c;
+}
+.s-pack-tools small {
+  display: block;
+  font-size: 9px;
+  color: #bac3af;
+}
+.s-pack-tools img {
+  image-rendering: pixelated;
+  object-fit: contain;
+}

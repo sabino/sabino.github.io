@@ -1,0 +1,11 @@
+# Tools, resources and the priest’s household
+
+New lives begin with the priest’s real Vespera residence, 240 coins, an axe, pickaxe and sickle, and three named working relationships. The body keeps a dedicated three-tool belt through mind travel. Existing saves preserve established wealth and progress while gaining the priest’s missing tool ledger.
+
+Open **Life → Household & tools**, **K → Working tools and household**, or the satchel. Tools have seeded head/haft dimensions, strength, recovery, energy cost and durability. Select the right tool and repeatedly click a resource or press E: trees require 4–7 strokes, mineral stocks/outcrops 5–9, and plants two. Nonfinal strokes consume energy and condition without producing resources. The last successful stroke removes the actual object and awards its finite yield. Workbench repair costs four coins, one wood and one ore. Creating a missing tool costs eighteen coins, two wood and two ore at a workbench.
+
+These supplies support clinic deliveries, radio repair, expedition equipment, medicines, furnishing and inventions. Continuing noticeboard commissions provide paid work; tool upkeep and staff wages consume earnings. Menus pause time rather than running unattended progress.
+
+Named household members show their specialty, competence, family-influenced trust and motives. Trust can be granted or withdrawn individually. A paid assignment reserves up to three actual nearby resources and lasts 60–180 seconds of lived time. Its wages are paid before work begins. Once due, collect near the worker or residence with sufficient pack space. Completion consumes those same world resources once. Dead, occupied or unavailable workers cannot deliver; competing depletion prevents delivery. Cancelling does not refund already agreed wages.
+
+Household resource assignments currently run in solo play. While in a shared room, manual preliminary strokes remain local and only the final stroke requests an atomic server claim with the appropriate tool. Tool ownership, condition, combat, NPC simulation and household state remain client-owned; cooperative play is not an authoritative MMO economy.

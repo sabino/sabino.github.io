@@ -10,6 +10,9 @@ import { Stichos, ITEMS, RECIPES } from './session';
 import { StichosRenderer } from './render';
 import { drawPortrait } from './portrait';
 import { weaponIcon } from './equipment';
+import { artifactIcon } from './artifact-art';
+import { toolIcon } from './labor-art';
+import type { ToolKind } from './labor';
 import type { WeaponKind } from './equipment';
 import { itemIcon } from './icons';
 import { AtlasController, AtlasPainter, atlasDistance } from './atlas';
@@ -431,14 +434,16 @@ function equipmentMenu() {
       .map((kind) => {
         const p = game.weaponProfile(kind);
         const owned = game.weapons.has(kind);
-        return `<article>${weaponIcon(game.weaponSeed(kind), kind, 112)}<small>${owned ? (game.player.appearance.weapon === kind ? 'Equipped' : 'In this body’s keeping') : 'Available from merchants'}</small><h3>${esc(p.name)}</h3><dl><div><dt>Strength</dt><dd>${p.damage}</dd></div><div><dt>Reach</dt><dd>${p.range.toFixed(2)}</dd></div><div><dt>Recovery</dt><dd>${p.cooldown.toFixed(2)}s</dd></div></dl><p>${esc(p.effectDescription)}</p><button data-equip="${kind}" ${!owned ? 'disabled' : ''}>${owned ? 'Equip' : 'Not owned'}</button></article>`;
+        return `<article>${weaponIcon(game.weaponSeed(kind), kind, 112)}<small>${owned ? (!game.activeArtifact && game.player.appearance.weapon === kind ? 'Equipped' : 'In this body’s keeping') : 'Available from merchants'}</small><h3>${esc(p.name)}</h3><dl><div><dt>Strength</dt><dd>${p.damage}</dd></div><div><dt>Reach</dt><dd>${p.range.toFixed(2)}</dd></div><div><dt>Recovery</dt><dd>${p.cooldown.toFixed(2)}s</dd></div></dl><p>${esc(p.effectDescription)}</p><button data-equip="${kind}" ${!owned ? 'disabled' : ''}>${owned ? 'Equip' : 'Not owned'}</button></article>`;
       })
       .join(
         '',
-      )}</div><button id="s-open-forge">Build from parts</button><button id="s-gear-return" class="s-primary">Return to this life</button>`,
+      )}</div>${game.activeArtifact ? `<article class="s-active-invention"><img src="${artifactIcon(game.activeArtifact.design, 112)}" alt=""><h3>${esc(game.activeArtifact.name)}</h3><p>Equipped invention · ${esc(game.activeArtifact.delivery)}<br>${game.activeArtifact.properties.damage} strength · ${game.activeArtifact.properties.range.toFixed(2)} reach · ${game.activeArtifact.properties.cooldown.toFixed(2)}s recovery</p></article>` : ''}<button id="s-open-estate">Working tools and household</button><button id="s-open-invent">Invent and inspect new constructions</button><button id="s-open-forge">Build from parts</button><button id="s-gear-return" class="s-primary">Return to this life</button>`,
   );
   el('s-gear-return').onclick = closeModal;
   el('s-open-forge').onclick = () => lifeMenu('forge');
+  el('s-open-estate').onclick = () => lifeMenu('estate');
+  el('s-open-invent').onclick = () => lifeMenu('discover', game.activeArtifact?.design);
 }
 function controls() {
   openModal(
@@ -694,6 +699,8 @@ function inventory(view: 'pack' | 'craft' = packView) {
 function updatePack() {
   const signature = JSON.stringify([
     game.inventory,
+    game.artifacts.map((a) => [a.design, a.equipped]),
+    game.tools.map((t) => [t.kind, t.durability, t.equipped]),
     game.player.coins,
     packView,
     selectedItem,
@@ -705,7 +712,25 @@ function updatePack() {
   if (packView === 'pack') {
     const entries = (Object.keys(ITEMS) as ItemId[]).filter((id) => (game.inventory[id] ?? 0) > 0);
     el('s-pack-content').innerHTML =
-      `<div class="s-item-grid">${entries.map((id) => `<button class="s-item ${selectedItem === id ? 'selected' : ''}" data-item="${id}" title="${esc(ITEMS[id].name)}">${itemIcon(id, 34)}<b>${game.inventory[id]}</b></button>`).join('')}${Array.from({ length: Math.max(0, 12 - entries.length) }, () => '<span class="s-empty-slot"></span>').join('')}</div>`;
+      `<div class="s-item-grid">${entries.map((id) => `<button class="s-item ${selectedItem === id ? 'selected' : ''}" data-item="${id}" title="${esc(ITEMS[id].name)}">${itemIcon(id, 34)}<b>${game.inventory[id]}</b></button>`).join('')}${Array.from({ length: Math.max(0, 12 - entries.length) }, () => '<span class="s-empty-slot"></span>').join('')}</div>` +
+      `<div class="s-pack-tools">${game.tools.map((t) => `<button data-pack-tool="${t.kind}" title="${esc(t.profile.name)} · ${t.durability}/${t.profile.maxDurability} condition" aria-pressed="${t.equipped}"><img src="${toolIcon(t.seed, t.kind, 36)}" alt=""><span>${t.kind}<small>${t.durability}/${t.profile.maxDurability}</small></span></button>`).join('')}</div><div class="s-pack-inventions">${game.artifacts.map((a) => `<button data-pack-invention="${esc(a.design)}" title="${esc(a.genome.name)}"><img src="${artifactIcon(a.design, 52)}" alt=""><span>${esc(a.genome.name)}<small>${a.equipped ? 'Equipped' : esc(a.genome.delivery)}</small></span></button>`).join('')}<button id="s-pack-tools">Working tools and household</button><button id="s-pack-invent">Open invention notebook</button></div>`;
+    el('s-pack-content')
+      .querySelectorAll<HTMLButtonElement>('[data-pack-tool]')
+      .forEach(
+        (b) =>
+          (b.onclick = () => {
+            toast(game.equipTool(b.dataset.packTool as ToolKind).message);
+            updateUI();
+            save();
+          }),
+      );
+    el('s-pack-tools').onclick = () => lifeMenu('estate');
+    el('s-pack-invent').onclick = () => lifeMenu('discover');
+    el('s-pack-content')
+      .querySelectorAll<HTMLButtonElement>('[data-pack-invention]')
+      .forEach(
+        (button) => (button.onclick = () => lifeMenu('discover', button.dataset.packInvention)),
+      );
   } else {
     el('s-pack-content').innerHTML = `<div class="s-recipes">${RECIPES.map(
       (r) =>
@@ -819,18 +844,28 @@ function updateUI() {
   document
     .querySelectorAll<HTMLElement>('[data-count]')
     .forEach((n) => (n.textContent = String(game.inventory[n.dataset.count as ItemId] ?? 0)));
-  const equipmentKey = `${p.appearance.seed}:${p.appearance.weapon}:${(['staff', 'sword', 'bow'] as const).map((kind) => game.weaponSeed(kind)).join(':')}`;
+  const equipmentKey = `${p.appearance.seed}:${p.appearance.weapon}:${(['staff', 'sword', 'bow'] as const).map((kind) => game.weaponSeed(kind)).join(':')}:${game.activeArtifact?.design ?? ''}`;
   const equipmentChanged = equipmentSignature !== equipmentKey;
   equipmentSignature = equipmentKey;
   if (equipmentChanged) {
     const kind = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon;
-    document
-      .querySelector('[data-action="attack"] svg')
+    const artifact = game.activeArtifact;
+    const attackButton = document.querySelector<HTMLButtonElement>('[data-action="attack"]');
+    attackButton
+      ?.querySelector('svg, img')
       ?.replaceWith(
         document
           .createRange()
-          .createContextualFragment(weaponIcon(game.weaponSeed(kind), kind, 30)),
+          .createContextualFragment(
+            artifact
+              ? `<img src="${artifactIcon(artifact.design, 30)}" width="30" height="30" alt="">`
+              : weaponIcon(game.weaponSeed(kind), kind, 30),
+          ),
       );
+    if (attackButton)
+      attackButton.title = artifact
+        ? `${artifact.name} · ${artifact.properties.damage} strength · ${artifact.delivery}`
+        : game.weaponProfile(kind).name;
   }
   document.querySelectorAll<HTMLButtonElement>('[data-equip]').forEach((n) => {
     if (equipmentChanged)
@@ -839,7 +874,7 @@ function updateUI() {
         n.dataset.equip as WeaponKind,
         38,
       );
-    n.classList.toggle('equipped', n.dataset.equip === p.appearance.weapon);
+    n.classList.toggle('equipped', !game.activeArtifact && n.dataset.equip === p.appearance.weapon);
     n.disabled = !game.weapons.has(n.dataset.equip as 'staff' | 'sword' | 'bow');
     n.title = n.disabled ? `Buy a ${n.dataset.equip} from a merchant` : `Equip ${n.dataset.equip}`;
     const profile = game.weaponProfile(n.dataset.equip as 'staff' | 'sword' | 'bow');
@@ -857,6 +892,15 @@ function updateUI() {
     if (plant)
       context.textContent = `E · Gather ${plant.name.toLowerCase()} · ${plant.yield} portions`;
   }
+  if (
+    near &&
+    !('role' in near) &&
+    ['pine', 'rock', 'cequin', 'heartleaf', 'emberroot', 'mushroom'].includes(near.kind)
+  ) {
+    const work = game.workProgress;
+    const required = near.kind === 'pine' ? 'axe' : near.kind === 'rock' ? 'pickaxe' : 'sickle';
+    context.textContent = `E · ${near.kind === 'pine' ? 'Chop' : near.kind === 'rock' ? 'Mine' : 'Gather'} ${near.name}${work?.propId === near.id ? ` · ${work.strokes}/${work.requiredStrokes} strokes` : ` · ${required}`}`;
+  }
   updatePack();
   updateDialogue();
 }
@@ -864,7 +908,10 @@ function drawMap(target = el<HTMLCanvasElement>('s-map'), scale = 5) {
   atlasPainter.draw(target, atlasSource(), { x: game.player.x, y: game.player.y, scale }, false);
 }
 
-function lifeMenu(initialTab: 'purpose' | 'forge' = 'purpose') {
+function lifeMenu(
+  initialTab: 'purpose' | 'forge' | 'discover' | 'estate' = 'purpose',
+  initialDesign?: string,
+) {
   if (sharedActionPending) return;
   openModal(
     'life',
@@ -878,6 +925,8 @@ function lifeMenu(initialTab: 'purpose' | 'forge' = 'purpose') {
       save();
     },
     initialTab,
+    initialDesign,
+    multiplayer.status !== 'offline',
   );
   el('s-life-return').onclick = closeModal;
 }
@@ -972,6 +1021,7 @@ function togetherMenu() {
   }
 }
 multiplayer.onChange = () => {
+  game.setSharedWorld(multiplayer.status !== 'offline');
   el('s-together').textContent =
     multiplayer.status === 'online'
       ? `Together · ${multiplayer.peers.length + 1}`
@@ -1062,6 +1112,12 @@ async function interactShared(id?: string, keepRoute = false) {
     toast(available.reason ?? 'This cannot be gathered yet.');
     return;
   }
+  if (available.completes === false) {
+    game.interact(target.id);
+    updateUI();
+    save();
+    return;
+  }
   const current = game,
     desiredOpen = !game.opened.has(target.id);
   sharedActionPending = true;
@@ -1077,6 +1133,7 @@ async function interactShared(id?: string, keepRoute = false) {
             target.id,
             ['chest', 'crate'].includes(target.kind) ? 'loot' : 'gather',
             target,
+            available.toolKind,
           );
     if (current !== game) return;
     if (result.ok) {
@@ -1613,6 +1670,14 @@ Object.defineProperty(window, 'stichos', {
         nearbyHomes: game.nearbyHomes,
         bodyId: game.bodyId,
         displayAppearance: game.displayAppearance,
+        tools: game.tools,
+        workProgress: game.workProgress,
+        staff: game.staff,
+        estate: game.estate,
+        laborOrders: game.laborOrders,
+        artifacts: game.artifacts,
+        activeArtifact: game.activeArtifact,
+        nextArtifactDesign: game.nextArtifactDesign,
         multiplayer: {
           status: multiplayer.status,
           room: multiplayer.room,

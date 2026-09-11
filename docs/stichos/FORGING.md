@@ -1,4 +1,14 @@
-# Component forging
+# Inventions and component forging
+
+## Open-ended invention sketches
+
+**Life → Invent**, the satchel, and **K → Invent** expose a second construction system beyond the component recipes. A normalized design phrase (up to 64 Unicode characters) addresses a connected graph of 5–24 parts. New sketches incorporate the world, body and saved invention serial. The graph determines generated materials, mass, hardness, conductive pathways, living tissue, silhouette, price and effects.
+
+The current primitive grammar supports implements, vessels and botanical constructions with contact, projectile, pulse or consumable delivery. There is no prewritten list of finished items; there are still finite primitive types and supported gameplay verbs. Each object uses the same generated pixels in its preview, pack and held appearance. Actual attacks obey its range, recovery and line of sight; restorative on-hit effects require a successful hit. Consumables restore bounded amounts and remove one physical object.
+
+The crafting level-two workbench checks exact coins, ingredients and resulting pack capacity before spending. One body can hold one copy of a particular design; salvage removes it and returns one raw material. Objects stay with their physical bearer through mind travel and save restoration regenerates the original construction. Gathering-capable designs advertise a graph-derived axe, pickaxe or sickle specialization.
+
+## Basic component recipes
 
 Open **Life → Forge**, or **K → Build from parts**. The bench combines choices into an actual procedural weapon. Three kinds, three materials per kind, three botanical cores and three proportions provide 81 recipes for each host. The host seed supplies the remaining details, so another body's interpretation of the same recipe can differ.
 

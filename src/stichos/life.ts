@@ -13,20 +13,36 @@ import { weaponIcon } from './equipment';
 import { furnitureIcon } from './progression-art';
 import { FORGE_MATERIALS, FORGE_CORES, FORGE_SPANS } from './forge';
 import type { ForgeRecipe } from './forge';
+import { artifactIcon } from './artifact-art';
+import type { ArtifactGenome } from './artifacts';
+import type { LaborKind, ToolKind } from './labor';
+import { toolIcon } from './labor-art';
 
 const esc = (value: unknown) =>
   String(value).replace(
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
-type LifeTab = 'purpose' | 'skills' | 'forge' | 'homes' | 'wardrobe' | 'store';
+type LifeTab =
+  | 'purpose'
+  | 'skills'
+  | 'forge'
+  | 'discover'
+  | 'estate'
+  | 'homes'
+  | 'wardrobe'
+  | 'store';
 export function mountLife(
   container: HTMLElement,
   game: Stichos,
   onChange: () => void,
   initialTab: LifeTab = 'purpose',
+  initialDesign?: string,
+  sharedWorld = false,
 ) {
   let tab: LifeTab = initialTab;
+  let inventionOffset = 0;
+  let design = initialDesign ?? game.nextArtifactDesign;
   const forgeRecipe: ForgeRecipe = {
     kind: game.player.appearance.weapon === 'none' ? 'staff' : game.player.appearance.weapon,
     material: 0,
@@ -106,6 +122,71 @@ export function mountLife(
       : '';
     return `<p>Build a weapon from its parts. Material sets mass, proportions shape reach and recovery, and a living core changes what a successful hit does. Your choices resolve into an actual generated weapon.</p><div class="s-forge-layout"><div class="s-forge-controls"><label>Weapon<select id="s-forge-kind">${(['staff', 'sword', 'bow'] as const).map((kind) => `<option value="${kind}" ${forgeRecipe.kind === kind ? 'selected' : ''}>${kind}</option>`).join('')}</select></label><label>Structural material<select id="s-forge-material">${FORGE_MATERIALS[forgeRecipe.kind].map((material, index) => `<option value="${index}" ${forgeRecipe.material === index ? 'selected' : ''}>${esc(material)}</option>`).join('')}</select></label><label>Living core<select id="s-forge-core">${FORGE_CORES.map((core) => `<option value="${core.id}" ${forgeRecipe.core === core.id ? 'selected' : ''}>${esc(core.name)}</option>`).join('')}</select></label><label>Proportions<select id="s-forge-span">${FORGE_SPANS.map((span) => `<option value="${span.id}" ${forgeRecipe.span === span.id ? 'selected' : ''}>${esc(span.name)}</option>`).join('')}</select></label><p>${esc(FORGE_SPANS.find((span) => span.id === forgeRecipe.span)!.description)}</p></div><article class="s-forge-preview">${resolved ? `${weaponIcon(resolved.seed, forgeRecipe.kind, 160)}<small>${esc(resolved.profile.construction)}</small><h3>${esc(resolved.profile.name)}</h3><dl><div><dt>Strength</dt><dd>${resolved.profile.damage} <small>current ${current.damage}</small></dd></div><div><dt>Reach</dt><dd>${resolved.profile.range.toFixed(2)} <small>current ${current.range.toFixed(2)}</small></dd></div><div><dt>Recovery</dt><dd>${resolved.profile.cooldown.toFixed(2)}s <small>current ${current.cooldown.toFixed(2)}s</small></dd></div></dl><p>${esc(resolved.profile.effectDescription)}</p>` : '<p>This construction could not be resolved. Choose another combination.</p>'}</article></div><p class="s-forge-price">${esc(price)}</p><button id="s-forge-build" class="s-primary" ${preview.ok ? '' : 'disabled'}>Forge and equip this construction</button><p id="s-forge-requirement">${esc(preview.message)}</p><p>The work requires crafting level 2 and a nearby field or home workbench. Its materials and coins leave this body’s pack. The completed weapon stays with this body when Theo travels.</p>`;
   }
+  function inventionStats(genome: ArtifactGenome) {
+    const p = genome.properties;
+    return `<dl class="s-invention-stats">${genome.delivery !== 'consume' ? `<div><dt>Strength</dt><dd>${p.damage}</dd></div><div><dt>Reach</dt><dd>${p.range.toFixed(2)}</dd></div><div><dt>Recovery</dt><dd>${p.cooldown.toFixed(2)}s</dd></div>` : ''}${[
+      ['Healing', p.healing],
+      ['Breath', p.breath],
+      ['Warmth', p.warmth],
+      ['Harvest', p.harvest],
+    ]
+      .filter(([, value]) => Number(value) > 0)
+      .map(([name, value]) => `<div><dt>${name}</dt><dd>+${value}</dd></div>`)
+      .join('')}</dl>`;
+  }
+  function discover() {
+    const preview = game.artifactPreview(design),
+      g = preview.genome;
+    const owned = game.artifacts.find((a) => a.design === g?.design);
+    return `<p>Sketch a construction from branches, blades, chambers, roots and living tissues. Its shape and materials determine what it does.</p><form id="s-invention-form"><label>A phrase for this design<input id="s-invention-design" value="${esc(design)}" maxlength="64" autocomplete="off" spellcheck="false"></label><div class="s-invention-buttons"><button type="submit">Sketch this phrase</button><button type="button" id="s-invention-next">Next invention →</button></div></form>${
+      g
+        ? `<article class="s-invention-sheet"><div class="s-invention-drawing"><img src="${artifactIcon(g.design, 200)}" alt="${esc(g.name)}"><small>${g.parts.length} connected parts · ${esc(g.delivery)}</small></div><div><span class="s-chapter">${esc(g.category)} · a new construction</span><h3>${esc(g.name)}</h3><p>${esc(g.description)}</p>${inventionStats(g)}<small>${g.delivery === 'consume' ? 'Using this consumes the physical object.' : 'Restorative effects apply only after a successful hit. This implement remains with its bearer.'}</small></div></article><details class="s-invention-parts"><summary>Read the construction</summary><div class="s-invention-part-list">${g.parts.map((part, i) => `<span><b>${i + 1}. ${esc(part.kind)}</b>${esc(part.material.name)}<small>${part.length.toFixed(1)} span · ${part.width.toFixed(1)} breadth<br>hardness ${part.material.hardness.toFixed(2)} · density ${part.material.density.toFixed(2)}</small></span>`).join('')}</div></details><p class="s-forge-price">${g.cost.coins} coins · ${Object.entries(
+            g.cost.items,
+          )
+            .map(([id, amount]) => `${amount} ${esc(id)}`)
+            .join(
+              ' · ',
+            )}</p>${owned ? `<button id="s-invention-act" class="s-primary" ${owned.equipped ? 'disabled' : ''}>${owned.equipped ? 'Held by this body' : g.delivery === 'consume' ? 'Use this invention' : 'Equip this invention'}</button>` : `<button id="s-invention-build" class="s-primary" ${preview.ok ? '' : 'disabled'}>Make this invention</button>`}`
+        : ''
+    }<p id="s-invention-requirement">${esc(preview.message)}</p><p>New sketches use this world's seed and Theo's next invention number. You can also enter your own phrase. The same phrase reproduces the same construction; keep exploring new phrases and sketches.</p><h3>This body’s inventions · ${game.artifacts.length}</h3><div class="s-invention-owned">${game.artifacts.map((a) => `<article><button data-invention-inspect="${esc(a.design)}"><img src="${artifactIcon(a.design, 88)}" alt=""><strong>${esc(a.genome.name)}</strong><small>${esc(a.genome.delivery)}${a.equipped ? ' · equipped' : ''}</small></button><button data-invention-action="${esc(a.design)}" ${a.equipped ? 'disabled' : ''}>${a.equipped ? 'Equipped' : a.genome.delivery === 'consume' ? 'Use' : 'Equip'}</button><button data-invention-salvage="${esc(a.design)}">Salvage materials</button></article>`).join('') || '<p>No inventions in this body’s pack yet. Make one at a workbench when the materials are ready.</p>'}</div>`;
+  }
+  function estate() {
+    const residence = game.estate.residence;
+    return `<article class="s-life-story"><small>The priest’s household · established over twenty stíchoi</small><h3>A life already lived here.</h3><p>${esc(game.estate.description)}</p>${residence ? `<p><b>${esc(residence.name)}</b> · ${Math.round(residence.x)}, ${Math.round(residence.y)}</p>` : ''}<p>Timber and ore maintain tools, furnish homes and make expedition equipment. Living plants keep clinics supplied. Wages buy another person’s time; your choice of whom to trust shapes this household.</p></article><h3>Working tools · this body’s belongings</h3><p>Equip an axe to chop wood, a pickaxe to mine, or a sickle to gather plants. Press E for each stroke. Working consumes energy and wears the tool; return to a workbench for repairs.</p><div class="s-life-grid s-tool-grid">${(
+      ['axe', 'pickaxe', 'sickle'] as ToolKind[]
+    )
+      .map((kind) => {
+        const tool = game.tools.find((t) => t.kind === kind);
+        return `<article>${tool ? `<img class="s-tool-preview" src="${toolIcon(tool.seed, kind, 88)}" alt="${esc(kind)}">` : ''}<small>${esc(kind)}${tool?.equipped ? ' · selected for work' : ''}</small><h4>${tool ? esc(tool.profile.name) : `No ${kind} in this body’s keeping`}</h4>${tool ? `<progress value="${tool.durability}" max="${tool.profile.maxDurability}" aria-label="${kind} condition"></progress><p>${tool.durability}/${tool.profile.maxDurability} condition<br>${tool.profile.staminaCost} energy per stroke · ${tool.profile.cooldown.toFixed(2)}s recovery</p><button data-tool-equip="${kind}" ${tool.equipped ? 'disabled' : ''}>${tool.equipped ? 'Selected' : 'Select tool'}</button><button data-tool-repair="${kind}">Repair at workbench</button>` : `<button data-tool-buy="${kind}">Obtain a working ${kind}</button>`}</article>`;
+      })
+      .join(
+        '',
+      )}</div><h3>The people who work with you</h3><p>Choose people individually. Their families, skills and motives matter; employment does not erase their own judgment.</p>${sharedWorld ? '<p class="s-life-message">Household assignments are available while playing alone. Leave the shared room to hire or collect work.</p>' : ''}<div class="s-life-grid s-staff-grid">${
+      game.staff
+        .map(
+          (worker) =>
+            `<article><small>${esc(worker.specialty)} · ${worker.competence}/100 competence</small><h4>${esc(worker.name)}</h4><p>${esc(worker.motive)}</p><p>${worker.loyalty}/100 trust in the household</p><button data-staff-trust="${esc(worker.id)}" data-trusted="${worker.trusted ? 'no' : 'yes'}">${worker.trusted ? 'Withdraw my trust' : 'Entrust household work'}</button>${(
+              ['forestry', 'quarry', 'garden'] as LaborKind[]
+            )
+              .map((kind) => {
+                const preview = game.laborPreview(worker.id, kind);
+                return `<div class="s-life-action"><button data-staff-hire="${esc(worker.id)}" data-labor-kind="${kind}" ${!preview.ok || sharedWorld ? 'disabled' : ''}>Commission ${kind}</button><small>${esc(preview.ok ? `${preview.wages} coins · ${Math.ceil(preview.order.endsAt - game.time)} seconds of work` : preview.reason)}</small></div>`;
+              })
+              .join('')}</article>`,
+        )
+        .join('') ||
+      '<p>Meet peaceful residents and learn who they are before entrusting household work.</p>'
+    }</div><h3>Agreed work</h3><p>Work advances while you are in the world. Menus pause the clock. Collect completed work near the worker or at your residence.</p><div class="s-life-grid">${
+      game.laborOrders
+        .filter((o) => o.status === 'working')
+        .map(
+          (order) =>
+            `<article><small>${esc(order.kind)} · ${order.wages} coins paid</small><h4>${esc(order.workerName)}</h4><progress value="${Math.max(0, game.time - order.startedAt)}" max="${order.endsAt - order.startedAt}"></progress><p>${Math.max(0, Math.ceil(order.endsAt - game.time))} seconds of lived time remaining<br>${order.allocations.map((a) => `${a.amount} ${esc(a.item)}`).join(' · ')}</p><button data-labor-collect="${esc(order.id)}" ${sharedWorld || game.time < order.endsAt ? 'disabled' : ''}>Collect agreed work</button><button data-labor-cancel="${esc(order.id)}">Cancel assignment</button></article>`,
+        )
+        .join('') ||
+      '<p>No assignment is underway. Select someone you trust and agree on paid work above.</p>'
+    }</div>`;
+  }
   function homes() {
     const owned = game.progression.homes,
       offered = game.nearbyHomes.filter((address) => !owned.some((h) => h.id === address.id));
@@ -146,7 +227,7 @@ export function mountLife(
     const focusId = active?.id,
       focusTab = active?.dataset.lifeTab;
     actions.length = 0;
-    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['purpose', 'skills', 'forge', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', skills: 'Professions', forge: 'Forge', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'purpose' ? purpose() : tab === 'skills' ? skills() : tab === 'forge' ? forge() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
+    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['purpose', 'skills', 'forge', 'discover', 'estate', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', skills: 'Professions', forge: 'Forge', discover: 'Invent', estate: 'Household & tools', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'purpose' ? purpose() : tab === 'skills' ? skills() : tab === 'forge' ? forge() : tab === 'discover' ? discover() : tab === 'estate' ? estate() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
     container.querySelectorAll<HTMLButtonElement>('[data-life-tab]').forEach(
       (button) =>
         (button.onclick = () => {
@@ -198,6 +279,101 @@ export function mountLife(
         onChange();
         render();
       };
+    const inventionForm = container.querySelector<HTMLFormElement>('#s-invention-form');
+    if (inventionForm)
+      inventionForm.onsubmit = (event) => {
+        event.preventDefault();
+        design = container.querySelector<HTMLInputElement>('#s-invention-design')!.value;
+        render();
+      };
+    const nextInvention = container.querySelector<HTMLButtonElement>('#s-invention-next');
+    if (nextInvention)
+      nextInvention.onclick = () => {
+        design = game.artifactDesign(++inventionOffset);
+        message = '';
+        render();
+      };
+    const makeInvention = container.querySelector<HTMLButtonElement>('#s-invention-build');
+    if (makeInvention)
+      makeInvention.onclick = () => {
+        const result = game.createArtifact(design);
+        message = result.message;
+        onChange();
+        render();
+      };
+    const useInvention = (chosen: string) => {
+      const canonical = game.artifactPreview(chosen).genome?.design;
+      const owned = game.artifacts.find((a) => a.design === canonical);
+      if (!owned) return;
+      message = (
+        owned.genome.delivery === 'consume'
+          ? game.useArtifact(owned.design)
+          : game.equipArtifact(owned.design)
+      ).message;
+      onChange();
+      render();
+    };
+    const currentInvention = container.querySelector<HTMLButtonElement>('#s-invention-act');
+    if (currentInvention) currentInvention.onclick = () => useInvention(design);
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-invention-action]')
+      .forEach((button) => (button.onclick = () => useInvention(button.dataset.inventionAction!)));
+    container.querySelectorAll<HTMLButtonElement>('[data-invention-inspect]').forEach(
+      (button) =>
+        (button.onclick = () => {
+          design = button.dataset.inventionInspect!;
+          render();
+        }),
+    );
+    container.querySelectorAll<HTMLButtonElement>('[data-invention-salvage]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          message = game.salvageArtifact(b.dataset.inventionSalvage!).message;
+          onChange();
+          render();
+        }),
+    );
+    const workAction = (result: { ok: boolean; message: string }) => {
+      message = result.message;
+      onChange();
+      render();
+    };
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-tool-equip]')
+      .forEach(
+        (b) => (b.onclick = () => workAction(game.equipTool(b.dataset.toolEquip as ToolKind))),
+      );
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-tool-repair]')
+      .forEach(
+        (b) => (b.onclick = () => workAction(game.repairTool(b.dataset.toolRepair as ToolKind))),
+      );
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-tool-buy]')
+      .forEach((b) => (b.onclick = () => workAction(game.buyTool(b.dataset.toolBuy as ToolKind))));
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-staff-trust]')
+      .forEach(
+        (b) =>
+          (b.onclick = () =>
+            workAction(game.chooseEstateTrust(b.dataset.staffTrust!, b.dataset.trusted === 'yes'))),
+      );
+    container.querySelectorAll<HTMLButtonElement>('[data-staff-hire]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          if (!sharedWorld)
+            workAction(game.hireLabor(b.dataset.staffHire!, b.dataset.laborKind as LaborKind));
+        }),
+    );
+    container.querySelectorAll<HTMLButtonElement>('[data-labor-collect]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          if (!sharedWorld) workAction(game.collectLabor(b.dataset.laborCollect!));
+        }),
+    );
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-labor-cancel]')
+      .forEach((b) => (b.onclick = () => workAction(game.cancelLabor(b.dataset.laborCancel!))));
     const rest = container.querySelector<HTMLButtonElement>('#s-home-rest');
     if (rest)
       rest.onclick = () => {
