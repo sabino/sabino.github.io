@@ -35,7 +35,7 @@ export type ArchitectureStyle = 'gothic' | 'timber' | 'adobe' | 'stilt' | 'basal
 export interface ArchitecturalCulture {
   seed: number;
   style: ArchitectureStyle;
-  wallMaterial: 'stone' | 'timber' | 'adobe' | 'basalt';
+  wallMaterial: 'stone' | 'timber' | 'adobe' | 'basalt' | 'metal' | 'glass' | 'composite';
   roof: 'steep' | 'flat' | 'terraced' | 'gable';
   wallColor: string;
   roofColor: string;
@@ -43,6 +43,15 @@ export interface ArchitecturalCulture {
   accentColor: string;
   window: 'arch' | 'square' | 'slit';
   raised: boolean;
+  technology?: number;
+  industry?: number;
+  organics?: number;
+  illumination?: number;
+  transparency?: number;
+  verticality?: number;
+  ornament?: number;
+  motif?: 'carved' | 'riveted' | 'latticed' | 'circuit' | 'grown';
+  eraName?: string;
 }
 export interface TileEcology {
   moisture: number;

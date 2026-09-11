@@ -1,5 +1,15 @@
 import { deriveSeed, random, mix } from '../procedural/random.ts';
 import {
+  civilizationFor,
+  civilizationArchitecture,
+  civilizationPlaceName,
+  civilizationPersonName,
+  civilizationTechnologyTier,
+  STICHOS_CLANS,
+  type CivilizationProfile,
+} from './civilization.ts';
+import { technologyWeaponSeed } from './equipment.ts';
+import {
   regionalClimate,
   regionalTerrain,
   ecologyProfile,
@@ -57,44 +67,7 @@ interface PlacedVault {
 }
 const CACHE_LIMIT = 160;
 const TOWN_SPACING = 80;
-const CLANS: Clan[] = [
-  {
-    id: 0,
-    name: 'Brown',
-    color: '#a68c6a',
-    doctrine: 'Orlando advocates industrial production of food and medicine.',
-  },
-  {
-    id: 1,
-    name: 'Sallas',
-    color: '#7faaa6',
-    doctrine: 'Guard a family secret that may explain travel between minds.',
-  },
-  {
-    id: 2,
-    name: 'Veyr',
-    color: '#aa8197',
-    doctrine: 'Maintain the frostwood seed libraries.',
-  },
-  {
-    id: 3,
-    name: 'Ordel',
-    color: '#9f9ab8',
-    doctrine: 'Shelter travelers and record the winter roads.',
-  },
-  {
-    id: 4,
-    name: 'Meren',
-    color: '#83a77f',
-    doctrine: 'Restore living soil beneath the ice.',
-  },
-  {
-    id: 5,
-    name: 'Caldris',
-    color: '#b08a76',
-    doctrine: 'Keep the furnaces and long-range radios alive.',
-  },
-];
+const CLANS: Clan[] = STICHOS_CLANS.map((clan) => ({ ...clan }));
 const pick = <T>(values: readonly T[], rng: () => number): T =>
   values[Math.floor(rng() * values.length)];
 const squareDistance = (a: Point, b: Point) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
@@ -148,7 +121,8 @@ export class InfiniteWorld {
   readonly seed: number;
   readonly generation: WorldGeneration;
   readonly spawn: Point = { x: 0, y: 5 };
-  readonly clans: Clan[] = CLANS.map((clan) => ({ ...clan }));
+  readonly clans: Clan[];
+  readonly civilization?: CivilizationProfile;
   private cache = new Map<string, Chunk>();
   private lattice = new Map<string, number>();
   private vaultCache = new Map<string, PlacedVault>();
@@ -157,6 +131,8 @@ export class InfiniteWorld {
       throw new RangeError('Unsupported world generation');
     this.seed = Number.isFinite(seed) ? seed >>> 0 : 0;
     this.generation = generation;
+    this.civilization = generation === 4 ? civilizationFor(this.seed) : undefined;
+    this.clans = (this.civilization?.factions ?? CLANS).map((clan) => ({ ...clan }));
   }
   get cacheSize() {
     return this.cache.size;
@@ -389,7 +365,7 @@ export class InfiniteWorld {
     const x = gx * TOWN_SPACING + (origin ? 0 : Math.floor(rng() * 13) - 6);
     const y = gy * TOWN_SPACING + (origin ? 0 : Math.floor(rng() * 13) - 6);
     const clan = origin ? 0 : Math.floor(rng() * CLANS.length);
-    const name = origin
+    let name = origin
       ? ORIGIN_CITY_NAME
       : `${pick(['Vey', 'Mor', 'El', 'Khar', 'Sael', 'Or', 'Cal', 'Thren'], rng)}${pick(['wick', 'mere', 'holt', 'grave', 'gard', 'watch', 'fell', 'haven'], rng)}`;
     const settlement: Settlement = {
@@ -456,9 +432,13 @@ export class InfiniteWorld {
     const y = this.roadCenter(gy) + (origin ? 0 : Math.floor(rng() * (jitter * 2 + 1)) - jitter);
     // Retain the opening people's seeds and identities along with their exact anchors.
     const clan = origin ? 0 : Math.floor(rng() * CLANS.length);
-    const name = origin
+    let name = origin
       ? ORIGIN_CITY_NAME
       : `${pick(['Vey', 'Mor', 'El', 'Khar', 'Sael', 'Or', 'Cal', 'Thren'], rng)}${pick(['wick', 'mere', 'holt', 'grave', 'gard', 'watch', 'fell', 'haven'], rng)}`;
+    if (this.civilization && !this.civilization.canonical)
+      name = origin
+        ? this.civilization.originCityName
+        : civilizationPlaceName(this.civilization, seed);
     const mainKind: BuildingKind = city
       ? 'church'
       : rank === 'hamlet'
@@ -475,15 +455,18 @@ export class InfiniteWorld {
       rank,
       radius: origin ? 21 : city ? 26 : rank === 'village' ? 17 : 11,
     };
-    const names: Record<BuildingKind, string> = {
-      church: 'Winter cathedral',
-      house: 'Snowbound dwelling',
-      inn: 'Wayfarer inn',
-      workshop: 'Radio workshop',
-      greenhouse: 'Glass conservatory',
-      storehouse: 'Provision storehouse',
-      hall: 'Assembly hall',
-    };
+    const names: Record<BuildingKind, string> =
+      this.civilization && !this.civilization.canonical
+        ? this.civilization.lexicon
+        : {
+            church: 'Winter cathedral',
+            house: 'Snowbound dwelling',
+            inn: 'Wayfarer inn',
+            workshop: 'Radio workshop',
+            greenhouse: 'Glass conservatory',
+            storehouse: 'Provision storehouse',
+            hall: 'Assembly hall',
+          };
     const main: Building = {
       id: `${settlement.id}:hall`,
       x,
@@ -496,7 +479,10 @@ export class InfiniteWorld {
             ? 3
             : 3 + Math.floor(rng() * 2),
       halfY: origin ? 4 : city ? 4 : rank === 'hamlet' ? 2 : 3,
-      name: origin ? ORIGIN_CATHEDRAL_NAME : names[mainKind],
+      name:
+        origin && (!this.civilization || this.civilization.canonical)
+          ? ORIGIN_CATHEDRAL_NAME
+          : names[mainKind],
       kind: mainKind,
     };
     const buildings = [main];
@@ -567,16 +553,16 @@ export class InfiniteWorld {
     }
     if (this.generation === 4) {
       const climate = this.climate(x, y) as RegionalClimate;
-      settlement.architecture = architecturalCulture(
+      settlement.architecture = civilizationArchitecture(
+        architecturalCulture(seed, climate, clan, this.clans[clan].color, origin),
+        this.civilization!,
         seed,
-        climate,
-        clan,
-        CLANS[clan].color,
-        origin,
       );
       for (const b of buildings) {
         b.architecture = settlement.architecture;
-        if (!origin || b.kind !== 'church')
+        if (this.civilization && !this.civilization.canonical)
+          b.name = `${names[b.kind!]} of ${name}`;
+        else if (!origin || b.kind !== 'church')
           b.name = `${b.kind === 'church' ? 'Cathedral' : b.kind === 'greenhouse' ? 'Botanical conservatory' : names[b.kind!].replace('Snowbound', 'Family').replace('Winter ', '')} of ${name}`;
       }
     }
@@ -752,6 +738,25 @@ export class InfiniteWorld {
         prop.name = `${id?.includes(':ore:') ? 'Workshop ' : ''}${ecology.rockMaterial} ore`;
       }
     }
+    if (this.civilization && !this.civilization.canonical && !building) {
+      const lexicon = this.civilization.lexicon;
+      if (
+        kind === 'radio' ||
+        kind === 'workbench' ||
+        kind === 'shrine' ||
+        kind === 'lamp' ||
+        kind === 'cequin' ||
+        kind === 'heartleaf' ||
+        kind === 'emberroot'
+      )
+        prop.name = lexicon[kind];
+      if (kind === 'notice')
+        prop.name = id?.startsWith('vault:')
+          ? `Sealed ${lexicon.archive} — follow this path north`
+          : `${name.split(' noticeboard')[0]} ${lexicon.notice.toLowerCase()}`;
+      if (kind === 'chest' && id?.startsWith('vault:')) prop.name = `Sealed ${lexicon.archive}`;
+      if (kind === 'banner' && clan !== undefined) prop.name = `${this.clans[clan].name} standard`;
+    }
     return prop;
   }
   private resident(
@@ -764,7 +769,9 @@ export class InfiniteWorld {
   ): Npc {
     const seed = deriveSeed(s.seed, 'resident', index, role),
       rng = random(seed);
-    const name = `${pick(['Ana', 'Iven', 'Mira', 'Oren', 'Neris', 'Toma', 'Edda', 'Sorin', 'Vela', 'Darin', 'Leva', 'Arin'], rng)} ${pick(['Vale', 'Thorn', 'Reed', 'Rusk', 'Fen', 'Moss', 'Wren', 'Ash', 'Kerr', 'Voss', 'Silt', 'Frost'], rng)}`;
+    let name = `${pick(['Ana', 'Iven', 'Mira', 'Oren', 'Neris', 'Toma', 'Edda', 'Sorin', 'Vela', 'Darin', 'Leva', 'Arin'], rng)} ${pick(['Vale', 'Thorn', 'Reed', 'Rusk', 'Fen', 'Moss', 'Wren', 'Ash', 'Kerr', 'Voss', 'Silt', 'Frost'], rng)}`;
+    if (this.civilization && !this.civilization.canonical)
+      name = civilizationPersonName(this.civilization, seed);
     const look = appearance(seed, role, s.clan);
     if (this.generation === 4) {
       const gear = random(deriveSeed(seed, 'v4-resident-carried-gear', role));
@@ -780,7 +787,15 @@ export class InfiniteWorld {
             : role === 'botanist' && gear() < 0.24
               ? 'staff'
               : 'none';
-      if (look.weapon !== 'none') look.weaponSeed = deriveSeed(seed, 'v4-resident-weapon', role);
+      if (look.weapon !== 'none')
+        look.weaponSeed = technologyWeaponSeed(
+          deriveSeed(seed, 'v4-resident-weapon', role),
+          civilizationTechnologyTier(this.civilization!),
+        );
+    }
+    if (this.civilization && !this.civilization.canonical) {
+      look.trim = this.clans[s.clan].color;
+      if (deriveSeed(seed, 'v4-clan-uniform') % 3 === 0) look.coat = this.clans[s.clan].color;
     }
     const hp = role === 'guard' || role === 'raider' ? 75 : 50;
     return {
@@ -1101,7 +1116,7 @@ export class InfiniteWorld {
           'banner',
           s.x + 2,
           s.y - 2,
-          `${CLANS[s.clan].name} standard`,
+          `${this.clans[s.clan].name} standard`,
           `${s.id}:banner`,
           s.clan,
         ),
