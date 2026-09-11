@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { Stichos, RECIPES } from '../src/stichos/session.ts';
 import { InfiniteWorld, STOP_SPACING } from '../src/stichos/world.ts';
@@ -10,6 +12,12 @@ import {
 import type { Point, ItemId, Prop } from '../src/stichos/types.ts';
 
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
+function fixture(name: string, game: Stichos) {
+  if (!process.env.VERSO_QA_FIXTURES) return;
+  const dir = fileURLToPath(new URL('../.dream-loop/campaign-fixtures/', import.meta.url));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}${name}.json`, JSON.stringify(game.save(), null, 2));
+}
 const key = (p: Point) => `${p.x},${p.y}`;
 function sustain(game: Stichos) {
   if (game.player.cequinTime < 20 && game.player.breath < 65 && game.inventory.cequin)
@@ -261,6 +269,7 @@ test('a whole generation-three campaign resolves through actual movement, harves
     game.rest();
     if (step.cost) stock(game, step.cost, step.town);
     if (step.kind === 'puzzle') {
+      if (index === 22) fixture('before-final-puzzle', game);
       click(game, step.target);
       game.choose('campaign:begin');
       if (index === 3) {
@@ -298,6 +307,7 @@ test('a whole generation-three campaign resolves through actual movement, harves
         game.choose(`campaign:${step.answer}`);
       } else {
         if (step.kind === 'ending') {
+          fixture('before-ending', game);
           const alternative = Stichos.restore(game.save());
           alternative.interact(step.target.id);
           alternative.choose('campaign:stay');
@@ -325,6 +335,7 @@ test('a whole generation-three campaign resolves through actual movement, harves
       'Restore may reveal the current footing since the last streamed sight update.',
     );
   }
+  fixture('campaign-complete', game);
   assert.equal(game.campaign.ending, 'return-link');
   assert.equal(game.campaign.completed, 24);
   assert.equal(game.quests.filter((q) => q.id.startsWith('sallas:') && q.complete).length, 24);
@@ -480,6 +491,7 @@ test('a whole generation-three campaign resolves through actual movement, harves
   game.choose('close');
   assert.equal(game.freeLife.contractsCompleted, 3);
   const final = Stichos.restore(game.save());
+  fixture('free-life-home', final);
   assert.equal(final.freeLife.milestones.find((m) => m.id === 'life:home')!.rewarded, true);
   assert.equal(final.freeLife.milestones.find((m) => m.id === 'life:garden')!.rewarded, true);
 });

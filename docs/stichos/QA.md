@@ -127,3 +127,20 @@ node scripts/browser-stichos-check.mjs http://127.0.0.1:PORT 'http://localhost:4
 The endpoint is ephemeral. Full QA creates and closes its own tab on the localhost QA origin; `--possession` continues its legitimately played save. Full QA also downloads a reusable campaign save to the workspace mount and copies it into ignored evidence; both paths are recorded in `results.json`. Import through the game's Restore a save control if needed. `--visual` and `--expedition` create and dispose separate browser contexts, preserving the completed campaign. The storage harness also uses a separate context. Add `--smoke` for only opening, controls, mobile, and saved continuation. Each run writes ignored results; a full run writes `REPORT.md` there instead of replacing this combined review.
 
 The current generation-3 checks are `--atlas`, `--visual`, and storage. The full-route harness chooses a 240-tile journey for generation 3 and 110 tiles for older worlds; the current full opening chain has not yet been repeated end-to-end after the spacing change. The archived `--expedition` route expects the generation-2 checkpoint recorded above, including its former 80-tile road lattice; it is not a current-generation atlas test.
+
+## Campaign, ending and free-life browser checkpoint
+
+Frozen preview `app-CYu5WpWe.js`, workspace browser `app-1319943` at its discovered loopback CDP endpoint. `scripts/browser-stichos-campaign.mjs` passed **8/8 checks with zero runtime errors** in a disposable browser context. It used the actual file chooser to import saves earned by the complete public-action simulation; no browser simulation fields, position, inventory or quest state were injected.
+
+Verified with real mouse/keyboard input: the Calling page hides the ending before investigation; all four final plaza lamps and radio complete the puzzle; the final decision opens a readable ending celebration; continuing returns to the same world; seven optional purposes and known identities are visible; an owned garden consumes a seed portion, prevents early harvest, advances through actual rest actions and pays its displayed yield; gathered timber/ore fund an equipment upgrade that changes its real profile; a selected willing host lacks the physical notebook, and returning to the original priest restores the exact original inventory and book. The Calling page also fits and closes at390×844.
+
+Evidence is in `.dream-loop/stichos-campaign-browser/results.json` and numbered screenshots. `08b-furnished-interior.png` follows an actual walk through the owned inn's south doorway. `04-ending.png` shows the final acknowledgement; `10-remembered-pages.png` shows the distinct memory record in another body.
+
+Reproduce after generating the action-earned fixtures:
+
+```sh
+VERSO_QA_FIXTURES=1 node --experimental-strip-types --test --test-name-pattern='whole generation-three' tests/stichos-campaign.test.ts
+node scripts/browser-stichos-campaign.mjs http://127.0.0.1:WORKSPACE_CDP_PORT http://localhost:4174/
+```
+
+The opt-in fixture files are `.dream-loop/campaign-fixtures/before-final-puzzle.json`, `before-ending.json`, `campaign-complete.json` and `free-life-home.json`. Ordinary test execution does not write them. The source of these states completes the radio opening, all24investigation objectives and post-story home/commission/identity actions through public simulation APIs. Unit tests separately cover all81weapon part combinations, matching forged previews and actual handling, physical weapon ownership across possession, and malformed recipe/owner/seed rejection. The modular forging UI was added after this frozen browser checkpoint and requires its own browser pass.
