@@ -164,6 +164,14 @@ export class StichosRenderer {
       if (!owner || effect.age >= effect.duration) continue;
       const prior = this.actorActions.get(owner.id);
       if (prior?.kind === 'hurt' && owner.kind !== 'hurt') continue;
+      // Completion particles must not replace the tool-bearing stroke from the same harvest.
+      if (
+        prior?.kind === 'gather' &&
+        prior.tool &&
+        !effect.tool &&
+        ['gather', 'craft'].includes(owner.kind)
+      )
+        continue;
       this.actorActions.set(owner.id, {
         kind: owner.kind,
         progress: effect.age / Math.max(0.01, effect.duration),
