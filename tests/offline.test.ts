@@ -234,20 +234,42 @@ test('known assets work offline without network calls; other requests are untouc
   );
 });
 
-test('manifest remains portable to a static subpath with the supplied local icon', async () => {
+test('install metadata and actual PNG icons remain portable to the nested app scope', async () => {
   const manifest = JSON.parse(
     await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'),
   );
   assert.equal(manifest.name, 'Verso');
   assert.equal(manifest.short_name, 'Verso');
+  assert.equal(manifest.id, './');
   assert.equal(manifest.start_url, './');
   assert.equal(manifest.scope, './');
   assert.equal(manifest.display, 'standalone');
-  assert.equal(manifest.theme_color, '#031b24');
-  const icon = manifest.icons.find((item: { src: string }) => item.src === './icon.svg');
-  assert.equal(icon.sizes, 'any');
-  assert.equal(icon.type, 'image/svg+xml');
-  assert.ok(
-    (await readFile(new URL('../public/icon.svg', import.meta.url), 'utf8')).includes('<svg'),
-  );
+  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(manifest.theme_color, /^#[0-9a-f]{6}$/i);
+  assert.equal(manifest.theme_color, manifest.background_color);
+  assert.equal(manifest.theme_color, /<meta name="theme-color" content="([^"]+)"/.exec(html)![1]);
+  const base = 'https://verso.test/games/verso/manifest.webmanifest';
+  for (const field of ['id', 'start_url', 'scope'])
+    assert.equal(new URL(manifest[field], base).href, 'https://verso.test/games/verso/');
+  async function png(src: string, width: number, height = width) {
+    assert.equal(new URL(src, base).pathname, `/games/verso/${src.replace(/^\.\//, '')}`);
+    const bytes = await readFile(new URL(`../public/${src}`, import.meta.url));
+    assert.deepEqual(bytes.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    assert.equal(bytes.subarray(12, 16).toString(), 'IHDR');
+    assert.equal(bytes.readUInt32BE(16), width);
+    assert.equal(bytes.readUInt32BE(20), height);
+  }
+  for (const purpose of ['any', 'maskable'])
+    for (const size of [192, 512]) {
+      const icon = manifest.icons.find(
+        (item: { sizes: string; purpose: string }) =>
+          item.sizes === `${size}x${size}` && item.purpose === purpose,
+      );
+      assert.ok(icon, `${size}px ${purpose} install icon`);
+      assert.equal(icon.type, 'image/png');
+      await png(icon.src, size);
+    }
+  const apple = /<link rel="apple-touch-icon" sizes="180x180" href="([^"]+)"/.exec(html);
+  assert.ok(apple, 'A page-specific Apple icon avoids the portfolio root icon.');
+  await png(apple[1], 180);
 });
