@@ -43,6 +43,7 @@ export class StichosRenderer {
   private playerSite: string | undefined;
   private lightSprites = new Map<string, HTMLCanvasElement>();
   private atmosphereLayer: HTMLCanvasElement | null = null;
+  private contactTexture: HTMLCanvasElement | null = null;
   private grounds = new Map<string, HTMLCanvasElement>();
   private worldSeed = -1;
   private worldGeneration = -1;
@@ -214,6 +215,10 @@ export class StichosRenderer {
           0.13,
         );
       if (prop.kind === 'rock') this.shadow(p, 18 * scale, 7 * scale, 0.12);
+      if (prop.kind === 'workbench') {
+        this.shadow({ x: p.x + 4 * scale, y: p.y }, 23 * scale, 7 * scale, 0.23);
+        this.glow(p.x + 14 * scale, p.y + 3 * scale, 48 * scale, '#ecc080', 0.16);
+      }
     }
     const drawables: { depth: number; draw: () => void }[] = [];
     for (const b of buildings.values())
@@ -248,6 +253,8 @@ export class StichosRenderer {
     for (const prop of props) {
       const p = this.worldToScreen(prop);
       if (prop.kind === 'lamp') this.glow(p.x, p.y - 51 * scale, 18 * scale, '#ffcf8b', 0.25);
+      if (prop.kind === 'workbench')
+        this.glow(p.x + 14 * scale, p.y - 26 * scale, 19 * scale, '#f1c783', 0.22);
       if (prop.kind === 'radio') {
         rect(ctx, p.x + 3 * scale, p.y - 21 * scale, 2 * scale, scale, '#c2f1d3');
       }
@@ -405,6 +412,8 @@ export class StichosRenderer {
       if (game.world.tile(tile.x + dx, tile.y + dy).terrain !== 'grass') {
         const x = p.x + (dx * u) / 2,
           y = p.y + (dy * u) / 2;
+        if (dy === 1) rect(ctx, p.x - u / 2 + 3 * s, y + 4 * s, u, 4 * s, '#17395060');
+        if (dx === 1) rect(ctx, x + 4 * s, p.y - u / 2 + 3 * s, 3 * s, u, '#18385155');
         rect(
           ctx,
           dx ? x - 2 * s : p.x - u / 2,
@@ -608,13 +617,15 @@ export class StichosRenderer {
       game.opened.has(prop.id),
       game.world.clans[prop.clan ?? 0]?.color ?? '#68837c',
     );
+    // These planted resource trees are visibly pruned, with the same trunk footprint.
+    const verticalScale = s * (prop.kind === 'pine' && /:timber:\d+$/.test(prop.id) ? 0.65 : 1);
     const x = p.x - sprite.x * s,
-      y = p.y - sprite.y * s;
+      y = p.y - sprite.y * verticalScale;
     if (
       x > this.width + 30 ||
       x + sprite.image.width * s < -30 ||
       y > this.height + 30 ||
-      y + sprite.image.height * s < -30
+      y + sprite.image.height * verticalScale < -30
     )
       return;
     const player = this.worldToScreen(game.player);
@@ -631,19 +642,37 @@ export class StichosRenderer {
       Math.round(x),
       Math.round(y),
       Math.round(sprite.image.width * s),
-      Math.round(sprite.image.height * s),
+      Math.round(sprite.image.height * verticalScale),
     );
+    if (prop.kind === 'workbench') {
+      rect(this.ctx, p.x + 11 * s, p.y - 29 * s, 6 * s, 9 * s, '#8d7956');
+      rect(this.ctx, p.x + 12 * s, p.y - 28 * s, 4 * s, 6 * s, '#f2cd8b');
+      rect(this.ctx, p.x + 10 * s, p.y - 30 * s, 8 * s, 2 * s, '#384954');
+      rect(this.ctx, p.x + 11 * s, p.y - 21 * s, 6 * s, s, '#b89b67');
+    }
     this.ctx.restore();
   }
 
   private shadow(p: Point, width: number, height: number, alpha: number) {
     const ctx = this.ctx;
+    if (!this.contactTexture) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 32;
+      const shade = canvas.getContext('2d')!;
+      shade.scale(1, 0.5);
+      const gradient = shade.createRadialGradient(28, 29, 2, 32, 32, 31);
+      gradient.addColorStop(0, '#102a49');
+      gradient.addColorStop(0.35, '#173750dd');
+      gradient.addColorStop(0.75, '#24455c54');
+      gradient.addColorStop(1, '#24455c00');
+      shade.fillStyle = gradient;
+      shade.fillRect(0, 0, 64, 64);
+      this.contactTexture = canvas;
+    }
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = '#1d3850';
-    ctx.beginPath();
-    ctx.ellipse(p.x + 4, p.y + 2, width, height, -0.1, 0, TAU);
-    ctx.fill();
+    ctx.drawImage(this.contactTexture, p.x - width + 4, p.y - height + 2, width * 2, height * 2);
     ctx.restore();
   }
   private person(game: Stichos, person: Npc | Stichos['player'], player: boolean) {
@@ -659,7 +688,7 @@ export class StichosRenderer {
       ctx.restore();
       return;
     }
-    this.shadow(p, 7 * s, 3 * s, 0.27);
+    this.shadow(p, 7 * s, 3 * s, 0.38);
     if (player) {
       ctx.strokeStyle = '#d9cda2a0';
       ctx.lineWidth = 1;
@@ -751,7 +780,7 @@ export class StichosRenderer {
       while (this.roofs.size > 28) this.roofs.delete(this.roofs.keys().next().value!);
     }
     // Foundations and steps use the same ground footprint as collision geometry.
-    for (let step = 2; step >= 0; step--) {
+    for (let step = b.cathedral ? -1 : 2; step >= 0; step--) {
       const width = (b.cathedral ? 3 : 1.6) * u + step * 7 * s,
         x = (left.x + right.x - width) / 2,
         y = right.y + step * 3 * s;
@@ -770,9 +799,10 @@ export class StichosRenderer {
       if (b.cathedral) {
         const center = (left.x + right.x) / 2;
         for (const side of [-1, 1]) {
-          this.glow(center + side * 60 * s, right.y - 52 * s, 33 * s, '#f0b765', 0.24);
-          this.glow(center + side * 60 * s, right.y + 4 * s, 39 * s, '#f0b765', 0.1);
+          this.glow(center + side * 60 * s, right.y - 52 * s, 29 * s, '#f0b765', 0.29);
+          this.glow(center + side * 49 * s, right.y + 20 * s, 63 * s, '#eeb970', 0.19);
         }
+        this.glow(center, right.y + 23 * s, 87 * s, '#edc58d', 0.13);
       }
     } else {
       // Roof lifted: preserve the north wall and side walls, lower/fade the near wall.
@@ -957,9 +987,17 @@ export class StichosRenderer {
         ],
         '#ffe5a6',
       );
+    // Stepped cool bands set the glass behind its stone reveal without flattening its gold center.
+    const reveal = Math.max(1, width * 0.045),
+      shades = ['#112c48b3', '#112c4870', '#112c483b', '#112c4818'];
+    for (let band = 0; band < shades.length; band++) {
+      rect(ctx, cx - width / 2 + band * reveal, top, reveal, height, shades[band]);
+      rect(ctx, cx + width / 2 - (band + 1) * reveal, top, reveal, height, shades[band]);
+      rect(ctx, cx - width / 2, top + band * width * 0.16, width, width * 0.16, shades[band]);
+    }
     ctx.restore();
     for (let i = 1; i < glass.length; i++)
-      line(ctx, glass[i - 1][0], glass[i - 1][1], glass[i][0], glass[i][1], '#b2a879');
+      line(ctx, glass[i - 1][0], glass[i - 1][1], glass[i][0], glass[i][1], '#8a947b');
     rect(ctx, cx - width * 0.69, bottom + 3, width * 1.38, 5, '#3e5a74');
     rect(ctx, cx - width * 0.7, bottom + 2, width * 1.4, 2, '#bacfe0');
     for (let i = 0; i < width / 4; i++)
@@ -993,7 +1031,7 @@ export class StichosRenderer {
       h = (b.maxY - b.minY + 1) * 32;
     const canvas = document.createElement('canvas');
     canvas.width = w + 112;
-    canvas.height = h + 338;
+    canvas.height = h + 378;
     const ctx = canvas.getContext('2d')!,
       rng = random(deriveSeed(worldSeed, b.id, 'cathedral'));
     const x = 56,
@@ -1048,6 +1086,27 @@ export class StichosRenderer {
       }
     };
     const buttress = (bx: number, height: number, width = 16) => {
+      // Upper-left cold light: masonry throws a quiet shadow to its right and underfoot.
+      poly(
+        ctx,
+        [
+          [bx + width / 2, front - height + 2],
+          [bx + width / 2 + 9, front - height + 13],
+          [bx + width / 2 + 16, front],
+          [bx + width / 2, front],
+        ],
+        '#0d29436b',
+      );
+      poly(
+        ctx,
+        [
+          [bx - width / 2, front - 1],
+          [bx + width / 2 + 8, front + 1],
+          [bx + width / 2 + 17, front + 8],
+          [bx - width / 2 + 7, front + 6],
+        ],
+        '#16395165',
+      );
       rect(ctx, bx - width / 2 - 4, front - height, width + 8, height, '#1e3549');
       rect(ctx, bx - width / 2, front - height, width, height, '#566e84');
       rect(ctx, bx + 2, front - height, width / 2 - 2, height, '#2c465f');
@@ -1326,6 +1385,18 @@ export class StichosRenderer {
     rect(ctx, mid - 2, roseY - 2, 4, 4, '#fff2bd');
     this.window(ctx, mid, front - 273, 25, 48, deriveSeed(worldSeed, b.id, 'upper'));
     // Concentric stone archivolts give the entrance visible thickness and shadow.
+    poly(
+      ctx,
+      [
+        [mid - 60, front],
+        [mid - 60, front - 100],
+        [mid, front - 166],
+        [mid + 70, front - 94],
+        [mid + 77, front + 4],
+        [mid + 48, front + 8],
+      ],
+      '#0b243e88',
+    );
     for (let layer = 0; layer < 5; layer++) {
       const half = 55 - layer * 5,
         peak = 151 - layer * 7;
@@ -1338,11 +1409,16 @@ export class StichosRenderer {
           [mid + half, front - peak * 0.63],
           [mid + half, front],
         ],
-        ['#233b50', '#8ca2b4', '#405b72', '#738b9e', '#132b3d'][layer],
+        ['#1a324a', '#839caf', '#2a465e', '#617e95', '#0d2339'][layer],
       );
     }
     line(ctx, mid - 59, front - 99, mid, front - 159, '#d7e2ec', 5);
     line(ctx, mid, front - 159, mid + 59, front - 99, '#a4bfd5', 4);
+    for (const side of [-1, 1]) {
+      const xx = mid + side * 36;
+      rect(ctx, xx - (side > 0 ? 0 : 4), front - 87, 4, 86, side > 0 ? '#081c31' : '#1e3a52');
+      rect(ctx, xx - (side > 0 ? 0 : 2), front - 82, 2, 81, '#071d32');
+    }
     // Cloth standards sit against blank stone, leaving the glass and central door clear.
     for (const side of [-1, 1]) {
       const bx = mid + side * (naveWidth / 2 + 31),
@@ -1378,10 +1454,33 @@ export class StichosRenderer {
       rect(ctx, bx - 6, front - 64, 12, 3, '#536478');
       rect(ctx, bx - 5, front - 46, 10, 3, '#283b4d');
     }
-    for (let step = 0; step < 5; step++) {
-      const sw = 113 + step * 12;
-      rect(ctx, mid - sw / 2, front + step * 3, sw, 3, '#5b7389');
-      rect(ctx, mid - sw / 2, front + step * 3, sw, 1, '#b7ccdd');
+    // A broad shallow landing remains within the clear approach to the existing door.
+    // It changes the surface illustration, never the world collision or elevation.
+    poly(
+      ctx,
+      [
+        [mid - 121, front + 37],
+        [mid + 127, front + 37],
+        [mid + 134, front + 47],
+        [mid - 111, front + 46],
+      ],
+      '#17334c55',
+    );
+    for (let step = 7; step >= 0; step--) {
+      const sw = 122 + step * 15,
+        y = front + step * 5;
+      rect(ctx, mid - sw / 2, y, sw, 5, step % 2 ? '#61798b' : '#698091');
+      rect(ctx, mid - sw / 2 + 1, y, sw - 2, 1, '#a9c0d2');
+      rect(ctx, mid - sw / 2, y + 4, sw, 1, '#29475f');
+      for (let slab = 0; slab < sw / 24; slab++) {
+        const xx = mid - sw / 2 + slab * 24 + (step % 2) * 9;
+        if (xx < mid + sw / 2 - 2) rect(ctx, xx, y + 1, 1, 3, '#405c73');
+      }
+      for (const side of [-1, 1]) {
+        const xx = mid + side * (sw / 2 - 9);
+        rect(ctx, xx - 5, y - 1, 10, 2, '#d3e0e9');
+        rect(ctx, xx - 3, y + 1, 6, 1, '#a7bfd3');
+      }
     }
     return { sprite: { image: canvas, x: 56, y: 320 }, width: canvas.width, height: canvas.height };
   }

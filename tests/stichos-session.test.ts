@@ -812,6 +812,150 @@ function actor(game: Stichos, id: string, x: number, y: number, hostile = true):
   };
 }
 
+function enemyArena(
+  kind: 'bow' | 'sword',
+  ownerSeed = 27,
+  player: Point = { x: 4000, y: 4000 },
+  enemy: Point = { x: 4000, y: 3995 },
+) {
+  const game = new Stichos(3886);
+  Object.assign(game.player, player);
+  for (const npc of game.world.npcsAround(player.x, player.y, 22)) game.removed.add(npc.id);
+  const hostile = actor(game, 'weapon-arena-enemy', enemy.x, enemy.y);
+  hostile.appearance = appearance(ownerSeed, 'raider', 3);
+  hostile.appearance.weapon = kind;
+  hostile.hp = 49; // A meaningful persistent actor survives the normal streaming refresh.
+  hostile.speed = 0.001;
+  hostile.cooldown = 0;
+  game.npcs = [hostile];
+  assert.ok(!game.world.blocked(player.x, player.y));
+  assert.ok(!game.world.blocked(enemy.x, enemy.y));
+  return game;
+}
+
+test('enemy bows give a visible fixed-aim windup and a traveling shot that can be dodged', () => {
+  const hit = enemyArena('bow');
+  hit.update(0.02, still);
+  assert.equal(hit.player.hp, 100, 'aiming does not deal instant damage at range');
+  assert.ok(hit.effects.some((e) => e.text === 'Drawing bow'));
+  assert.ok(!hit.effects.some((e) => e.kind === 'arrow'));
+  let released = false,
+    releasedAt = 0;
+  for (let i = 0; i < 90 && hit.player.hp === 100; i++) {
+    hit.update(0.02, still);
+    if (!released && hit.effects.some((e) => e.kind === 'arrow')) {
+      released = true;
+      releasedAt = hit.time;
+    }
+  }
+  assert.ok(released && releasedAt >= 0.4, 'the warning precedes an actual projectile');
+  assert.ok(hit.player.hp >= 90 && hit.player.hp <= 95, 'one shot has bounded encounter damage');
+  assert.ok(hit.time - releasedAt > 0.5, 'damage waits for the arrow to cover the distance');
+
+  const dodged = enemyArena('bow');
+  dodged.update(0.02, still);
+  let sawArrow = false;
+  for (let i = 0; i < 70; i++) {
+    dodged.update(0.02, i < 45 ? { x: 1, y: 0, run: false } : still);
+    sawArrow ||= dodged.effects.some((e) => e.kind === 'arrow');
+  }
+  assert.ok(dodged.player.x > 4002.5);
+  assert.ok(
+    sawArrow,
+    'the enemy really releases its locked aim rather than cancelling on movement',
+  );
+  assert.equal(dodged.player.hp, 100, 'moving away from the aimed line avoids the shot');
+});
+
+test('enemy bow aim respects obstruction and released arrows collide with newly closed cover', () => {
+  const game = enemyArena('bow', 27, { x: 5, y: 8 }, { x: 5, y: 4 });
+  const rocks = game.world.propsAround(5, 6, 2).filter((p) => p.kind === 'rock' && p.x === 5);
+  assert.ok(rocks.length >= 2);
+  for (let i = 0; i < 60; i++) game.update(0.02, still);
+  assert.equal(game.player.hp, 100);
+  assert.ok(
+    !game.effects.some((e) => e.kind === 'arrow' || e.text === 'Drawing bow'),
+    'solid terrain prevents aiming through cover',
+  );
+  for (const rock of rocks) game.removed.add(rock.id);
+  let arrow = game.effects.find((e) => e.kind === 'arrow');
+  for (let i = 0; i < 60 && !arrow; i++) {
+    game.update(0.02, still);
+    arrow = game.effects.find((e) => e.kind === 'arrow');
+  }
+  assert.ok(arrow, 'opening the line allows a shot');
+  const cover = rocks.find((p) => p.y === 6)!;
+  assert.ok(arrow.y < cover.y - 0.5);
+  game.removed.delete(cover.id); // A world obstacle closes after release, before impact.
+  for (let i = 0; i < 70; i++) game.update(0.02, still);
+  assert.equal(
+    game.player.hp,
+    100,
+    'projectiles cannot pass through cover introduced during flight',
+  );
+  assert.ok(!game.effects.some((e) => e.kind === 'arrow'));
+});
+
+test('generated enemy melee weapons change impact and recovery while a ward interrupts their telegraph', () => {
+  const outcomes = new Set<string>();
+  for (const seed of [3, 8, 19, 31, 46, 57]) {
+    const game = enemyArena('sword', seed, { x: 4000, y: 4000 }, { x: 4000, y: 3999 });
+    game.update(0.02, still);
+    assert.equal(game.player.hp, 100);
+    assert.ok(game.effects.some((e) => e.text === 'Striking'));
+    for (let i = 0; i < 30 && game.player.hp === 100; i++) game.update(0.02, still);
+    const damage = 100 - game.player.hp;
+    assert.ok(damage >= 5 && damage <= 10);
+    const recovery = game.npcs.find((n) => n.id === 'weapon-arena-enemy')!.cooldown;
+    assert.ok(recovery >= 0.9, 'impact is followed by a fair recovery window');
+    outcomes.add(`${damage}/${recovery.toFixed(2)}/${game.time.toFixed(2)}`);
+    const hp = game.player.hp;
+    for (let i = 0; i < 30; i++) game.update(0.02, still);
+    assert.equal(game.player.hp, hp, 'the enemy cannot hit again during recovery');
+  }
+  assert.ok(outcomes.size >= 3, 'different generated constructions have different actual handling');
+  const interrupted = enemyArena('sword', 31, { x: 4000, y: 4000 }, { x: 4000, y: 3999 });
+  interrupted.update(0.02, still);
+  interrupted.ward();
+  for (let i = 0; i < 30; i++) interrupted.update(0.02, still);
+  assert.equal(interrupted.player.hp, 100, 'a ward cancels the pending swing before impact');
+});
+
+test('a live bow within actual reach prevents resting and voluntary transfer unless distant cover blocks its line', () => {
+  const game = enemyArena('bow', 27, { x: -1, y: -2 }, { x: -1, y: 4 });
+  game.storyStage = 4;
+  const host = actor(game, 'quiet-shrine-host', 0, -2, false);
+  game.npcs.push(host);
+  assert.ok(game.transferCandidate);
+  game.player.hp = 60;
+  const time = game.time;
+  game.rest();
+  assert.equal(game.player.hp, 60, 'an archer six tiles away is still a live threat');
+  assert.equal(game.time, time);
+  game.reincarnate();
+  assert.equal(game.occupiedNpcId, null);
+  assert.ok(game.drainEvents().some((e) => e.text === 'An attacker breaks your concentration.'));
+
+  const archer = game.npcs.find((n) => n.id === 'weapon-arena-enemy')!;
+  Object.assign(game.player, { x: -5, y: 2 });
+  Object.assign(archer, { x: -5, y: 8 });
+  assert.ok(game.world.blocked(-5, 4), 'a cultivated pine now covers the nearby bench');
+  game.rest();
+  assert.equal(
+    game.player.hp,
+    game.player.maxHp,
+    'distant obstructed bows do not prevent sheltered rest',
+  );
+  game.player.hp = 60;
+  Object.assign(archer, { x: -4, y: 6 });
+  game.rest();
+  assert.equal(
+    game.player.hp,
+    60,
+    'the established five-tile nearby-attacker restriction still applies',
+  );
+});
+
 test('directional melee and a stamina-priced ward distinguish targets and persist deaths', () => {
   const game = new Stichos(31);
   const front = actor(game, 'front-raider', game.player.x + 0.7, game.player.y);

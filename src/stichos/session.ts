@@ -153,11 +153,21 @@ type CorrespondenceJob = {
   status: 'active' | 'delivered' | 'revealed' | 'withheld' | 'cancelled';
 };
 type Arrow = {
+  owner: 'player' | 'enemy';
   effect: Effect;
   vx: number;
   vy: number;
   damage: number;
   enchantment: WeaponProfile['effect'];
+};
+type EnemyIntent = {
+  remaining: number;
+  heading: number;
+  kind: Weapon;
+  damage: number;
+  range: number;
+  color: string;
+  warning: Effect;
 };
 const CAPACITY = 60;
 const clamp = (v: number, a = 0, b = 100) => Math.max(a, Math.min(b, v));
@@ -195,6 +205,7 @@ export class Stichos {
   private supplyJobs = new Map<string, SupplyJob>();
   private correspondenceJobs = new Map<string, CorrespondenceJob>();
   private arrows: Arrow[] = [];
+  private enemyIntents = new Map<string, EnemyIntent>();
   private nextEffect = 1;
   private refreshClock = 0;
   private stepClock = 0;
@@ -423,18 +434,97 @@ export class Stichos {
   }
 
   private updateNpcs(dt: number) {
+    const active = new Set(
+      this.npcs.filter((npc) => npc.hp > 0 && npc.hostile).map((npc) => npc.id),
+    );
+    for (const [id, intent] of this.enemyIntents)
+      if (!active.has(id)) {
+        intent.warning.age = intent.warning.duration;
+        this.enemyIntents.delete(id);
+      }
     for (const npc of this.npcs) {
-      if (npc.hp <= 0) continue;
+      if (npc.hp <= 0 || this.phase !== 'playing') continue;
       npc.cooldown = Math.max(0, npc.cooldown - dt);
       if (npc.role === 'guard' && this.reputation[npc.clan] < -24) npc.hostile = true;
       const range = distance(npc, this.player);
       const target = npc.hostile && range < 8 ? this.player : npc.home;
       const targetDistance = distance(npc, target);
-      if (npc.hostile && range < 1.1 && npc.cooldown <= 0) {
+      const intent = this.enemyIntents.get(npc.id);
+      if (intent) {
+        intent.remaining -= dt;
+        npc.heading = intent.heading;
+        if (intent.remaining <= 0) {
+          this.enemyIntents.delete(npc.id);
+          intent.warning.age = intent.warning.duration;
+          if (intent.kind === 'bow') {
+            const speed = 7;
+            const end = {
+              x: npc.x + Math.cos(intent.heading) * intent.range,
+              y: npc.y + Math.sin(intent.heading) * intent.range,
+            };
+            // Cover can interrupt a drawn shot; already released arrows also collide with it.
+            const nearEnd = {
+              x: npc.x + Math.cos(intent.heading) * Math.min(range, intent.range),
+              y: npc.y + Math.sin(intent.heading) * Math.min(range, intent.range),
+            };
+            if (this.lineOfSight(npc, nearEnd)) {
+              const effect = this.effect(
+                'arrow',
+                npc,
+                intent.color,
+                distance(npc, end) / speed,
+                intent.heading,
+              );
+              this.arrows.push({
+                owner: 'enemy',
+                effect,
+                vx: Math.cos(intent.heading) * speed,
+                vy: Math.sin(intent.heading) * speed,
+                damage: intent.damage,
+                enchantment: 'stagger',
+              });
+              this.event('attack');
+            }
+          } else {
+            this.event('attack');
+            this.effect('slash', npc, intent.color, 0.22, intent.heading);
+            const facing =
+              ((this.player.x - npc.x) * Math.cos(intent.heading) +
+                (this.player.y - npc.y) * Math.sin(intent.heading)) /
+              Math.max(0.001, range);
+            if (range <= intent.range && facing > 0.35 && this.lineOfSight(npc, this.player))
+              this.hurt(intent.damage);
+          }
+        }
+        continue;
+      }
+      const kind = npc.appearance.weapon === 'none' ? 'staff' : npc.appearance.weapon;
+      const profile =
+        npc.hostile && range < 8 ? generatedWeaponProfile(npc.appearance.seed, kind, 1) : null;
+      const reach = profile ? profile.range * 0.78 : 0;
+      const canAim = !!profile && range <= reach && this.lineOfSight(npc, this.player);
+      if (canAim && npc.cooldown <= 0) {
+        const windup =
+          kind === 'bow' ? 0.42 + profile!.cooldown * 0.18 : 0.16 + profile!.cooldown * 0.1;
+        const recovery = clamp(
+          profile!.cooldown * 1.8,
+          kind === 'bow' ? 1.1 : 0.95,
+          kind === 'bow' ? 1.65 : 1.4,
+        );
         npc.heading = Math.atan2(this.player.y - npc.y, this.player.x - npc.x);
-        npc.cooldown = 1.15;
-        this.hurt(npc.role === 'raider' ? 9 : 7);
-      } else if (targetDistance > (npc.hostile && range < 8 ? 0.85 : 0.5)) {
+        npc.cooldown = windup + recovery;
+        const warning = this.effect('speech', npc, '#edbd91', windup, npc.heading);
+        warning.text = kind === 'bow' ? 'Drawing bow' : 'Striking';
+        this.enemyIntents.set(npc.id, {
+          remaining: windup,
+          heading: npc.heading,
+          kind,
+          damage: clamp(Math.round(profile!.damage * (npc.role === 'raider' ? 0.31 : 0.25)), 5, 10),
+          range: reach,
+          color: profile!.color,
+          warning,
+        });
+      } else if (!canAim && targetDistance > (npc.hostile && range < 8 ? 0.85 : 0.5)) {
         const dx = target.x - npc.x,
           dy = target.y - npc.y;
         const speed = Math.min(2.4, npc.speed || 1.5);
@@ -444,6 +534,32 @@ export class Stichos {
         npc.phase += distance(npc, before) * 2.5;
       }
     }
+  }
+
+  private lineOfSight(from: Point, to: Point) {
+    const steps = Math.max(1, Math.ceil(distance(from, to) / 0.15));
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      if (
+        this.world.blocked(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, this.removed)
+      )
+        return false;
+    }
+    return true;
+  }
+
+  private nearbyThreat() {
+    return this.npcs.some((npc) => {
+      if (!npc.hostile || npc.hp <= 0 || this.removed.has(npc.id)) return false;
+      const range = distance(npc, this.player);
+      if (range < 5) return true;
+      return (
+        npc.appearance.weapon === 'bow' &&
+        range < 8 &&
+        range <= generatedWeaponProfile(npc.appearance.seed, 'bow', 1).range * 0.78 &&
+        this.lineOfSight(npc, this.player)
+      );
+    });
   }
 
   nearby(): Prop | Npc | null {
@@ -1363,6 +1479,7 @@ export class Stichos {
     if (weapon === 'bow') {
       const effect = this.effect('arrow', p, profile.color, profile.range / 9, p.heading);
       this.arrows.push({
+        owner: 'player',
         effect,
         vx: Math.cos(p.heading) * 9,
         vy: Math.sin(p.heading) * 9,
@@ -1408,13 +1525,21 @@ export class Stichos {
   private updateArrows(dt: number) {
     for (const arrow of this.arrows) {
       if (arrow.effect.age >= arrow.effect.duration) continue;
-      const count = Math.max(1, Math.ceil((9 * dt) / 0.12));
+      const count = Math.max(1, Math.ceil((Math.hypot(arrow.vx, arrow.vy) * dt) / 0.12));
       for (let i = 0; i < count; i++) {
         arrow.effect.x += (arrow.vx * dt) / count;
         arrow.effect.y += (arrow.vy * dt) / count;
         if (this.world.blocked(arrow.effect.x, arrow.effect.y, this.removed)) {
           arrow.effect.age = arrow.effect.duration;
           break;
+        }
+        if (arrow.owner === 'enemy') {
+          if (distance(this.player, arrow.effect) < 0.35) {
+            this.hurt(arrow.damage);
+            arrow.effect.age = arrow.effect.duration;
+            break;
+          }
+          continue;
         }
         const hit = this.npcs.find((n) => n.hp > 0 && distance(n, arrow.effect) < 0.4);
         if (hit) {
@@ -1428,6 +1553,11 @@ export class Stichos {
   }
 
   private damageNpc(npc: Npc, amount: number, enchantment?: WeaponProfile['effect']) {
+    const interrupted = this.enemyIntents.get(npc.id);
+    if (interrupted) {
+      interrupted.warning.age = interrupted.warning.duration;
+      this.enemyIntents.delete(npc.id);
+    }
     const wasFriendly = !npc.hostile && npc.role !== 'raider';
     npc.hp = Math.max(0, npc.hp - amount);
     npc.hostile = true;
@@ -1472,6 +1602,7 @@ export class Stichos {
       this.phase = 'lost';
       this.dialogue = null;
       this.arrows = [];
+      this.enemyIntents.clear();
       this.entry(
         'The body falls quiet',
         this.transferReady
@@ -1552,7 +1683,7 @@ export class Stichos {
       this.event('dialogue', 'Find a bench or quiet shrine to rest.');
       return;
     }
-    if (this.npcs.some((n) => n.hostile && n.hp > 0 && distance(n, this.player) < 5)) {
+    if (this.nearbyThreat()) {
       this.event('dialogue', 'It is not safe to rest beside an attacker.');
       return;
     }
@@ -1575,7 +1706,7 @@ export class Stichos {
       );
       return;
     }
-    if (!lost && this.npcs.some((n) => n.hostile && n.hp > 0 && distance(n, this.player) < 5)) {
+    if (!lost && this.nearbyThreat()) {
       this.event('dialogue', 'An attacker breaks your concentration.');
       return;
     }
@@ -1668,6 +1799,7 @@ export class Stichos {
     this.phase = 'playing';
     this.dialogue = null;
     this.arrows = [];
+    this.enemyIntents.clear();
     this.effects = [];
     this.refreshNpcs();
     this.visit();

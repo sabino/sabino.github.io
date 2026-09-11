@@ -90,7 +90,9 @@ export class StichosArt {
     }
     const result = make();
     this.cache.set(key, result);
-    while (this.cache.size > 320) this.cache.delete(this.cache.keys().next().value!);
+    // A dense 1600px view at minimum zoom can contain 480 distinct plants/trees.
+    // Keep a whole visible set resident so full-seed art never regenerates each frame.
+    while (this.cache.size > 768) this.cache.delete(this.cache.keys().next().value!);
     return result;
   }
   get cacheSize() {
@@ -307,7 +309,9 @@ export class StichosArt {
   prop(kind: PropKind, seed: number, opened = false, tint = '#687e80'): Sprite {
     if (kind === 'cequin' || kind === 'heartleaf' || kind === 'emberroot' || kind === 'mushroom')
       return this.get(`plant:${kind}:${seed >>> 0}`, () => this.herb(kind, seed));
-    const variant = seed % (kind === 'pine' ? 24 : 12);
+    // Organic silhouettes retain their full coordinate seed; the bounded sprite
+    // cache controls memory without collapsing the forest into 24 repeated trees.
+    const variant = kind === 'pine' || kind === 'rock' ? seed >>> 0 : seed % 12;
     return this.get(`prop:${kind}:${variant}:${opened}:${tint}`, () => {
       const rng = random(deriveSeed(variant, kind));
       if (kind === 'pine') return this.pine(rng);
