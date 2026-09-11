@@ -49,6 +49,7 @@ export interface CompactPlan {
   generation: number;
   towns: Settlement[];
   projects: CompactProject[];
+  clans?: { id: number; name: string; color: string }[];
 }
 export interface CompactOutcome {
   care: number;
@@ -494,7 +495,13 @@ export function buildCompact(world: InfiniteWorld): CompactPlan {
         reward: { coins: 32 + phase * 9, xp: 20 + phase * 8 },
       });
     }
-  return { seed: world.seed, generation: world.generation, towns, projects };
+  return {
+    seed: world.seed,
+    generation: world.generation,
+    towns,
+    projects,
+    clans: world.clans.map(({ id, name, color }) => ({ id, name, color })),
+  };
 }
 
 /** Current terms derive from completed public commitments, not elapsed time or random rerolls. */
