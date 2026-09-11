@@ -1538,6 +1538,7 @@ export function drawHumanoid(
   const strike = Math.round(attack * 5);
   const key = [
     look.seed,
+    look.technology,
     look.coat,
     look.trim,
     look.skin,
@@ -1626,7 +1627,13 @@ function drawHumanoidParts(
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
   const anatomy = humanoidGenome(look.seed),
-    tailoring = tailoringGenome(look.seed);
+    tailoring = { ...tailoringGenome(look.seed) },
+    technology = look.technology ?? -1;
+  if (technology >= 2 && look.seed % 5 < 3) {
+    tailoring.bottom = -8;
+    tailoring.flare = 1;
+    tailoring.split = 0;
+  }
   ctx.scale(scale * look.build * 1.28 * anatomy.width, scale * look.height * anatomy.height);
   const face = ((Math.round(heading) % 4) + 4) % 4;
   const side = face === 1 || face === 3,
@@ -1898,6 +1905,33 @@ function drawHumanoidParts(
       );
     }
   }
+  if (technology >= 2) {
+    const accent = color(look.trim, technology === 3 ? 48 : 12),
+      steel = color(look.coat, 32);
+    // Independent seam, shoulder and hardware genes retain ordinary civilian clothes too.
+    if (look.seed % 3 !== 0) {
+      for (const side of [-1, 1]) {
+        rect(ctx, side * (anatomy.shoulders - 1) - 2, -26 - bob, 4, 3, color(look.coat, -23));
+        rect(ctx, side * (anatomy.shoulders - 1) - 1, -26 - bob, 3, 1, steel);
+      }
+    }
+    if (face !== 0) {
+      const axis = side ? east * 2 : 0;
+      rect(ctx, axis - 2, -23, 4, 5, color(look.coat, -25));
+      rect(ctx, axis - 1, -22, 2, 2, accent);
+      if (technology === 3 && look.seed % 4 !== 0) {
+        line(ctx, -anatomy.waist + 1, -23, -anatomy.waist + 1, -17, accent);
+        line(ctx, -anatomy.waist + 1, -17, axis - 2, -17, accent);
+      } else {
+        rect(ctx, axis + 2, -21, 1, 1, steel);
+        rect(ctx, axis + 2, -18, 1, 1, steel);
+      }
+    } else if (look.seed % 4 < 2) {
+      rect(ctx, -3, -25, 6, 7, color(look.coat, -24));
+      rect(ctx, -2, -24, 4, 3, steel);
+      for (let i = 0; i < 3; i++) rect(ctx, -2 + i * 2, -20, 1, 1, accent);
+    }
+  }
   // Neck, skull silhouette, hair/hood and a readable face at only a few pixels.
   rect(ctx, -2, -29 - bob, 4, 3, color(look.skin, -15));
   poly(
@@ -1967,6 +2001,17 @@ function drawHumanoidParts(
     } else if (anatomy.beard === 2) rect(ctx, -2, -30 - bob, 4, 1, look.hair);
     else if (anatomy.beard === 3)
       rect(ctx, side ? east * 3 : -1, -28 - bob, 2, 2, color(look.hair, 10));
+  }
+  if (technology >= 2 && look.hat === 2 && face !== 0) {
+    rect(
+      ctx,
+      side ? east - 2 : -4,
+      -33 - bob,
+      side ? 5 : 8,
+      2,
+      color(look.trim, technology === 3 ? 42 : -8),
+    );
+    if (technology === 3) rect(ctx, side ? east * 4 : -5, -33 - bob, 2, 4, color(look.coat, -12));
   }
   if (look.hat === 1 || look.hat === 3) {
     poly(
