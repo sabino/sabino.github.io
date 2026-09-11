@@ -1,4 +1,17 @@
 import {
+  buildCompact,
+  createCompact,
+  compactProject,
+  previewCompact,
+  applyCompact,
+  recordCompactEvent,
+  restoreCompact,
+  type CompactPlan,
+  type CompactAction,
+  type CompactEvent,
+  type CompactContext,
+} from './compact.ts';
+import {
   InfiniteWorld,
   appearance,
   CHUNK_SIZE,
@@ -22,6 +35,12 @@ import {
   type LaborKind,
   type LaborOrder,
 } from './labor.ts';
+import {
+  validSharedCombatFrame,
+  type SharedCombatFrame,
+  type SharedEnemy,
+  type SharedCombatProgression,
+} from './shared-combat.ts';
 import { deriveSeed } from '../procedural/random.ts';
 import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
@@ -304,6 +323,9 @@ export class Stichos {
   private occupiedBody: Npc | null = null;
   private bodyPossessions = new Map<string, BodyPossessions>();
   private notebook = true;
+  private winterState = createCompact();
+  private winterPlan: CompactPlan | null = null;
+  private winterLaborBaseline = 0;
   private campaignState = createCampaignState();
   private campaignPlan: CampaignPlan | null = null;
   private campaignOrdinary = false;
@@ -323,6 +345,21 @@ export class Stichos {
   private laborSerial = 0;
   private laborPaths = new Map<string, { target: string; points: Point[]; removedSize: number }>();
   private sharedWorld = false;
+  private sharedCombat = false;
+  private sharedRoom = '';
+  private sharedSequence = -1;
+  private sharedSnapshotLoaded = false;
+  private sharedEnemies = new Map<string, SharedEnemy>();
+  private sharedProjectiles = new Map<number, { effect: Effect; vx: number; vy: number }>();
+  private sharedWarnings = new Map<string, Effect>();
+  private sharedReceipts = new Set<number>();
+  private sharedBenefitStrikes = new Set<number>();
+  private sharedReceiptFloor = 0;
+  private sharedAcknowledged = 0;
+  private sharedRewarded = new Set<string>();
+  private sharedIneligible = new Set<string>();
+  private sharedPeaceful = new Set<string>();
+  private approvingSharedParley = false;
   private estateTrust: Record<string, boolean> = Object.fromEntries(
     THEO_ESTATE.staffIds.map((id) => [id, true]),
   );
@@ -698,7 +735,7 @@ export class Stichos {
       .map((id) => this.laborWorker(id))
       .filter((n): n is Npc => !!n)
       .map((npc) => ({
-        ...workerProfile(npc, this.reputation),
+        ...workerProfile(npc, this.laborReputation(npc)),
         trusted: this.estateTrust[npc.id] !== false,
         x: npc.x,
         y: npc.y,
@@ -775,7 +812,7 @@ export class Stichos {
       };
     const result = assignLabor({
       worker,
-      reputation: this.reputation,
+      reputation: this.laborReputation(worker),
       kind,
       props: this.world.propsAround(worker.x, worker.y, 24),
       removed: this.removed,
@@ -847,6 +884,15 @@ export class Stichos {
     for (const id of result.consumeIds) this.removed.add(id);
     this.gain(result.output);
     Object.assign(order, result.order);
+    if (order.serial > this.winterLaborBaseline)
+      this.recordWinterWork({
+        id: `labor:${order.id}`,
+        kind: 'labor',
+        workerId: worker.id,
+        orderId: order.id,
+        paidCoins: order.wages,
+        output: result.output,
+      });
     return { ok: true, message: `${worker.name} delivered the agreed resources.` };
   }
   cancelLabor(orderId: string) {
@@ -1110,6 +1156,482 @@ export class Stichos {
     delete order.journey.reason;
     this.laborPaths.delete(order.id);
     return { ok: true, message: 'The worker is trying the cleared route again.' };
+  }
+  get sharedCombatProgression(): SharedCombatProgression {
+    const kind = this.player.appearance.weapon === 'none' ? 'staff' : this.player.appearance.weapon;
+    return {
+      level: this.player.level,
+      combatXp: this.progression.xp.combat,
+      upgrade: this.progression.upgrades[this.bodyId]?.[kind] ?? 0,
+    };
+  }
+  setSharedCombat(active: boolean, roomIdentity?: string) {
+    if (active === this.sharedCombat && (!roomIdentity || roomIdentity === this.sharedRoom)) return;
+    if (roomIdentity && roomIdentity !== this.sharedRoom) {
+      this.sharedRoom = roomIdentity;
+      this.sharedSequence = -1;
+      this.sharedReceipts.clear();
+      this.sharedBenefitStrikes.clear();
+      this.sharedReceiptFloor = 0;
+      this.sharedAcknowledged = 0;
+      this.sharedIneligible = new Set(this.removed);
+      this.sharedEnemies.clear();
+      this.sharedPeaceful.clear();
+    }
+    this.sharedCombat = active;
+    this.sharedSnapshotLoaded = false;
+    for (const { effect } of this.sharedProjectiles.values()) effect.age = effect.duration;
+    this.sharedProjectiles.clear();
+    for (const effect of this.sharedWarnings.values()) effect.age = effect.duration;
+    this.sharedWarnings.clear();
+    this.arrows = [];
+    this.enemyIntents.clear();
+    if (!active) this.sharedEnemies.clear();
+    this.refreshNpcs();
+  }
+  sharedCombatPreview(kind: 'attack' | 'ward', target?: Point) {
+    const p = this.player,
+      bodyId = this.bodyId;
+    const heading =
+      target && finite(target.x) && finite(target.y) && distance(target, p) > 0.01
+        ? Math.atan2(target.y - p.y, target.x - p.x)
+        : p.heading;
+    const result = (ok: boolean, message: string) => ({ ok, message, heading, bodyId });
+    if (!this.sharedCombat || this.sharedSequence < 0)
+      return result(false, 'Wait for the shared combat state.');
+    if (!['attack', 'ward'].includes(kind) || this.phase !== 'playing' || this.dialogue)
+      return result(false, 'This body cannot attack now.');
+    if (
+      (kind === 'attack' ? p.attackCooldown : p.wardCooldown) > 0 ||
+      p.stamina < (kind === 'attack' ? 8 : 30)
+    )
+      return result(false, 'Recover enough energy and let the action settle first.');
+    if (kind === 'attack') {
+      const weapon = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon;
+      const range = this.activeArtifact?.properties.range ?? this.weaponProfile(weapon).range;
+      const aimed = this.npcs
+        .filter(
+          (n) =>
+            n.hp > 0 &&
+            distance(n, p) <= range &&
+            this.inCone(n, heading) &&
+            this.lineOfSight(p, n),
+        )
+        .sort((a, b) => distance(a, p) - distance(b, p))[0];
+      if (
+        aimed &&
+        (!aimed.hostile || aimed.role !== 'raider') &&
+        (target ? distance(target, aimed) < 0.9 : true)
+      )
+        return result(
+          false,
+          'Residents are protected in a shared world. Choose a hostile creature.',
+        );
+    }
+    return result(true, 'Ready for the room to confirm this action.');
+  }
+  commitSharedCombatAction(kind: 'attack' | 'ward', heading: number, bodyId: string) {
+    if (bodyId !== this.bodyId || !finite(heading))
+      return { ok: false, message: 'The attacking body has changed.' };
+    if (
+      !this.sharedCombat ||
+      this.sharedSequence < 0 ||
+      this.phase !== 'playing' ||
+      this.dialogue ||
+      !['attack', 'ward'].includes(kind) ||
+      (kind === 'attack' ? this.player.attackCooldown : this.player.wardCooldown) > 0 ||
+      this.player.stamina < (kind === 'attack' ? 8 : 30)
+    )
+      return { ok: false, message: 'This body cannot commit that action now.' };
+    const p = this.player;
+    p.heading = heading;
+    if (kind === 'ward') {
+      p.stamina -= 30;
+      p.wardCooldown = 8;
+      p.breath = clamp(p.breath + 5);
+      const effect = this.effect('ward', p, '#9abde9', 0.75, heading);
+      effect.actorId = this.bodyId;
+      this.event('ward');
+    } else {
+      const artifact = this.activeArtifact,
+        weapon = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon,
+        profile = this.weaponProfile(weapon);
+      const delivery = artifact?.delivery ?? (weapon === 'bow' ? 'projectile' : 'contact');
+      p.stamina -= 8;
+      p.attackCooldown = artifact?.properties.cooldown ?? profile.cooldown;
+      // The released projectile comes from the authoritative room snapshot.
+      const effect = this.effect(
+        delivery === 'pulse' ? 'ward' : 'slash',
+        p,
+        artifact?.color ?? profile.color,
+        delivery === 'pulse' ? 0.6 : 0.22,
+        heading,
+      );
+      effect.actorId = this.bodyId;
+      this.event('attack');
+    }
+    return { ok: true, message: 'The room confirmed the action.' };
+  }
+  sharedParleyPreview() {
+    const step = this.activeCampaignStep(),
+      bodyId = this.bodyId;
+    const fail = (message: string) => ({
+      ok: false as const,
+      message,
+      bodyId,
+      stepId: step?.id ?? '',
+      guardIds: [] as string[],
+    });
+    if (
+      !this.sharedCombat ||
+      this.phase !== 'playing' ||
+      !step ||
+      step.kind !== 'encounter' ||
+      !step.vault
+    )
+      return fail('This is not an active shared vault negotiation.');
+    if (distance(this.player, step.target) > 1.8 || this.dialogue?.npcId !== step.target.id)
+      return fail('Speak at the actual vault notice.');
+    if (!this.has(step.cost!)) return fail('Bring the listed medicine and food for the agreement.');
+    return {
+      ok: true as const,
+      message: 'Ask the room to confirm the truce.',
+      bodyId,
+      stepId: step.id,
+      guardIds: [`${step.vault.id}:guard:0`, `${step.vault.id}:guard:1`],
+    };
+  }
+  commitSharedParley(stepId: string, bodyId: string) {
+    const preview = this.sharedParleyPreview();
+    if (!preview.ok || preview.stepId !== stepId || preview.bodyId !== bodyId)
+      return { ok: false, message: 'The negotiation changed before confirmation.' };
+    if (!preview.guardIds.every((id) => this.sharedPeaceful.has(id) || this.removed.has(id)))
+      return { ok: false, message: 'The room has not confirmed this truce.' };
+    this.approvingSharedParley = true;
+    try {
+      this.choose('campaign:parley');
+    } finally {
+      this.approvingSharedParley = false;
+    }
+    return {
+      ok: this.activeCampaignStep()?.id !== stepId,
+      message: 'The guards accepted the physical supplies.',
+    };
+  }
+  applySharedCombat(frame: SharedCombatFrame, localPeerId: string): { eventId: number } {
+    if (
+      !this.sharedCombat ||
+      !validSharedCombatFrame(frame) ||
+      typeof localPeerId !== 'string' ||
+      !localPeerId
+    )
+      return { eventId: this.sharedAcknowledged };
+    if (
+      frame.snapshot.seq > this.sharedSequence ||
+      (!this.sharedSnapshotLoaded && frame.snapshot.seq === this.sharedSequence)
+    ) {
+      this.sharedSnapshotLoaded = true;
+      this.sharedSequence = frame.snapshot.seq;
+      this.sharedEnemies = new Map(frame.snapshot.enemies.map((n) => [n.id, clone(n)]));
+      this.sharedPeaceful = new Set(frame.snapshot.peaceful);
+      for (const id of frame.snapshot.dead) {
+        this.removed.add(id);
+        const npc = this.npcMemory.get(id) ?? this.npcs.find((n) => n.id === id);
+        if (npc) {
+          npc.hp = 0;
+          this.npcMemory.set(id, clone(npc));
+        }
+      }
+      for (const npc of this.sharedEnemies.values())
+        if (distance(npc, this.player) < 24 && (npc.hp < npc.maxHp || !npc.hostile)) {
+          const { intent, ...body } = npc;
+          this.npcMemory.set(npc.id, clone(body));
+        }
+      for (const id of frame.snapshot.peaceful) {
+        const npc = this.npcMemory.get(id) ?? this.npcs.find((n) => n.id === id);
+        if (npc) {
+          npc.hostile = false;
+          npc.cooldown = 0;
+          this.npcMemory.set(id, clone(npc));
+        }
+      }
+      const liveProjectiles = new Set(frame.snapshot.projectiles.map((p) => p.id));
+      for (const [id, value] of this.sharedProjectiles)
+        if (!liveProjectiles.has(id)) {
+          value.effect.age = value.effect.duration;
+          this.sharedProjectiles.delete(id);
+        }
+      for (const projectile of frame.snapshot.projectiles) {
+        if (distance(projectile, this.player) > 24) continue;
+        let value = this.sharedProjectiles.get(projectile.id);
+        if (!value) {
+          value = {
+            effect: this.effect(
+              'arrow',
+              projectile,
+              projectile.color,
+              Math.max(0.1, projectile.remaining / projectile.speed),
+              projectile.heading,
+            ),
+            vx: 0,
+            vy: 0,
+          };
+          this.sharedProjectiles.set(projectile.id, value);
+        }
+        Object.assign(value.effect, {
+          x: projectile.x,
+          y: projectile.y,
+          age: 0,
+          duration: Math.max(0.1, projectile.remaining / projectile.speed),
+          heading: projectile.heading,
+        });
+        value.vx = Math.cos(projectile.heading) * projectile.speed;
+        value.vy = Math.sin(projectile.heading) * projectile.speed;
+      }
+      const warnings = new Set<string>();
+      for (const npc of this.sharedEnemies.values())
+        if (npc.intent && distance(npc, this.player) < 22) {
+          warnings.add(npc.id);
+          let e = this.sharedWarnings.get(npc.id);
+          if (!e) {
+            e = this.effect('speech', npc, '#edbd91', npc.intent.duration, npc.intent.heading);
+            this.sharedWarnings.set(npc.id, e);
+          }
+          Object.assign(e, {
+            x: npc.x,
+            y: npc.y,
+            age: npc.intent.duration - npc.intent.remaining,
+            duration: npc.intent.duration,
+            heading: npc.intent.heading,
+            actorId: npc.id,
+            text: npc.intent.kind === 'arrow' ? 'Drawing bow' : 'Striking',
+          });
+        }
+      for (const [id, e] of this.sharedWarnings)
+        if (!warnings.has(id)) {
+          e.age = e.duration;
+          this.sharedWarnings.delete(id);
+        }
+      this.refreshNpcs();
+      this.checkCampaignEncounter();
+    }
+    const receipts = [
+      ...frame.hits.map((hit) => ({ id: hit.id, hit })),
+      ...frame.deaths.map((death) => ({ id: death.id, death })),
+    ].sort((a, b) => a.id - b.id);
+    for (const receipt of receipts) {
+      const hit = 'hit' in receipt ? receipt.hit : null,
+        death = 'death' in receipt ? receipt.death : null;
+      const relevant = hit
+        ? (hit.target === 'peer' && hit.targetId === localPeerId) ||
+          (hit.target === 'npc' && hit.actorId === localPeerId)
+        : !!death && (death.killerId === localPeerId || death.contributors.includes(localPeerId));
+      if (!relevant) continue;
+      this.sharedAcknowledged = Math.max(this.sharedAcknowledged, receipt.id);
+      if (receipt.id <= this.sharedReceiptFloor || this.sharedReceipts.has(receipt.id)) continue;
+      this.sharedReceipts.add(receipt.id);
+      if (hit) {
+        if (
+          hit.target === 'peer' &&
+          hit.targetId === localPeerId &&
+          (!hit.targetBodyId || hit.targetBodyId === this.bodyId)
+        )
+          this.hurt(hit.damage);
+        if (hit.target === 'npc' && hit.actorId === localPeerId) {
+          grantPractice(this.progression, 'combat', 2);
+          if (this.phase === 'playing' && (!hit.actorBodyId || hit.actorBodyId === this.bodyId)) {
+            const strike = hit.strikeId ?? hit.id;
+            if (hit.artifactDesign && !this.sharedBenefitStrikes.has(strike)) {
+              this.sharedBenefitStrikes.add(strike);
+              this.artifactBenefits(generateArtifact(hit.artifactDesign).properties);
+            }
+            if (hit.effect === 'breath') this.player.breath = clamp(this.player.breath + 2);
+            if (hit.effect === 'warmth') this.player.warmth = clamp(this.player.warmth + 3);
+          }
+        }
+        const target =
+          hit.target === 'peer'
+            ? !hit.targetBodyId || hit.targetBodyId === this.bodyId
+              ? this.player
+              : null
+            : (this.sharedEnemies.get(hit.targetId) ??
+              this.npcs.find((n) => n.id === hit.targetId));
+        if (target) {
+          const e = this.effect('hurt', target, hit.color, 0.4);
+          e.actorId = hit.target === 'peer' ? this.bodyId : hit.targetId;
+        }
+      }
+      if (
+        death &&
+        !this.sharedRewarded.has(death.npcId) &&
+        !this.sharedIneligible.has(death.npcId)
+      ) {
+        this.sharedRewarded.add(death.npcId);
+        this.removed.add(death.npcId);
+        this.recordFreeLife('watch', death.npcId, 1);
+        grantPractice(this.progression, 'combat', 6);
+        this.awardXp(16);
+        if (death.killerId === localPeerId) {
+          if (!death.killerBodyId || death.killerBodyId === this.bodyId) this.player.coins += 4;
+          else {
+            const body = this.bodyPossessions.get(death.killerBodyId);
+            if (body) body.coins += 4;
+          }
+        }
+      }
+    }
+    while (this.sharedBenefitStrikes.size > 4096)
+      this.sharedBenefitStrikes.delete(Math.min(...this.sharedBenefitStrikes));
+    while (this.sharedReceipts.size > 4096) {
+      const first = Math.min(...this.sharedReceipts);
+      this.sharedReceipts.delete(first);
+      this.sharedReceiptFloor = Math.max(this.sharedReceiptFloor, first);
+    }
+    return { eventId: this.sharedAcknowledged };
+  }
+  private updateSharedProjectiles(dt: number) {
+    for (const { effect, vx, vy } of this.sharedProjectiles.values()) {
+      if (effect.age >= effect.duration) continue;
+      const next = { x: effect.x + vx * dt, y: effect.y + vy * dt };
+      if (this.world.blocked(next.x, next.y, this.removed)) effect.age = effect.duration;
+      else {
+        effect.x = next.x;
+        effect.y = next.y;
+      }
+    }
+  }
+  get winterCompact() {
+    this.winterPlan ??= buildCompact(this.world);
+    return { state: clone(this.winterState), plan: clone(this.winterPlan) };
+  }
+  compactTarget(id: string) {
+    this.winterPlan ??= buildCompact(this.world);
+    const project = compactProject(this.winterState, this.winterPlan);
+    if (!project) return null;
+    if (project.board.id === id) return clone(project.board);
+    const witness = project.witnesses.find((w) => w.id === id);
+    if (!witness) return null;
+    const actual = this.npcs.find((n) => n.id === id) ?? this.npcMemory.get(id);
+    if (this.removed.has(id) || actual?.hp === 0 || actual?.hostile || this.occupiedNpcId === id)
+      return { ...clone(project.board), name: `${witness.name}'s deposited account` };
+    return { ...clone(witness), ...(actual ? { x: actual.x, y: actual.y } : {}) };
+  }
+  private compactContext(action: CompactAction): CompactContext {
+    this.winterPlan ??= buildCompact(this.world);
+    const project = compactProject(this.winterState, this.winterPlan);
+    const unavailable: string[] = [];
+    const witnesses =
+      project?.witnesses.map((w) => {
+        const actual =
+          this.npcs.find((n) => n.id === w.id) ??
+          this.npcMemory.get(w.id) ??
+          this.world.npcsAround(w.x, w.y, 3).find((n) => n.id === w.id);
+        if (
+          !actual ||
+          actual.hp <= 0 ||
+          actual.hostile ||
+          this.removed.has(w.id) ||
+          this.occupiedNpcId === w.id
+        )
+          unavailable.push(w.id);
+        return actual;
+      }) ?? [];
+    const requested =
+      action.kind === 'survey' && !unavailable.includes(action.witnessId)
+        ? witnesses.find((n) => n?.id === action.witnessId)
+        : project?.board;
+    return {
+      plan: this.winterPlan,
+      position: this.player,
+      coins: this.player.coins,
+      inventory: this.inventory,
+      actor: this.phase === 'playing' ? requested : undefined,
+      unavailableWitnesses: unavailable,
+    };
+  }
+  compactPreview(action: CompactAction) {
+    return previewCompact(this.winterState, action, this.compactContext(action));
+  }
+  actCompact(action: CompactAction) {
+    const title = this.winterPlan
+      ? compactProject(this.winterState, this.winterPlan)?.title
+      : undefined;
+    const result = applyCompact(this.winterState, action, this.compactContext(action));
+    if (result.ok) {
+      this.player.coins += result.reward.coins - result.cost.coins;
+      this.spend(result.cost.items);
+      this.winterState = result.state;
+      if (action.kind === 'choose') this.winterLaborBaseline = this.laborSerial;
+      for (const [clan, delta] of result.reputation) this.changeReputation(clan, delta);
+      this.awardXp(result.reward.xp);
+      this.entry(title ?? 'The Winter Compact', result.message);
+      this.syncCompactQuest();
+      this.event('quest', result.message);
+    }
+    return result;
+  }
+  private recordWinterWork(event: CompactEvent) {
+    if (this.winterState.stage !== 'work' || !Object.keys(this.winterState.choices).length) return;
+    this.winterPlan ??= buildCompact(this.world);
+    const before = this.winterState.stage;
+    this.winterState = recordCompactEvent(this.winterState, event, this.winterPlan);
+    this.syncCompactQuest();
+    if (before !== this.winterState.stage)
+      this.event(
+        'quest',
+        'The agreed fresh work is complete. Bring the physical supplies to the district board.',
+      );
+  }
+  private syncCompactQuest() {
+    if (
+      !this.winterPlan ||
+      (!this.winterState.surveys.length &&
+        !this.winterState.project &&
+        !Object.keys(this.winterState.choices).length)
+    )
+      return;
+    const p = compactProject(this.winterState, this.winterPlan);
+    let q = this.quests.find((q) => q.id === 'winter-compact');
+    if (!q) {
+      q = {
+        id: 'winter-compact',
+        title: 'The Winter Compact',
+        description: 'Six families must answer for the commitments they make.',
+        objective: '',
+        stage: 0,
+        complete: false,
+      };
+      this.quests.push(q);
+    }
+    q.stage = this.winterState.project;
+    q.complete = !p;
+    if (!p) {
+      q.title = 'The Winter Compact · resolved';
+      q.objective = 'Twenty-four commitments have changed the six districts.';
+      delete q.target;
+      return;
+    }
+    const choice = p.choices.find((c) => c.id === this.winterState.choices[p.id]);
+    const witness = p.witnesses.find((w) => !this.winterState.surveys.includes(w.id));
+    q.title = `Winter Compact ${this.winterState.project + 1}/24 · ${p.title}`;
+    q.objective =
+      this.winterState.stage === 'survey'
+        ? `Hear ${witness?.name ?? 'both witnesses'} in ${p.town.name}.`
+        : !choice
+          ? `Agree one funded policy at the ${p.town.name} board.`
+          : this.winterState.stage === 'work'
+            ? `${choice.work.kind === 'gather' ? 'Gather' : 'Prepare'} fresh ${choice.work.item}: ${this.winterState.work}/${choice.work.amount}. ${choice.work.acceptsLabor ? 'New paid resource work also counts.' : ''}`
+            : `Deliver ${this.costText(choice.delivery)} to ${p.town.name}.`;
+    q.target =
+      this.compactTarget(
+        this.winterState.stage === 'survey' && witness ? witness.id : p.board.id,
+      ) ?? p.board;
+  }
+  private laborReputation(worker: Npc) {
+    const learned = this.winterState.workerTrust[worker.id] ?? 0;
+    return this.reputation.map(
+      (value, clan) => value + (clan === worker.clan ? learned / 0.35 : 0),
+    );
   }
   artifactDesign(index = 0) {
     const offset = Number.isSafeInteger(index) && index >= 0 ? index : 0;
@@ -1582,6 +2104,7 @@ export class Stichos {
     this.updateNpcs(dt);
     this.updateLabor(dt);
     this.updateArrows(dt);
+    this.updateSharedProjectiles(dt);
     for (const effect of this.effects) effect.age += dt;
     this.effects = this.effects.filter((e) => e.age < e.duration);
   }
@@ -1617,6 +2140,7 @@ export class Stichos {
     const candidates = new Map<string, Npc>();
     for (const npc of generated) {
       const saved = this.npcMemory.get(npc.id) ?? this.npcRuntime.get(npc.id);
+      if (this.sharedCombat && npc.role === 'raider') continue;
       const actor = saved ? clone(saved) : clone(npc);
       if (
         actor.id !== this.occupiedNpcId &&
@@ -1628,6 +2152,7 @@ export class Stichos {
     }
     for (const npc of this.npcMemory.values())
       if (
+        !(this.sharedCombat && npc.role === 'raider') &&
         npc.id !== this.occupiedNpcId &&
         npc.hp > 0 &&
         !this.removed.has(npc.id) &&
@@ -1635,6 +2160,9 @@ export class Stichos {
         !candidates.has(npc.id)
       )
         candidates.set(npc.id, clone(npc));
+    if (this.sharedCombat)
+      for (const npc of this.sharedEnemies.values())
+        if (npc.hp > 0 && distance(npc, this.player) <= 18) candidates.set(npc.id, clone(npc));
     this.npcs = [...candidates.values()]
       .sort((a, b) => distance(a, this.player) - distance(b, this.player))
       .slice(0, 64);
@@ -1665,6 +2193,7 @@ export class Stichos {
       }
     for (const npc of this.npcs) {
       if (npc.hp <= 0 || this.phase !== 'playing') continue;
+      if (this.sharedCombat && npc.role === 'raider') continue;
       if (
         !npc.hostile &&
         !this.sharedWorld &&
@@ -2307,6 +2836,10 @@ export class Stichos {
       return;
     }
     if (step.kind === 'encounter') {
+      if (id === 'parley' && this.sharedCombat && !this.approvingSharedParley) {
+        this.event('dialogue', 'The room must confirm this truce before supplies are committed.');
+        return;
+      }
       if (id === 'parley' && this.spend(step.cost!)) {
         for (const npc of this.campaignGuards(step))
           if (npc.hp > 0 && !this.removed.has(npc.id)) {
@@ -2663,6 +3196,13 @@ export class Stichos {
     this.removed.add(prop.id);
     if (botanical) grantPractice(this.progression, 'botany', 3);
     this.recordFreeLife('field', item, amount);
+    this.recordWinterWork({
+      id: `gather:${prop.id}`,
+      kind: 'gather',
+      propId: prop.id,
+      item,
+      amount,
+    });
     this.effect('harvest', prop, '#d2efa8');
     this.event(
       'harvest',
@@ -3368,6 +3908,10 @@ export class Stichos {
   }
 
   attack(target?: Point) {
+    if (this.sharedCombat) {
+      this.event('dialogue', 'Shared attacks require confirmation from the room.');
+      return;
+    }
     const p = this.player;
     if (this.phase !== 'playing' || this.dialogue || p.attackCooldown > 0 || p.stamina < 8) return;
     if (target && finite(target.x) && finite(target.y) && distance(target, p) > 0.01)
@@ -3439,6 +3983,10 @@ export class Stichos {
   }
 
   ward() {
+    if (this.sharedCombat) {
+      this.event('dialogue', 'Shared wards require confirmation from the room.');
+      return;
+    }
     const p = this.player;
     if (this.phase !== 'playing' || this.dialogue || p.wardCooldown > 0 || p.stamina < 30) return;
     p.stamina -= 30;
@@ -3497,6 +4045,7 @@ export class Stichos {
   }
 
   private damageNpc(npc: Npc, amount: number, enchantment?: WeaponProfile['effect']) {
+    if (this.sharedCombat) return;
     const interrupted = this.enemyIntents.get(npc.id);
     if (interrupted) {
       interrupted.warning.age = interrupted.warning.duration;
@@ -3622,6 +4171,13 @@ export class Stichos {
     this.gain({ [recipe.result]: amount });
     grantPractice(this.progression, 'crafting', 4);
     this.recordFreeLife('workshop', recipe.result, amount);
+    this.recordWinterWork({
+      id: `craft:${this.winterState.observed + 1}`,
+      kind: 'craft',
+      recipeId: recipe.id,
+      item: recipe.result,
+      amount,
+    });
     this.effect('harvest', this.player, '#d5dca4');
     this.event('harvest', `Prepared ${amount} ${recipe.name.toLowerCase()}.`);
   }
@@ -3891,7 +4447,7 @@ export class Stichos {
       this.player.xp -= this.player.level * 40;
       this.player.level++;
       this.player.maxHp += 6;
-      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 6);
+      this.player.hp = this.phase === 'lost' ? 0 : Math.min(this.player.maxHp, this.player.hp + 6);
       this.event('level', `Experience ${this.player.level}`);
     }
   }
@@ -4049,8 +4605,24 @@ export class Stichos {
       player: this.player,
       notebook: this.notebook,
       campaign: this.campaignState,
+      winterCompact:
+        this.winterState.project ||
+        this.winterState.surveys.length ||
+        Object.keys(this.winterState.choices).length
+          ? { state: this.winterState, laborBaseline: this.winterLaborBaseline }
+          : undefined,
       progression: this.progression,
       freeLife: this.freeLifeState,
+      sharedCombatRewards: [...this.sharedRewarded],
+      sharedCombatLedger: {
+        room: this.sharedRoom,
+        sequence: this.sharedSequence,
+        receipts: [...this.sharedReceipts],
+        strikes: [...this.sharedBenefitStrikes],
+        floor: this.sharedReceiptFloor,
+        acknowledged: this.sharedAcknowledged,
+        ineligible: [...this.sharedIneligible],
+      },
       labor: {
         serial: this.laborSerial,
         trust: this.estateTrust,
@@ -4099,6 +4671,18 @@ export class Stichos {
     const priestBodyId = `body:theo-priest:${data.seed}`;
     game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
     game.inventory = { ...data.inventory };
+    game.sharedRewarded = new Set(data.sharedCombatRewards ?? []);
+    if (data.sharedCombatLedger) {
+      const ledger = data.sharedCombatLedger;
+      game.sharedRoom = ledger.room;
+      game.sharedSequence = ledger.sequence;
+      game.sharedReceipts = new Set(ledger.receipts);
+      game.sharedBenefitStrikes = new Set(ledger.strikes ?? []);
+      game.sharedReceiptFloor = ledger.floor;
+      game.sharedAcknowledged = ledger.acknowledged;
+      game.sharedIneligible = new Set(ledger.ineligible ?? []);
+    }
+
     const establishedResidence = game.estate.residence;
     game.progression = restoreProgression(data.progression, data.seed);
     // A legacy continuation gains the established address once, never money or
@@ -4205,6 +4789,22 @@ export class Stichos {
     game.campaignState = data.campaign
       ? validateCampaignState(data.campaign)
       : createCampaignState();
+    if (data.winterCompact !== undefined) {
+      const ledger = data.winterCompact;
+      if (
+        !ledger ||
+        typeof ledger !== 'object' ||
+        Array.isArray(ledger) ||
+        Object.keys(ledger).some((k) => !['state', 'laborBaseline'].includes(k)) ||
+        !Number.isSafeInteger(ledger.laborBaseline) ||
+        ledger.laborBaseline < 0 ||
+        ledger.laborBaseline > (data.labor?.serial ?? 0)
+      )
+        throw new Error('Invalid winter labor evidence.');
+      game.winterPlan = buildCompact(game.world);
+      game.winterState = restoreCompact(ledger.state, game.winterPlan);
+      game.winterLaborBaseline = ledger.laborBaseline;
+    }
     game.freeLifeState = restoreFreeLife(data.freeLife);
     if (data.freeLife === undefined)
       game.freeLifeState.knownHosts = [...game.npcMemory.values()]
@@ -4320,6 +4920,7 @@ export class Stichos {
     }
     game.syncCampaign();
     game.syncFreeLife();
+    game.syncCompactQuest();
     game.revealExploration();
     game.events = [];
     game.dialogue = null;
@@ -4699,6 +5300,37 @@ function validateSave(value: unknown): SaveData {
       )
         return fail();
     }
+  }
+  if (
+    value.sharedCombatRewards !== undefined &&
+    (!strings(value.sharedCombatRewards) ||
+      (value.sharedCombatRewards as string[]).some(
+        (id) => !(value.removed as string[]).includes(id),
+      ))
+  )
+    return fail();
+  if (value.sharedCombatLedger !== undefined) {
+    const ledger = value.sharedCombatLedger;
+    if (
+      !object(ledger) ||
+      !text(ledger.room, 300) ||
+      !number(ledger.sequence, -1, Number.MAX_SAFE_INTEGER, true) ||
+      !number(ledger.floor, 0, Number.MAX_SAFE_INTEGER, true) ||
+      !number(ledger.acknowledged, 0, Number.MAX_SAFE_INTEGER, true) ||
+      (ledger.strikes !== undefined &&
+        (!Array.isArray(ledger.strikes) ||
+          ledger.strikes.length > 4096 ||
+          new Set(ledger.strikes).size !== ledger.strikes.length ||
+          !ledger.strikes.every((id) => number(id, 1, ledger.acknowledged as number, true)))) ||
+      (ledger.ineligible !== undefined && !strings(ledger.ineligible)) ||
+      !Array.isArray(ledger.receipts) ||
+      ledger.receipts.length > 4096 ||
+      new Set(ledger.receipts).size !== ledger.receipts.length ||
+      !ledger.receipts.every((id) =>
+        number(id, (ledger.floor as number) + 1, ledger.acknowledged as number, true),
+      )
+    )
+      return fail();
   }
   if (value.labor !== undefined) {
     const labor = value.labor;

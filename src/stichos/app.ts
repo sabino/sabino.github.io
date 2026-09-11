@@ -53,10 +53,7 @@ const peerEmotes = new Map<string, { text: string; until: number }>();
 let sharedActionPending = false;
 let multiplayerRoster = '';
 let roomName = 'Theo';
-let roomServer =
-  location.protocol === 'https:'
-    ? `wss://${location.host}/ws`
-    : `ws://${location.hostname}:4175/ws`;
+let roomServer = location.protocol === 'https:' ? 'peer:' : `ws://${location.hostname}:4175/ws`;
 try {
   roomName = localStorage.getItem('verso.room.name') || 'Theo';
   roomServer = localStorage.getItem('verso.room.server') || roomServer;
@@ -927,6 +924,16 @@ function lifeMenu(
     initialTab,
     initialDesign,
     multiplayer.status !== 'offline',
+    (id) => {
+      const target = game.compactTarget(id);
+      if (!target) return;
+      mapWaypoint = { x: target.x, y: target.y };
+      trackedQuestId = 'map-waypoint';
+      closeModal();
+      updateUI();
+      drawMap();
+      toast(`Follow the atlas bearing to ${target.name}.`);
+    },
   );
   el('s-life-return').onclick = closeModal;
 }
@@ -949,14 +956,18 @@ function roomIdentity() {
     name: roomName,
     appearance: game.displayAppearance,
     position: { x: game.player.x, y: game.player.y },
+    bodyId: game.bodyId,
+    combatActive: false,
+    progression: game.sharedCombatProgression,
   };
 }
 function togetherMenu() {
   if (sharedActionPending) return;
   const active = multiplayer.status === 'online';
+  const browserRoom = roomServer === 'peer:';
   openModal(
     'together',
-    `<span class="s-chapter">Voices on the same frequency</span><h2>Travel together.</h2><p>Share the roads of the same Stíchos with up to eight people. You see each other move, gather from the same plants and chests, and open the same doors. Your story, battles, homes and belongings stay personal.</p><p class="s-room-status" role="status">${active ? `Connected · room <b>${esc(multiplayer.room)}</b> · ${multiplayer.peers.length + 1}/8 travelers` : multiplayer.status === 'disconnected' ? 'Signal interrupted. Reconnect to refresh the shared world.' : 'Create a room, or enter a friend’s room code.'}</p><p>World <b>${formatSeed(game.world.seed)}</b> · geography ${game.world.generation}<br>Friends must start or restore this same world before joining.</p>${active ? `<div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}${p.id === multiplayer.peerId ? ' · you' : ''}</span></p>`).join('')}</div><label>Invitation<input id="s-room-invitation" readonly value="${esc(`Stíchos · seed ${formatSeed(game.world.seed)} · geography ${game.world.generation} · room ${multiplayer.room} · server ${roomServer}`)}"></label><div class="s-menu-buttons"><button id="s-room-copy">Copy invitation</button><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thank you</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>` : `<form id="s-room-form"><label>Your traveler name<input id="s-room-name" value="${esc(roomName)}" maxlength="32" required></label><label>Game server<input id="s-room-server" value="${esc(roomServer)}" maxlength="240" required></label><label>Room code · leave empty to create<input id="s-room-code" value="${esc(multiplayer.room)}" maxlength="16" autocapitalize="characters"></label><button class="s-primary" type="submit">${multiplayer.status === 'connecting' ? 'Connecting…' : 'Join this frequency'}</button>${multiplayer.reconnectable ? '<button id="s-room-reconnect" type="button">Reconnect to my room</button><button id="s-room-forget" type="button">Leave this room</button>' : ''}</form>`}<button id="s-room-return">Return to the world</button>`,
+    `<span class="s-chapter">Voices on the same frequency</span><h2>Travel together.</h2><p>Share the roads of the same Stíchos with up to eight people. You see each other move, gather from the same plants and chests, open the same doors, and fight the same raiders. The room host resolves enemy attacks, wounds and defeats for everyone. Your story, homes and belongings stay personal.</p><p class="s-room-status" role="status">${active ? `Connected · room <b>${esc(multiplayer.room)}</b> · ${multiplayer.peers.length + 1}/8 travelers` : multiplayer.status === 'disconnected' ? 'Signal interrupted. Reconnect to refresh the shared world.' : 'Create a room, or enter a friend’s room code.'}</p><p>World <b>${formatSeed(game.world.seed)}</b> · geography ${game.world.generation}<br>Friends must start or restore this same world before joining.</p>${active ? `<div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}${p.id === multiplayer.peerId ? ' · you' : ''}</span></p>`).join('')}</div><label>Invitation<input id="s-room-invitation" readonly value="${esc(`Stíchos · seed ${formatSeed(game.world.seed)} · geography ${game.world.generation} · room ${multiplayer.room} · ${roomServer === 'peer:' ? 'browser room (host keeps the game open)' : `server ${roomServer}`}`)}"></label><div class="s-menu-buttons"><button id="s-room-copy">Copy invitation</button><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thank you</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>` : `<form id="s-room-form"><label>Your traveler name<input id="s-room-name" value="${esc(roomName)}" maxlength="32" required></label><label>Connection<select id="s-room-mode"><option value="peer" ${browserRoom ? 'selected' : ''}>Browser-hosted room</option><option value="server" ${!browserRoom ? 'selected' : ''}>Dedicated game server</option></select></label><label id="s-room-server-label" ${browserRoom ? 'hidden' : ''}>Game server<input id="s-room-server" value="${esc(browserRoom ? `wss://${location.host}/ws` : roomServer)}" maxlength="240"></label><p id="s-room-peer-note" ${browserRoom ? '' : 'hidden'}>The host keeps this game open while friends visit. Browsers exchange game data directly; PeerJS provides connection discovery. Some networks need a relay or a dedicated game server.</p><label>Room code · leave empty to create<input id="s-room-code" value="${esc(multiplayer.room)}" maxlength="16" autocapitalize="characters"></label><button class="s-primary" type="submit">${multiplayer.status === 'connecting' ? 'Connecting…' : 'Join this frequency'}</button>${multiplayer.reconnectable ? '<button id="s-room-reconnect" type="button">Reconnect to my room</button><button id="s-room-forget" type="button">Leave this room</button>' : ''}</form>`}<button id="s-room-return">Return to the world</button>`,
   );
   el('s-room-return').onclick = closeModal;
   if (active) {
@@ -983,11 +994,19 @@ function togetherMenu() {
         }),
     );
   } else {
+    el<HTMLSelectElement>('s-room-mode').onchange = () => {
+      const peer = el<HTMLSelectElement>('s-room-mode').value === 'peer';
+      el('s-room-server-label').hidden = peer;
+      el('s-room-peer-note').hidden = !peer;
+    };
     el<HTMLFormElement>('s-room-form').onsubmit = async (event) => {
       event.preventDefault();
       if (multiplayer.status === 'connecting') return;
       roomName = el<HTMLInputElement>('s-room-name').value.trim() || 'Traveler';
-      roomServer = el<HTMLInputElement>('s-room-server').value.trim();
+      roomServer =
+        el<HTMLSelectElement>('s-room-mode').value === 'peer'
+          ? 'peer:'
+          : el<HTMLInputElement>('s-room-server').value.trim();
       const code = el<HTMLInputElement>('s-room-code').value.trim().toUpperCase();
       try {
         localStorage.setItem('verso.room.name', roomName);
@@ -1022,6 +1041,7 @@ function togetherMenu() {
 }
 multiplayer.onChange = () => {
   game.setSharedWorld(multiplayer.status !== 'offline');
+  game.setSharedCombat(multiplayer.status !== 'offline', `${game.world.seed}:${multiplayer.room}`);
   el('s-together').textContent =
     multiplayer.status === 'online'
       ? `Together · ${multiplayer.peers.length + 1}`
@@ -1035,6 +1055,23 @@ multiplayer.onChange = () => {
   }
 };
 multiplayer.onMessage = (text) => toast(text, 7000);
+multiplayer.onCombat = (frame) => {
+  const accepted = game.applySharedCombat(frame, multiplayer.peerId);
+  if (accepted.eventId) multiplayer.acknowledgeCombat(accepted.eventId);
+};
+function sendCombatPose(
+  force = false,
+  active = started && !paused && !game.dialogue && !transferStarted && game.phase === 'playing',
+) {
+  multiplayer.pose(
+    game.player,
+    game.displayAppearance,
+    force,
+    active,
+    game.sharedCombatProgression,
+    game.bodyId,
+  );
+}
 multiplayer.onEmote = (id, gesture) => {
   const text = { wave: 'Hello!', thanks: 'Thank you.', help: 'Over here!' }[gesture];
   peerEmotes.set(id, { text, until: performance.now() + 4500 });
@@ -1124,7 +1161,7 @@ async function interactShared(id?: string, keepRoute = false) {
   keys.clear();
   if (!keepRoute) walk = [];
   setInert(true);
-  multiplayer.pose(game.player, game.displayAppearance, true);
+  sendCombatPose(true);
   try {
     const result =
       target.kind === 'door'
@@ -1151,6 +1188,70 @@ async function interactShared(id?: string, keepRoute = false) {
     if (document.hidden && !modal && !transferStarted) pauseMenu();
   }
 }
+async function combatShared(kind: 'attack' | 'ward') {
+  if (sharedActionPending || game.phase !== 'playing') return;
+  if (multiplayer.status === 'offline') {
+    if (kind === 'attack') game.attack(pointer ?? undefined);
+    else game.ward();
+    return;
+  }
+  if (multiplayer.status !== 'online') {
+    toast('Reconnect from Together, or leave the room before fighting alone.');
+    return;
+  }
+  const preview = game.sharedCombatPreview(kind, pointer ?? undefined);
+  if (!preview.ok) {
+    toast(preview.message);
+    return;
+  }
+  const current = game;
+  sharedActionPending = true;
+  keys.clear();
+  walk = [];
+  setInert(true);
+  sendCombatPose(true, true);
+  try {
+    const result = await multiplayer.combat(kind, preview.heading);
+    if (current !== game) return;
+    if (result.ok) game.commitSharedCombatAction(kind, preview.heading, preview.bodyId);
+    else toast(result.reason ?? 'That action could not reach the shared world.');
+    updateUI();
+    save();
+  } finally {
+    sharedActionPending = false;
+    if (!modal && !transferStarted) setInert(false);
+    if (document.hidden && !modal && !transferStarted) pauseMenu();
+  }
+}
+async function parleyShared() {
+  if (sharedActionPending) return;
+  if (multiplayer.status !== 'online') {
+    toast('Reconnect to ask for a shared truce.');
+    return;
+  }
+  const preview = game.sharedParleyPreview();
+  if (!preview.ok) {
+    toast(preview.message);
+    return;
+  }
+  const current = game;
+  sharedActionPending = true;
+  keys.clear();
+  setInert(true);
+  sendCombatPose(true, false);
+  try {
+    const result = await multiplayer.parley(preview.guardIds);
+    if (current !== game) return;
+    if (result.ok) toast(game.commitSharedParley(preview.stepId, preview.bodyId).message);
+    else toast(result.reason ?? 'The guards did not accept the truce.');
+    updateUI();
+    drawMap();
+    save();
+  } finally {
+    sharedActionPending = false;
+    if (!modal && !transferStarted) setInert(false);
+  }
+}
 function act(command: string) {
   if (
     !started ||
@@ -1161,8 +1262,7 @@ function act(command: string) {
     game.phase !== 'playing'
   )
     return;
-  if (command === 'attack') game.attack(pointer ?? undefined);
-  if (command === 'ward') game.ward();
+  if (command === 'attack' || command === 'ward') void combatShared(command);
   if (command === 'interact') void interactShared();
   updateUI();
   save();
@@ -1338,6 +1438,10 @@ root.addEventListener('click', (event) => {
     save();
   }
   if (d.choice) {
+    if (d.choice === 'campaign:parley' && multiplayer.status !== 'offline') {
+      void parleyShared();
+      return;
+    }
     const previousEnding = game.campaign.ending;
     const knownQuests = new Set(game.quests.map((q) => q.id));
     const sourceId = game.dialogue?.npcId;
@@ -1610,7 +1714,7 @@ function frame(now: number) {
     );
     if (event.kind === 'transfer' && !transferStarted) transfer('return');
   }
-  multiplayer.pose(game.player, game.displayAppearance);
+  sendCombatPose();
   renderer.draw(game, {
     peers: multiplayer.peers,
     playerAppearance: game.displayAppearance,

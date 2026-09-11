@@ -1,3 +1,6 @@
+import type { RoomTransport } from './peer-transport';
+import type { SharedCombatFrame } from './shared-combat';
+import type { SharedCombatProgression } from './shared-combat';
 import { MULTIPLAYER_PROTOCOL } from './multiplayer-protocol.ts';
 import type {
   ClientMessage,
@@ -14,9 +17,12 @@ export interface RoomIdentity {
   name: string;
   appearance: Appearance;
   position: Point;
+  bodyId?: string;
+  combatActive?: boolean;
+  progression?: SharedCombatProgression;
 }
 export class MultiplayerConnection {
-  private socket: WebSocket | null = null;
+  private socket: RoomTransport | WebSocket | null = null;
   private serial = 0;
   private epoch = 0;
   private pending = new Map<
@@ -30,6 +36,7 @@ export class MultiplayerConnection {
   private resumeToken = '';
   private endpoint = '';
   private lastPose = 0;
+  private lastCombatAck = 0;
   private peerRecords = new Map<string, Peer>();
   room = '';
   peerId = '';
@@ -38,6 +45,7 @@ export class MultiplayerConnection {
   onWorld: (
     change: Extract<ServerMessage, { type: 'world' }> | Extract<ServerMessage, { type: 'welcome' }>,
   ) => void = () => {};
+  onCombat: (frame: SharedCombatFrame) => void = () => {};
   onMessage: (text: string) => void = () => {};
   onEmote: (peerId: string, gesture: MultiplayerGesture) => void = () => {};
   get peers(): readonly Peer[] {
@@ -55,8 +63,9 @@ export class MultiplayerConnection {
     room = '',
     resume = false,
   ): Promise<void> {
-    const url = new URL(endpoint);
-    if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password)
+    const peerHosted = endpoint === 'peer:';
+    const url = new URL(peerHosted ? 'https://peerjs.com' : endpoint);
+    if (!peerHosted && (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password))
       throw Error('Use a valid ws:// or wss:// game server.');
     const token = resume ? this.resumeToken : '';
     this.disconnect(false);
@@ -66,18 +75,30 @@ export class MultiplayerConnection {
       this.resumeToken = '';
     }
     const epoch = ++this.epoch;
-    this.endpoint = url.href;
+    this.endpoint = peerHosted ? 'peer:' : url.href;
     this.reconnectIdentity = identity;
+    this.lastCombatAck = 0;
     this.status = 'connecting';
     this.onChange();
+    const peerFactory = peerHosted ? (await import('./peer-transport')).createPeerTransport : null;
+    if (epoch !== this.epoch) return;
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
+      const socket = peerFactory ? peerFactory(room) : new WebSocket(url);
       this.socket = socket;
       let welcomed = false;
-      const timeout = setTimeout(() => {
-        socket.close();
-        reject(Error('The game server did not answer.'));
-      }, 10000);
+      const timeout = setTimeout(
+        () => {
+          socket.close();
+          reject(
+            Error(
+              peerHosted
+                ? 'The browser room could not connect. The host must keep the game open; some networks require a relay or game server.'
+                : 'The game server did not answer.',
+            ),
+          );
+        },
+        peerHosted ? 20000 : 10000,
+      );
       socket.onopen = () =>
         this.send({
           type: 'join',
@@ -86,7 +107,7 @@ export class MultiplayerConnection {
           room: room || undefined,
           resumeToken: token || undefined,
         });
-      socket.onmessage = (event) => {
+      socket.onmessage = (event: { data: unknown }) => {
         if (epoch !== this.epoch || typeof event.data !== 'string' || event.data.length > 4_000_000)
           return;
         let message: ServerMessage;
@@ -119,6 +140,7 @@ export class MultiplayerConnection {
           this.peerRecords = new Map(message.peers.map((peer) => [peer.id, peer]));
           this.onWorld(message);
           this.onChange();
+          this.onCombat(message.combat);
           resolve();
         } else if (message.type === 'peerJoined' || message.type === 'pose') {
           this.peerRecords.set(message.peer.id, message.peer);
@@ -129,7 +151,10 @@ export class MultiplayerConnection {
         } else if (message.type === 'world') {
           // The claimant applies its own successful local action after the acknowledgement.
           if (message.actorId !== this.peerId) this.onWorld(message);
-        } else if (message.type === 'claimResult') {
+        } else if (message.type === 'combat_frame') {
+          this.onCombat(message.frame);
+        } else if (message.type === 'claimResult' || message.type === 'combat_result') {
+          if (message.type === 'combat_result') this.onCombat(message.frame);
           const request = this.pending.get(message.requestId);
           if (request) {
             clearTimeout(request.timer);
@@ -147,7 +172,14 @@ export class MultiplayerConnection {
       };
       socket.onerror = () => {
         clearTimeout(timeout);
-        if (!welcomed) reject(Error('Cannot reach the game server.'));
+        if (!welcomed)
+          reject(
+            Error(
+              peerHosted
+                ? 'Could not reach that browser room. Check its code and keep the host’s game open.'
+                : 'Cannot reach the game server.',
+            ),
+          );
       };
       socket.onclose = () => {
         clearTimeout(timeout);
@@ -196,7 +228,14 @@ export class MultiplayerConnection {
   private send(message: ClientMessage) {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message));
   }
-  pose(player: Point & { heading: number; phase: number }, appearance: Appearance, force = false) {
+  pose(
+    player: Point & { heading: number; phase: number },
+    appearance: Appearance,
+    force = false,
+    combatActive = false,
+    progression?: SharedCombatProgression,
+    bodyId?: string,
+  ) {
     const time = performance.now();
     if (this.status !== 'online' || (!force && time - this.lastPose < 100)) return;
     this.lastPose = time;
@@ -207,7 +246,22 @@ export class MultiplayerConnection {
       heading: player.heading,
       phase: player.phase,
       appearance,
+      combatActive,
+      progression,
+      bodyId,
     });
+  }
+  acknowledgeCombat(eventId: number) {
+    if (Number.isSafeInteger(eventId) && eventId > this.lastCombatAck) {
+      this.lastCombatAck = eventId;
+      this.send({ type: 'combat_ack', eventId });
+    }
+  }
+  combat(kind: 'attack' | 'ward', heading: number) {
+    return this.request({ type: 'combat', requestId: '', kind, heading });
+  }
+  parley(guardIds: string[]) {
+    return this.request({ type: 'combat', requestId: '', kind: 'parley', guardIds });
   }
   claim(
     propId: string,

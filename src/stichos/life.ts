@@ -1,3 +1,6 @@
+import './compact.css';
+import { renderCompact } from './compact-view';
+import type { CompactAction } from './compact';
 import type { Stichos } from './session';
 import {
   COSMETICS,
@@ -26,6 +29,7 @@ const esc = (value: unknown) =>
   );
 type LifeTab =
   | 'purpose'
+  | 'compact'
   | 'skills'
   | 'forge'
   | 'discover'
@@ -40,6 +44,7 @@ export function mountLife(
   initialTab: LifeTab = 'purpose',
   initialDesign?: string,
   sharedWorld = false,
+  onTrack?: (id: string) => void,
 ) {
   let tab: LifeTab = initialTab;
   let inventionOffset = 0;
@@ -177,12 +182,12 @@ export function mountLife(
         )
         .join('') ||
       '<p>Meet peaceful residents and learn who they are before entrusting household work.</p>'
-    }</div><h3>Agreed work</h3><p>Work advances while you are in the world. Menus pause the clock. Collect completed work near the worker or at your residence.</p><div class="s-life-grid">${
+    }</div><h3>Agreed work</h3><p>Work advances while you are in the world. Menus pause the clock. Workers walk to each resource, use their tools and return. Collect returned work near the worker or at your residence. If a route is blocked, clear the obstruction and ask them to try again.</p><div class="s-life-grid">${
       game.laborOrders
-        .filter((o) => o.status === 'working')
+        .filter((o) => o.status === 'working' || o.journey?.phase === 'returning')
         .map(
           (order) =>
-            `<article><small>${esc(order.kind)} · ${order.wages} coins paid</small><h4>${esc(order.workerName)}</h4><progress value="${Math.max(0, game.time - order.startedAt)}" max="${order.endsAt - order.startedAt}"></progress><p>${Math.max(0, Math.ceil(order.endsAt - game.time))} seconds of lived time remaining<br>${order.allocations.map((a) => `${a.amount} ${esc(a.item)}`).join(' · ')}</p><button data-labor-collect="${esc(order.id)}" ${sharedWorld || game.time < order.endsAt ? 'disabled' : ''}>Collect agreed work</button><button data-labor-cancel="${esc(order.id)}">Cancel assignment</button></article>`,
+            `<article><small>${esc(order.kind)} · ${order.wages} coins paid</small><h4>${esc(order.workerName)}</h4><progress value="${Math.max(0, game.time - order.startedAt)}" max="${order.endsAt - order.startedAt}"></progress><p><b>${esc(order.status === 'cancelled' ? 'Returning from a cancelled assignment' : { outbound: 'Walking to the resource', working: 'Working with tools', returning: 'Returning with supplies', ready: 'Back with the agreed work', blocked: 'Route blocked' }[order.journey?.phase ?? 'outbound'])}</b><br>${Math.min(order.allocations.length, order.journey?.allocation ?? 0)}/${order.allocations.length} resource sites worked${order.journey?.phase === 'working' ? ` · ${order.journey.strokes} tool strokes at this site` : ''}<br>${order.journey?.reason ? esc(order.journey.reason) : `${Math.max(0, Math.ceil(order.endsAt - game.time))} seconds left in the paid shift`}<br>${order.allocations.map((a) => `${a.amount} ${esc(a.item)}`).join(' · ')}</p>${order.status === 'working' ? `<button data-labor-collect="${esc(order.id)}" ${sharedWorld || game.time < order.endsAt || order.journey?.phase !== 'ready' ? 'disabled' : ''}>Collect returned work</button>${order.journey?.phase === 'blocked' ? `<button data-labor-retry="${esc(order.id)}">Try the route again</button>` : ''}<button data-labor-cancel="${esc(order.id)}">Cancel assignment</button>` : ''}</article>`,
         )
         .join('') ||
       '<p>No assignment is underway. Select someone you trust and agree on paid work above.</p>'
@@ -228,7 +233,7 @@ export function mountLife(
     const focusId = active?.id,
       focusTab = active?.dataset.lifeTab;
     actions.length = 0;
-    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['purpose', 'skills', 'forge', 'discover', 'estate', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', skills: 'Professions', forge: 'Forge', discover: 'Invent', estate: 'Household & tools', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'purpose' ? purpose() : tab === 'skills' ? skills() : tab === 'forge' ? forge() : tab === 'discover' ? discover() : tab === 'estate' ? estate() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
+    container.innerHTML = `<nav class="s-life-tabs" aria-label="Life disciplines">${(['purpose', 'compact', 'skills', 'forge', 'discover', 'estate', 'homes', 'wardrobe', 'store'] as LifeTab[]).map((t) => `<button data-life-tab="${t}" aria-current="${t === tab ? 'page' : 'false'}">${{ purpose: 'Calling', compact: 'Winter Compact', skills: 'Professions', forge: 'Forge', discover: 'Invent', estate: 'Household & tools', homes: 'Home & garden', wardrobe: 'Clothing', store: 'Cosmetic shop' }[t]}</button>`).join('')}</nav><div class="s-life-balance">${esc(game.player.bodyName)} · ${game.player.coins} coins · ${game.carried}/${game.capacity} belongings</div><p class="s-life-message" role="status">${esc(message)}</p><div id="s-life-panel">${tab === 'purpose' ? purpose() : tab === 'compact' ? renderCompact(game.winterCompact.state, game.winterCompact.plan, game.inventory, game.player.coins) : tab === 'skills' ? skills() : tab === 'forge' ? forge() : tab === 'discover' ? discover() : tab === 'estate' ? estate() : tab === 'homes' ? homes() : tab === 'wardrobe' ? wardrobe() : '<p>Checking the cosmetic shop…</p>'}</div>`;
     container.querySelectorAll<HTMLButtonElement>('[data-life-tab]').forEach(
       (button) =>
         (button.onclick = () => {
@@ -237,6 +242,32 @@ export function mountLife(
           render();
         }),
     );
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-compact-track]')
+      .forEach((button) => (button.onclick = () => onTrack?.(button.dataset.compactTrack!)));
+    const compactAction = (button: HTMLButtonElement, action: CompactAction) => {
+      const preview = game.compactPreview(action);
+      button.title = preview.message;
+      button.disabled = !preview.ok;
+      button.onclick = () => {
+        message = game.actCompact(action).message;
+        onChange();
+        render();
+      };
+    };
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-compact-survey]')
+      .forEach((button) =>
+        compactAction(button, { kind: 'survey', witnessId: button.dataset.compactSurvey! }),
+      );
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-compact-choose]')
+      .forEach((button) =>
+        compactAction(button, { kind: 'choose', choiceId: button.dataset.compactChoose! }),
+      );
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-compact-deliver]')
+      .forEach((button) => compactAction(button, { kind: 'deliver' }));
     container.querySelectorAll<HTMLButtonElement>('[data-life-action]').forEach(
       (button) =>
         (button.onclick = () => {
@@ -380,6 +411,9 @@ export function mountLife(
           if (!sharedWorld) workAction(game.collectLabor(b.dataset.laborCollect!));
         }),
     );
+    container
+      .querySelectorAll<HTMLButtonElement>('[data-labor-retry]')
+      .forEach((b) => (b.onclick = () => workAction(game.retryLabor(b.dataset.laborRetry!))));
     container
       .querySelectorAll<HTMLButtonElement>('[data-labor-cancel]')
       .forEach((b) => (b.onclick = () => workAction(game.cancelLabor(b.dataset.laborCancel!))));

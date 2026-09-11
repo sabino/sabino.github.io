@@ -37,3 +37,7 @@ Tests use a local mocked Stripe endpoint, actual HTTP requests, and real HMAC si
 The integration follows Stripe’s primary documentation for [hosted Checkout](https://docs.stripe.com/checkout/quickstart), [Checkout Session creation](https://docs.stripe.com/api/checkout/sessions/create), and [raw-body webhook signatures](https://docs.stripe.com/webhooks/signature).
 
 Recovery routes: `POST /api/store/recovery` with `{}` issues/rotates a code; `POST /api/store/recover` with `{ "recoveryCode": "…" }` restores the wallet. Both use the current browser wallet’s `X-Verso-CSRF` and return its new state. `GET /api/store/wallet` includes `recoveryConfigured`; plaintext recovery codes are never included in that GET response.
+
+## Static GitHub Pages edition
+
+The HTTPS static edition shows cosmetic previews with purchasing disabled. It does not request a nonexistent Pages payment API or present an active checkout. To connect the prepared backend, build with `VITE_STORE_ORIGIN=https://your-payment-api.example` (an HTTPS origin without a path), or `VITE_STORE_ORIGIN=.` behind a same-origin reverse proxy. Provider secret keys, signing secrets and price configuration belong on that backend, never in Vite environment variables or this public build. The backend must explicitly allow the published game's origin. Plain HTTP local development defaults to the local service on port4175.

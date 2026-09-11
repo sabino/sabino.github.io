@@ -2,6 +2,7 @@ import type { Stichos } from './session.ts';
 import { drawHumanoid } from './art.ts';
 import { COSMETICS, previewCosmetic } from './progression.ts';
 import { formatStorePrice, hostedCheckoutUrl } from './store-protocol.ts';
+import { configuredStoreOrigin } from './hosting.ts';
 import './store.css';
 
 interface CatalogSkin {
@@ -20,8 +21,7 @@ const mounted = new WeakMap<HTMLElement, symbol>();
 const verifiedWallets = new WeakMap<Stichos, string[]>();
 const walletRequests = new WeakMap<Stichos, number>();
 
-const storeOrigin = () =>
-  location.protocol === 'https:' ? location.origin : `http://${location.hostname}:4175`;
+const storeOrigin = configuredStoreOrigin;
 const nextWalletRequest = (game: Stichos) => {
   const value = (walletRequests.get(game) ?? 0) + 1;
   walletRequests.set(game, value);
@@ -39,9 +39,14 @@ function applyWallet(game: Stichos, ids: string[]) {
  * saved style IDs and redirect query strings never confer ownership. */
 export async function restoreStoreEntitlements(game: Stichos, onChange: () => void): Promise<void> {
   const request = nextWalletRequest(game);
+  const origin = storeOrigin();
+  if (!origin) {
+    if (applyWallet(game, [])) onChange();
+    return;
+  }
   let ids: string[] = [];
   try {
-    const response = await fetch(`${storeOrigin()}/api/store/wallet`, {
+    const response = await fetch(`${origin}/api/store/wallet`, {
       credentials: 'include',
       signal: AbortSignal.timeout(8000),
     });
@@ -239,6 +244,10 @@ export async function mountStore(
       grid.append(card);
     }
     root.append(grid);
+    if (!origin) {
+      container.replaceChildren(root);
+      return;
+    }
     const footer = element('div', 's-store-footer');
     footer.append(
       button(
@@ -369,6 +378,24 @@ export async function mountStore(
   };
   const refresh = async () => {
     if (busy || !current()) return;
+    if (!origin) {
+      catalog = {
+        enabled: false,
+        testMode: false,
+        skins: premium.map((style) => ({
+          id: style.id,
+          amount: null,
+          currency: null,
+          available: false,
+        })),
+      };
+      loaded = true;
+      problem = false;
+      notice =
+        'Cosmetic purchases are not active on this edition. Preview the outfits here; earned clothing is available in Life → Clothing.';
+      render();
+      return;
+    }
     busy = true;
     notice = 'Checking the outfit catalog and your browser wallet…';
     problem = false;
