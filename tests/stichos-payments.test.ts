@@ -21,6 +21,10 @@ function signed(payload: unknown, secret = webhookSecret, at = timestamp) {
 async function fixture(t: any, enabled = true) {
   const storageDir = await mkdtemp(path.join(tmpdir(), 'verso-payment-test-'));
   const requests: { url: string; body: URLSearchParams }[] = [];
+  const expirations: string[] = [];
+  let clock = timestamp;
+  let checkoutGate: (() => Promise<void>) | undefined;
+  let expirationFails = false;
   const env = {
     VERSO_PAYMENTS_ENABLED: String(enabled),
     VERSO_PUBLIC_ORIGIN: origin,
@@ -39,14 +43,22 @@ async function fixture(t: any, enabled = true) {
         unit_amount: 500,
         currency: 'brl',
       });
+    if (url.endsWith('/expire')) {
+      expirations.push(url);
+      return expirationFails
+        ? Response.json({ error: 'Mock expiration unavailable' }, { status: 503 })
+        : Response.json({ id: url.split('/').at(-2), status: 'expired' });
+    }
     requests.push({ url, body: new URLSearchParams(options.body) });
+    const index = requests.length;
+    await checkoutGate?.();
     return Response.json({
-      id: `cs_test_${requests.length}`,
-      url: `https://checkout.stripe.com/c/pay/test_${requests.length}`,
-      expires_at: timestamp / 1000 + 3600,
+      id: `cs_test_${index}`,
+      url: `https://checkout.stripe.com/c/pay/test_${index}`,
+      expires_at: clock / 1000 + 3600,
     });
   };
-  let handle = createStoreHandler({ env, storageDir, fetchStripe, now: () => timestamp });
+  let handle = createStoreHandler({ env, storageDir, fetchStripe, now: () => clock });
   const server = createServer((req, res) => {
     void handle(req, res).then((handled) => {
       if (!handled) {
@@ -104,7 +116,7 @@ async function fixture(t: any, enabled = true) {
     };
   }
   async function webhook(event: unknown, secret = webhookSecret) {
-    const value = signed(event, secret);
+    const value = signed(event, secret, clock);
     return fetch(`${base}/api/store/webhook`, {
       method: 'POST',
       headers: { 'stripe-signature': value.signature },
@@ -125,12 +137,22 @@ async function fixture(t: any, enabled = true) {
     cookie,
     wallet,
     requests,
+    expirations,
+    advance(ms: number) {
+      clock += ms;
+    },
+    holdCheckout(gate?: () => Promise<void>) {
+      checkoutGate = gate;
+    },
+    failExpiration(value: boolean) {
+      expirationFails = value;
+    },
     checkout,
     completion,
     webhook,
     owned,
     reload() {
-      handle = createStoreHandler({ env, storageDir, fetchStripe, now: () => timestamp });
+      handle = createStoreHandler({ env, storageDir, fetchStripe, now: () => clock });
     },
   };
 }
@@ -345,5 +367,81 @@ test('a failed ledger write closes fulfillment and preserves the last durable wa
   f.reload();
   assert.deepEqual(await f.owned(), []);
   assert.equal((await f.webhook(f.completion())).status, 200);
+  assert.deepEqual(await f.owned(), ['aurora-mantle']);
+});
+
+test('a paid webhook overtaking replacement checkout prevents a second payable link and expires the redundant session', async (t) => {
+  const f = await fixture(t);
+  await f.checkout();
+  f.advance(3_601_000);
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  t.after(() => release());
+  f.holdCheckout(async () => {
+    started();
+    await gate;
+  });
+  const replacement = f.checkout();
+  await entered;
+  assert.equal((await f.webhook(f.completion())).status, 200);
+  assert.deepEqual(await f.owned(), ['aurora-mantle']);
+  release();
+  assert.deepEqual(await (await replacement).json(), { owned: true });
+  assert.deepEqual(f.expirations, [`https://api.stripe.com/v1/checkout/sessions/cs_test_2/expire`]);
+  f.reload();
+  assert.deepEqual(await f.owned(), ['aurora-mantle']);
+});
+
+test('durable fulfillment expires an already returned duplicate without cancelling another outfit', async (t) => {
+  const f = await fixture(t);
+  await f.checkout();
+  f.advance(3_601_000);
+  assert.ok((await (await f.checkout()).json()).url);
+  await f.checkout({ skinId: 'promethean-gold' });
+  assert.equal((await f.webhook(f.completion())).status, 200);
+  assert.deepEqual(f.expirations, ['https://api.stripe.com/v1/checkout/sessions/cs_test_2/expire']);
+  const ledger = JSON.parse(await readFile(path.join(f.storageDir, 'wallets.json'), 'utf8'));
+  const orders = Object.values(Object.values(ledger.wallets)[0].orders) as any[];
+  assert.equal(orders.find((o) => o.sessionId === 'cs_test_2').status, 'expired');
+  assert.equal(orders.find((o) => o.sessionId === 'cs_test_3').status, 'pending');
+  assert.deepEqual(await f.owned(), ['aurora-mantle']);
+});
+
+test('failed duplicate expiration preserves paid ownership and the pending order for cleanup after restart', async (t) => {
+  const f = await fixture(t);
+  await f.checkout();
+  f.advance(3_601_000);
+  await f.checkout();
+  f.failExpiration(true);
+  assert.equal((await f.webhook(f.completion())).status, 200);
+  assert.deepEqual(await f.owned(), ['aurora-mantle']);
+  const readOrders = async () => {
+    const ledger = JSON.parse(await readFile(path.join(f.storageDir, 'wallets.json'), 'utf8'));
+    return Object.values(Object.values(ledger.wallets)[0].orders) as any[];
+  };
+  assert.equal((await readOrders()).find((o) => o.sessionId === 'cs_test_2').status, 'pending');
+  f.reload();
+  f.failExpiration(false);
+  const results = await Promise.all([f.checkout(), f.checkout()]);
+  assert.deepEqual(await Promise.all(results.map((r) => r.json())), [
+    { owned: true },
+    { owned: true },
+  ]);
+  assert.equal(f.requests.length, 2, 'ownership retries do not create a new payable checkout');
+  assert.deepEqual(
+    f.expirations,
+    [
+      'https://api.stripe.com/v1/checkout/sessions/cs_test_2/expire',
+      'https://api.stripe.com/v1/checkout/sessions/cs_test_2/expire',
+    ],
+    'simultaneous ownership retries share one expiration request',
+  );
+  assert.equal((await readOrders()).find((o) => o.sessionId === 'cs_test_2').status, 'expired');
+  f.reload();
   assert.deepEqual(await f.owned(), ['aurora-mantle']);
 });

@@ -98,6 +98,7 @@ export function createStoreHandler({
   let queue = Promise.resolve();
   const prices = new Map(),
     inFlight = new Map(),
+    expiring = new Map(),
     attempts = new Map();
   async function load() {
     if (database) return database;
@@ -216,11 +217,48 @@ export function createStoreHandler({
     prices.set(priceId, value);
     return value;
   }
+  const owns = (record, skinId) => durableOwnership.get(record.id)?.includes(skinId) === true;
+  /** Fulfillment is already durable before cleanup. A failed expiry never revokes ownership
+   * or forgets the payable order; another owned-checkout request retries it after restart. */
+  async function expireDuplicateSessions(record, skinId) {
+    if (!owns(record, skinId)) return;
+    const duplicates = Object.values(record.orders)
+      .filter(
+        (order) =>
+          order.skinId === skinId &&
+          order.status === 'pending' &&
+          order.sessionId &&
+          order.expires > now(),
+      )
+      .slice(0, 8);
+    await Promise.allSettled(
+      duplicates.map((order) => {
+        if (expiring.has(order.sessionId)) return expiring.get(order.sessionId);
+        const task = (async () => {
+          const result = await stripe(
+            `checkout/sessions/${encodeURIComponent(order.sessionId)}/expire`,
+            { method: 'POST' },
+          );
+          if (result.id !== order.sessionId || result.status !== 'expired')
+            throw Error('Checkout expiration was not confirmed.');
+          await transaction(() => {
+            // A completion/refund arriving during the provider request remains authoritative.
+            if (order.status === 'pending') order.status = 'expired';
+          });
+        })();
+        expiring.set(order.sessionId, task);
+        return task.finally(() => expiring.delete(order.sessionId));
+      }),
+    );
+  }
   async function checkout(record, skin) {
     const key = record.id + ':' + skin.id;
     if (inFlight.has(key)) return inFlight.get(key);
     const task = (async () => {
-      if (record.entitlements.includes(skin.id)) return { owned: true };
+      if (owns(record, skin.id)) {
+        await expireDuplicateSessions(record, skin.id);
+        return { owned: true };
+      }
       const previous = Object.values(record.orders).find(
         (order) =>
           order.skinId === skin.id &&
@@ -232,6 +270,10 @@ export function createStoreHandler({
       const cost = await price(skin);
       if (!cost)
         throw Object.assign(Error('This outfit is currently unavailable.'), { status: 503 });
+      if (owns(record, skin.id)) {
+        await expireDuplicateSessions(record, skin.id);
+        return { owned: true };
+      }
       const orderId = secret();
       await transaction(() => {
         record.orders[orderId] = {
@@ -278,6 +320,10 @@ export function createStoreHandler({
             : now() + 1800000,
         });
       });
+      if (owns(record, skin.id)) {
+        await expireDuplicateSessions(record, skin.id);
+        return { owned: true };
+      }
       return { url: session.url };
     })();
     inFlight.set(key, task);
@@ -304,6 +350,7 @@ export function createStoreHandler({
       reply(res, 400, { error: 'Invalid event.' });
       return;
     }
+    let fulfilled;
     await transaction(() => {
       if (database.events.includes(event.id)) return;
       if (
@@ -334,8 +381,10 @@ export function createStoreHandler({
           order.status === 'refunded' || database.refundedIntents.includes(order.paymentIntent)
             ? 'refunded'
             : 'paid';
-        if (order.status === 'paid' && !record.entitlements.includes(order.skinId))
-          record.entitlements.push(order.skinId);
+        if (order.status === 'paid') {
+          if (!record.entitlements.includes(order.skinId)) record.entitlements.push(order.skinId);
+          fulfilled = { record, skinId: order.skinId };
+        }
       } else if (event.type === 'charge.refunded' && event.data?.object?.refunded === true) {
         const intent = event.data.object.payment_intent;
         if (typeof intent !== 'string')
@@ -358,6 +407,7 @@ export function createStoreHandler({
       }
       database.events.push(event.id);
     });
+    if (fulfilled) await expireDuplicateSessions(fulfilled.record, fulfilled.skinId);
     reply(res, 200, { received: true });
   }
   return async function handleStore(req, res) {
