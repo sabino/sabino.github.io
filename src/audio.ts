@@ -143,6 +143,9 @@ export class AudioDirector {
       scanned: 0.5,
       relay: 0.35,
       click: 0.065,
+      breath: 2.7,
+      'mind-transfer': 3,
+      radio: 0.7,
     };
     if (now - (this.lastEvents.get(event) ?? -100) < (limits[event] ?? 0.08)) return;
     this.lastEvents.set(event, now);
@@ -150,6 +153,31 @@ export class AudioDirector {
     const pan = (this.effectRandom() - 0.5) * 0.35;
 
     switch (event) {
+      case 'mind-transfer':
+        this.noise(now, 3.8, 0.13, 1100, 'bandpass', 0, 0.5);
+        [0.5, 1, 1.007, 1.5].forEach((multiplier, index) => {
+          this.tone(110 * multiplier, now + index * 0.12, 4.6, 0.042, bus, {
+            endHz: 330 * multiplier,
+            attack: 0.7,
+            shape: 'sine',
+            pan: index % 2 ? 0.65 : -0.65,
+          });
+        });
+        for (let i = 0; i < 4; i++) {
+          this.tone(65, now + i * 0.76, 0.2, 0.12, bus, { endHz: 36, cutoff: 180 });
+          this.tone(56, now + i * 0.76 + 0.21, 0.15, 0.065, bus, { endHz: 34, cutoff: 160 });
+        }
+        break;
+      case 'breath':
+        this.noise(now, 1.1, 0.045, 800, 'bandpass', -0.12, 0.18);
+        this.noise(now + 1.45, 1.35, 0.027, 600, 'lowpass', 0.12, 0.12);
+        break;
+      case 'radio':
+        this.noise(now, 0.55, 0.08, 2200, 'bandpass', 0);
+        [700, 1050, 700].forEach((frequency, index) =>
+          this.tone(frequency, now + 0.16 * index, 0.095, 0.022, bus, { shape: 'sine' }),
+        );
+        break;
       case 'blade':
         this.noise(now, 0.16, 0.17, 1700, 'bandpass', pan);
         this.tone(320 * jitter, now, 0.13, 0.07, bus, {
