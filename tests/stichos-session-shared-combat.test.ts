@@ -8,6 +8,7 @@ import {
   type SharedCombatPeer,
 } from '../src/stichos/shared-combat.ts';
 import { generateArtifact } from '../src/stichos/artifacts.ts';
+import { buildCampaign, createCampaignState } from '../src/stichos/campaign.ts';
 import type { Npc } from '../src/stichos/types.ts';
 
 const room = '3886:test-room';
@@ -361,4 +362,131 @@ test('malformed shared frames and damaged receipt ledgers fail closed', () => {
   save.sharedCombatLedger.receipts = [9];
   save.sharedCombatLedger.acknowledged = 8;
   assert.throws(() => Stichos.restore(save));
+});
+
+test('actual shared vault parley remains withdrawn and spends supplies only after a confirmed room truce', () => {
+  // A validated in-progress save fixture exercises the adapter, not campaign play duration.
+  const base = new Stichos(3886),
+    saved = base.save(),
+    plan = buildCampaign(base.world),
+    step = plan.steps[5];
+  assert.ok(step.vault && step.cost);
+  saved.storyStage = 4;
+  saved.campaign = {
+    ...createCampaignState(),
+    started: true,
+    step: 5,
+    evidence: plan.steps.slice(0, 5).map((s) => s.id),
+    choices: { 'sallas:02': 'protect' },
+  };
+  for (const s of plan.steps.slice(0, 5))
+    saved.quests.push({
+      id: s.id,
+      title: s.title,
+      description: s.text,
+      objective: s.result,
+      stage: 1,
+      complete: true,
+    });
+  for (const [id, amount] of Object.entries(step.cost))
+    saved.inventory[id as keyof typeof saved.inventory] = amount;
+  let footing: { x: number; y: number } | undefined;
+  for (const [dx, dy] of [
+    [0, 1],
+    [1, 0],
+    [-1, 0],
+    [0, -1],
+    [1, 1],
+    [-1, 1],
+  ]) {
+    const p = { x: step.target.x + dx, y: step.target.y + dy };
+    if (
+      [
+        [-0.21, -0.21],
+        [0.21, -0.21],
+        [-0.21, 0.21],
+        [0.21, 0.21],
+      ].every(([x, y]) => !base.world.blocked(p.x + x, p.y + y, base.removed))
+    ) {
+      footing = p;
+      break;
+    }
+  }
+  assert.ok(footing);
+  Object.assign(saved.player, footing);
+  const g = Stichos.restore(saved);
+  g.setSharedWorld(true);
+  g.setSharedCombat(true, room);
+  const authority = new SharedCombat(g.world, new Set(), { now: () => 1000 });
+  apply(g, authority.tick(0.01, [{ ...peer(g), combatActive: false }]));
+  g.interact(step.target.id);
+  const preview = g.sharedParleyPreview();
+  assert.ok(preview.ok, preview.message);
+  const inventory = { ...g.inventory };
+  g.choose('campaign:parley');
+  assert.equal(g.campaign.step, 5);
+  assert.deepEqual(g.inventory, inventory);
+  assert.equal(g.commitSharedParley(preview.stepId, preview.bodyId).ok, false);
+  const accepted = authority.parley({ ...peer(g), combatActive: false }, preview.guardIds);
+  assert.ok(accepted.ok, accepted.reason);
+  apply(g, accepted);
+  assert.ok(g.commitSharedParley(preview.stepId, preview.bodyId).ok);
+  assert.equal(g.campaign.step, 6);
+  for (const [id, amount] of Object.entries(step.cost))
+    assert.equal(
+      g.inventory[id as keyof typeof g.inventory] ?? 0,
+      (inventory[id as keyof typeof inventory] ?? 0) - amount,
+    );
+  const paid = { ...g.inventory };
+  assert.equal(g.commitSharedParley(preview.stepId, preview.bodyId).ok, false);
+  assert.deepEqual(g.inventory, paid);
+  assert.ok(accepted.snapshot.peaceful.every((id) => preview.guardIds.includes(id)));
+  assert.equal(Stichos.restore(g.save()).campaign.step, 6);
+});
+
+test('bounded receipt compaction and active Compact knowledge survive the same save without replaying pruned events', () => {
+  let g = game();
+  const witness = g.winterCompact.plan.projects[0].witnesses[0];
+  Object.assign(g.player, { x: witness.x, y: witness.y + 1 });
+  assert.ok(g.actCompact({ kind: 'survey', witnessId: witness.id }).ok);
+  Object.assign(g.player, { x: 0, y: 30 });
+  for (let first = 1; first <= 4100; first += 1000) {
+    const f = frame(first);
+    for (let id = first; id < first + 1000 && id <= 4100; id++)
+      f.hits.push({
+        id,
+        actorId: 'raider',
+        targetId: 'one',
+        targetBodyId: 'previous-body',
+        target: 'peer',
+        damage: 1,
+        kind: 'arrow',
+        color: '#aabbcc',
+      });
+    apply(g, f);
+  }
+  const save = g.save();
+  assert.equal(save.sharedCombatLedger.receipts.length, 4096);
+  assert.equal(save.sharedCombatLedger.floor, 4);
+  assert.equal(save.sharedCombatLedger.acknowledged, 4100);
+  assert.deepEqual(save.winterCompact?.state.surveys, [witness.id]);
+  g = Stichos.restore(save);
+  g.setSharedCombat(true, room);
+  const old = frame(1);
+  old.hits = [
+    {
+      id: 2,
+      actorId: 'raider',
+      targetId: 'one',
+      targetBodyId: g.bodyId,
+      target: 'peer',
+      damage: 12,
+      kind: 'arrow',
+      color: '#aabbcc',
+    },
+  ];
+  const hp = g.player.hp;
+  assert.equal(apply(g, old).eventId, 4100);
+  assert.equal(g.player.hp, hp);
+  assert.deepEqual(g.winterCompact.state.surveys, [witness.id]);
 });
