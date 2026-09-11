@@ -11,6 +11,8 @@ import {
   validRoomWorldCheckpoint,
   validProductionMachine,
   validRoomChat,
+  createRoomSigningIdentity,
+  signRoomHello,
 } from './room-checkpoint.ts';
 
 const MAX_COORDINATE = Number.MAX_SAFE_INTEGER - 4096;
@@ -119,6 +121,7 @@ export class CoopRooms {
     this.now = now;
     this.durable = durable;
     this.checkpoints = new Map();
+    this.signingIdentities = new Map();
     this.codeFactory = codeFactory;
     this.maxRooms = maxRooms;
     this.maxPeers = maxPeers;
@@ -128,6 +131,17 @@ export class CoopRooms {
     this.messageBurst = messageBurst;
     this.rooms = new Map();
     this.connections = new Set();
+  }
+  signingIdentity(id) {
+    let identity = this.signingIdentities.get(id);
+    if (!identity) {
+      identity = createRoomSigningIdentity();
+      this.signingIdentities.set(id, identity);
+    }
+    return identity;
+  }
+  setSigningIdentity(id, identity) {
+    this.signingIdentities.set(id, Promise.resolve(identity));
   }
   attach(socket) {
     const connection = {
@@ -222,8 +236,11 @@ export class CoopRooms {
         !this.durable &&
         ![...room.members.values()].some((member) => member.connection) &&
         now - room.lastActivity >= this.roomIdleMs
-      )
+      ) {
         this.rooms.delete(id);
+        this.checkpoints.delete(id);
+        this.signingIdentities.delete(id);
+      }
     }
   }
   heartbeat() {
@@ -300,21 +317,45 @@ export class CoopRooms {
       if (
         message.protocol !== MULTIPLAYER_PROTOCOL ||
         typeof message.room !== 'string' ||
-        !/^[A-Za-z0-9]{4,16}$/.test(message.room)
+        !/^[A-Za-z0-9]{4,16}$/.test(message.room) ||
+        (message.challenge !== undefined &&
+          (typeof message.challenge !== 'string' || !/^[a-f0-9]{64}$/.test(message.challenge)))
       )
         return this.error(connection, 'invalid_hello', 'Use a valid room code.');
       const room = this.rooms.get(message.room.toUpperCase());
       if (!room)
         return this.error(connection, 'room_missing', 'That world is not currently hosted.');
-      return this.send(connection, {
-        type: 'room_info',
-        info: {
-          room: room.id,
-          seed: room.seed,
-          generation: room.generation,
-          players: [...room.members.values()].filter((m) => m.connection).length,
-        },
-      });
+      const reply = (proof) =>
+        this.send(connection, {
+          type: 'room_info',
+          info: {
+            room: room.id,
+            seed: room.seed,
+            generation: room.generation,
+            players: [...room.members.values()].filter((m) => m.connection).length,
+          },
+          ...(proof ? { proof } : {}),
+        });
+      if (message.challenge)
+        void this.signingIdentity(room.id)
+          .then((identity) =>
+            signRoomHello(
+              room.id,
+              message.challenge,
+              connection.socket.channelBinding ?? '',
+              identity,
+            ),
+          )
+          .then(reply)
+          .catch(() =>
+            this.error(
+              connection,
+              'identity_failed',
+              'This authority could not prove its identity.',
+            ),
+          );
+      else reply();
+      return;
     }
     if (message.type === 'join') return this.join(connection, message);
     if (!connection.member)
@@ -392,6 +433,8 @@ export class CoopRooms {
       (message.progression !== undefined && !validSharedCombatProgression(message.progression)) ||
       (message.room !== undefined &&
         (typeof message.room !== 'string' || !/^[A-Za-z0-9]{4,16}$/.test(message.room))) ||
+      (message.challenge !== undefined &&
+        (typeof message.challenge !== 'string' || !/^[a-f0-9]{64}$/.test(message.challenge))) ||
       (message.clientId !== undefined &&
         (typeof message.clientId !== 'string' || !/^[a-f0-9-]{36}$/.test(message.clientId))) ||
       (message.resumeToken !== undefined &&
@@ -508,25 +551,53 @@ export class CoopRooms {
     connection.member = member;
     connection.room = room;
     room.lastActivity = this.now();
-    this.send(connection, {
-      type: 'welcome',
-      protocol: MULTIPLAYER_PROTOCOL,
-      room: room.id,
-      peerId: member.id,
-      resumeToken: member.token,
-      seed: room.seed,
-      generation: room.generation,
-      peers: [...room.members.values()].filter((value) => value.connection).map(publicPeer),
-      removed: [...room.removed],
-      opened: [...room.opened],
-      combat: this.combatFrame(room, member),
-      chat: room.chat.filter((c) => c.channel === 'world' || distance(c, member) <= 12),
-      machines: [...room.machines.values()],
-    });
-    this.broadcast(room, { type: 'peerJoined', peer: publicPeer(member) }, connection);
-    const checkpoint = this.checkpoints.get(room.id);
-    if (checkpoint) this.send(connection, { type: 'checkpoint', checkpoint });
+    const welcome = (proof) => {
+      if (member.connection !== connection || connection.socket.readyState !== 1) return;
+      member.combatActive = message.combatActive === true;
+      member.lastPose = this.now();
+      this.send(connection, {
+        type: 'welcome',
+        protocol: MULTIPLAYER_PROTOCOL,
+        room: room.id,
+        peerId: member.id,
+        resumeToken: member.token,
+        seed: room.seed,
+        generation: room.generation,
+        peers: [...room.members.values()].filter((value) => value.connection).map(publicPeer),
+        removed: [...room.removed],
+        opened: [...room.opened],
+        combat: this.combatFrame(room, member),
+        chat: room.chat.filter((c) => c.channel === 'world' || distance(c, member) <= 12),
+        machines: [...room.machines.values()],
+        ...(proof ? { proof } : {}),
+      });
+      this.broadcast(room, { type: 'peerJoined', peer: publicPeer(member) }, connection);
+      const checkpoint = this.checkpoints.get(room.id);
+      if (checkpoint) this.send(connection, { type: 'checkpoint', checkpoint });
+    };
+    if (message.challenge) {
+      member.combatActive = false;
+      void this.signingIdentity(room.id)
+        .then((identity) =>
+          signRoomHello(
+            room.id,
+            message.challenge,
+            connection.socket.channelBinding ?? '',
+            identity,
+          ),
+        )
+        .then(welcome)
+        .catch(() => {
+          this.error(
+            connection,
+            'identity_failed',
+            'This authority could not sign the room handshake.',
+          );
+          connection.socket.close();
+        });
+    } else welcome();
   }
+
   /** Trusted host-only persistence API. No wire message can restore or replace world state. */
   exportRoom(id) {
     const room = this.rooms.get(id);

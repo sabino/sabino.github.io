@@ -1,7 +1,7 @@
 import type { Appearance, Point } from './types.ts';
 import type { WorldGeneration } from './world.ts';
 import type { SharedCombatFrame, SharedCombatProgression } from './shared-combat.ts';
-import type { SignedRoomCheckpoint } from './room-checkpoint.ts';
+import type { SignedRoomCheckpoint, RoomHelloProof } from './room-checkpoint.ts';
 
 export const MULTIPLAYER_PROTOCOL = 3 as const;
 export const MAX_ROOM_PLAYERS = 8;
@@ -40,7 +40,7 @@ export interface MultiplayerPeer extends Point {
 }
 
 export type MultiplayerClientMessage =
-  | { type: 'hello'; room: string; protocol: typeof MULTIPLAYER_PROTOCOL }
+  | { type: 'hello'; room: string; protocol: typeof MULTIPLAYER_PROTOCOL; challenge?: string }
   | { type: 'chat'; requestId: string; channel: ChatChannel; text: string }
   | { type: 'machine'; requestId: string; machine: Omit<ProductionMachine, 'ownerId'> }
   | {
@@ -63,6 +63,7 @@ export type MultiplayerClientMessage =
       position: Point;
       resumeToken?: string;
       clientId?: string;
+      challenge?: string;
       combatActive?: boolean;
       bodyId?: string;
       progression?: SharedCombatProgression;
@@ -94,7 +95,7 @@ export type MultiplayerClientMessage =
   | { type: 'emote'; gesture: MultiplayerGesture };
 
 export type MultiplayerServerMessage =
-  | { type: 'room_info'; info: RoomInfo }
+  | { type: 'room_info'; info: RoomInfo; proof?: RoomHelloProof }
   | { type: 'chat'; message: RoomChat }
   | { type: 'chat_result'; requestId: string; ok: boolean; reason?: string }
   | { type: 'machines'; machines: ProductionMachine[] }
@@ -115,6 +116,7 @@ export type MultiplayerServerMessage =
       combat: SharedCombatFrame;
       chat: RoomChat[];
       machines: ProductionMachine[];
+      proof?: RoomHelloProof;
     }
   | { type: 'peerJoined'; peer: MultiplayerPeer }
   | { type: 'peerLeft'; peerId: string }

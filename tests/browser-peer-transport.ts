@@ -2,9 +2,10 @@ import { createPeerTransport, type RoomTransport } from '../src/stichos/peer-tra
 import { MULTIPLAYER_PROTOCOL } from '../src/stichos/multiplayer-protocol.ts';
 import { validSharedCombatFrame, type SharedCombatFrame } from '../src/stichos/shared-combat.ts';
 import { InfiniteWorld, appearance } from '../src/stichos/world.ts';
+import { verifyRoomHello, verifyRoomCheckpoint } from '../src/stichos/room-checkpoint.ts';
 
 // These are real clear coordinates in world3886/gen3. Their union exposes49 generated raiders.
-// No invented NPCs, padded packets, game-state assignment, or local-storage changes participate.
+// No invented NPCs, padded packets, or direct game/storage assignment participate.
 const positions = [
   { x: -352, y: -448 },
   { x: 192, y: -480 },
@@ -24,6 +25,9 @@ interface Client {
   maxBytes: number;
   lastSequence: number;
   lastAck: number;
+  proofVerified: boolean;
+  binding: string;
+  checkpointBytes: number;
 }
 interface Report {
   status: 'RUNNING' | 'PASS' | 'FAIL';
@@ -104,13 +108,20 @@ button.onclick = async () => {
       maxBytes: 0,
       lastSequence: 0,
       lastAck: 0,
+      proofVerified: false,
+      binding: '',
+      checkpointBytes: 0,
     };
+    const challenge = [...crypto.getRandomValues(new Uint8Array(32))]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
     clients.push(c);
     wire.onopen = () =>
       wire.send(
         JSON.stringify({
           type: 'join',
           protocol: MULTIPLAYER_PROTOCOL,
+          challenge,
           seed: 3886,
           generation: 3,
           name: `Transport witness ${index + 1}`,
@@ -142,6 +153,21 @@ button.onclick = async () => {
           c.room = message.room;
           if (c.welcomed !== 1) fail('A signalling reconnect triggered a second room join.');
           if (!validSharedCombatFrame(message.combat)) fail('Malformed welcome combat frame.');
+          c.binding = wire.channelBinding ?? '';
+          if (index > 0 && !c.binding.startsWith('sha-256 '))
+            fail('RTC handshake did not expose a host certificate fingerprint.');
+          void verifyRoomHello(message.proof, challenge, message.room, c.binding).then((ok) => {
+            c.proofVerified = ok;
+            if (!ok) fail('The actual RTC nonce/fingerprint proof did not verify.');
+          });
+        }
+        if (message.type === 'checkpoint') {
+          if (message.checkpoint.state.chat.some((m: { channel: string }) => m.channel !== 'world'))
+            fail('Public replica exposed local speech.');
+          void verifyRoomCheckpoint(message.checkpoint).then((ok) => {
+            if (!ok) fail('Actual public checkpoint signature failed.');
+            else c.checkpointBytes = Math.max(c.checkpointBytes, encode.encode(data).length);
+          });
         }
         if (message.type === 'combat_frame') {
           if (!validSharedCombatFrame(message.frame)) {
@@ -214,10 +240,20 @@ button.onclick = async () => {
         clients.length === 8 && clients.every((c) => c.welcomed === 1 && c.wire.readyState === 1),
     );
     note('Eight participants joined through real public PeerJS signalling and RTC channels');
+    await wait(() => clients.every((c) => c.proofVerified));
+    note(
+      'All eight fresh nonce proofs verify; remote proofs bind their actual host DTLS fingerprints',
+      clients.map((c) => ({ binding: c.binding, verified: c.proofVerified })),
+    );
     await wait(() => clients.every((c) => c.maxBytes > 16300 && c.frames >= 2));
     note(
       'Every participant reassembled identical valid combat strings larger than the JSON-channel limit',
       clients.map((c) => ({ bytes: c.maxBytes, frames: c.frames })),
+    );
+    await wait(() => clients.every((c) => c.checkpointBytes > 16300));
+    note(
+      'All eight participants received and verified chunked signed public world checkpoints',
+      clients.map((c) => c.checkpointBytes),
     );
     const hostSignal = signals.find(
       (s) =>

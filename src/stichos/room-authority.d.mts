@@ -1,8 +1,13 @@
 export const MAX_MESSAGE_BYTES: number;
-import type { RoomWorldCheckpoint, SignedRoomCheckpoint } from './room-checkpoint.ts';
+import type {
+  RoomWorldCheckpoint,
+  SignedRoomCheckpoint,
+  RoomSigningIdentity,
+} from './room-checkpoint.ts';
 export interface AuthoritySocket {
   readyState: number;
   bufferedAmount: number;
+  readonly channelBinding?: string;
   send(message: string): void;
   close(code?: number, reason?: string): void;
   terminate(): void;
@@ -38,4 +43,6 @@ export class CoopRooms {
   exportRoom(id: string): { state: RoomWorldCheckpoint; privateState: unknown } | null;
   restoreRoom(state: RoomWorldCheckpoint, privateState?: unknown): string;
   publishCheckpoint(checkpoint: SignedRoomCheckpoint): void;
+  signingIdentity(id: string): Promise<RoomSigningIdentity>;
+  setSigningIdentity(id: string, identity: RoomSigningIdentity): void;
 }

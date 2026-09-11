@@ -12,6 +12,8 @@ import {
   createRoomSigningIdentity,
   signRoomCheckpoint,
   verifyRoomCheckpoint,
+  signRoomHello,
+  verifyRoomHello,
 } from '../src/stichos/room-checkpoint.ts';
 import { createCoopServer } from '../server/coop.mjs';
 import { RoomPersistence } from '../src/stichos/room-persistence.ts';
@@ -453,4 +455,124 @@ test('actual hostile damage receipts survive authority restore and a synchronous
   b.send({ type: 'combat_ack', eventId: hit.id + 10000 });
   assert.equal(b.socket.get('error').code, 'invalid_combat_ack');
   assert.equal((restored.exportRoom(room)!.privateState as any).members[0].combatAck, hit.id);
+});
+
+test('live authority proofs reject a replayed nonce, another room, another signing key and a substituted RTC fingerprint', async () => {
+  const identity = await createRoomSigningIdentity(),
+    nonce = 'a'.repeat(64),
+    binding = 'sha-256 aa:bb:cc';
+  const proof = await signRoomHello('ABCDEF', nonce, binding, identity);
+  assert.equal(await verifyRoomHello(proof, nonce, 'ABCDEF', binding, identity.publicKey), true);
+  assert.equal(
+    await verifyRoomHello(proof, 'b'.repeat(64), 'ABCDEF', binding, identity.publicKey),
+    false,
+  );
+  assert.equal(await verifyRoomHello(proof, nonce, 'FEDCBA', binding, identity.publicKey), false);
+  assert.equal(
+    await verifyRoomHello(proof, nonce, 'ABCDEF', 'sha-256 dd:ee:ff', identity.publicKey),
+    false,
+  );
+  assert.equal(
+    await verifyRoomHello(
+      proof,
+      nonce,
+      'ABCDEF',
+      binding,
+      (await createRoomSigningIdentity()).publicKey,
+    ),
+    false,
+  );
+  assert.equal(
+    await verifyRoomHello(
+      { ...proof, issuedAt: Infinity },
+      nonce,
+      'ABCDEF',
+      binding,
+      identity.publicKey,
+    ),
+    false,
+  );
+});
+
+test('known-world client rejects changed live keys before world/combat callbacks and applies a valid pinned welcome only after verification', async (t) => {
+  const data = new Map<string, string>(),
+    descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
+    previousSocket = globalThis.WebSocket;
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, v: string) => data.set(key, v),
+      removeItem: (key: string) => data.delete(key),
+    },
+  });
+  globalThis.WebSocket = WebSocket as any;
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
+    else delete (globalThis as any).localStorage;
+    globalThis.WebSocket = previousSocket;
+  });
+  const server = createCoopServer({ durable: true }),
+    address: any = await server.listen(0, '127.0.0.1');
+  t.after(() => server.close());
+  const url = `ws://127.0.0.1:${address.port}/ws`,
+    who = {
+      seed: 3886,
+      generation: 3 as const,
+      name: 'Theo',
+      appearance: look,
+      position: { x: 0, y: 5 },
+    };
+  const a = new MultiplayerConnection();
+  await a.connect(url, who);
+  const room = a.room,
+    peerId = a.peerId;
+  const identity = await server.hub.signingIdentity(room),
+    checkpoint = await signRoomCheckpoint(server.hub.exportRoom(room)!.state, identity);
+  assert.equal(storeRoom({ checkpoint }), true);
+  a.disconnect();
+  await new Promise((r) => setTimeout(r, 20));
+  server.hub.publishCheckpoint(checkpoint);
+  server.hub.setSigningIdentity(room, await createRoomSigningIdentity());
+  let worldCalls = 0,
+    combatCalls = 0,
+    machineCalls = 0,
+    secretsSent = 0;
+  const handle = server.hub.handle.bind(server.hub);
+  server.hub.handle = (c: any, m: any) => {
+    if (m.type === 'join' && m.resumeToken) secretsSent++;
+    return handle(c, m);
+  };
+  const wrong = new MultiplayerConnection();
+  wrong.onWorld = () => worldCalls++;
+  wrong.onCombat = () => combatCalls++;
+  wrong.onMachines = () => machineCalls++;
+  await assert.rejects(() => wrong.connect(url, who, room), /signing key/);
+  assert.equal(
+    secretsSent,
+    0,
+    'private credential must remain unsent until the authority proves its key',
+  );
+  assert.equal(worldCalls + combatCalls + machineCalls, 0);
+  assert.equal(readRoomCredential(url, room)!.peerId, peerId);
+  await new Promise((r) => setTimeout(r, 20));
+  server.hub.setSigningIdentity(room, identity);
+  const valid = new MultiplayerConnection();
+  t.after(() => valid.disconnect());
+  valid.onWorld = () => worldCalls++;
+  valid.onCombat = () => combatCalls++;
+  valid.onMachines = () => machineCalls++;
+  await valid.connect(url, who, room);
+  assert.equal(secretsSent, 1);
+  assert.equal(valid.peerId, peerId);
+  assert.equal(worldCalls, 1);
+  assert.ok(combatCalls >= 1);
+  assert.equal(machineCalls, 1);
+  server.hub.broadcast(server.hub.rooms.get(room), {
+    type: 'machines',
+    machines: Array.from({ length: 257 }, () => ({ id: 'bad', x: NaN, y: 0 })),
+  });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(machineCalls, 1);
+  valid.disconnect();
 });

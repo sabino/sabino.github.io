@@ -2,10 +2,16 @@ import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
 import { CoopRooms, type AuthoritySocket } from './room-authority.mjs';
 import { RoomPersistence } from './room-persistence.ts';
 import { storeRoom, type SavedRoom } from './room-storage.ts';
+const fingerprint = (sdp?: string) =>
+  /^a=fingerprint:(sha-256\s+[a-f0-9:]+)\r?$/im
+    .exec(sdp ?? '')?.[1]
+    .toLowerCase()
+    .trim() ?? '';
 
 /** A common wire shape keeps the WebSocket and browser-hosted room rules identical. */
 export interface RoomTransport {
   readyState: number;
+  readonly channelBinding?: string;
   onopen: (() => void) | null;
   onmessage: ((event: { data: unknown }) => void) | null;
   onerror: (() => void) | null;
@@ -19,11 +25,15 @@ class HostSocket implements AuthoritySocket {
   get bufferedAmount() {
     return this.pendingBytes();
   }
+  get channelBinding() {
+    return this.binding();
+  }
   private listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   constructor(
     private deliver: (message: string) => void,
     private terminateWire: () => void,
     private pendingBytes: () => number = () => 0,
+    private binding: () => string = () => '',
   ) {}
   on(event: string, callback: (...args: unknown[]) => void) {
     const callbacks = this.listeners.get(event) ?? [];
@@ -70,8 +80,9 @@ export function createPeerTransport(
   room = '',
   peerOptions?: PeerOptions,
   restore?: SavedRoom,
+  forceHost = false,
 ): RoomTransport {
-  const hosting = !room || !!restore?.owner;
+  const hosting = forceHost || !room || !!restore?.owner;
   const code =
     restore?.checkpoint.state.room ||
     room ||
@@ -111,25 +122,28 @@ export function createPeerTransport(
         restore?.checkpoint,
       )
     : null;
-  const persist = () =>
-    activated
-      ? persistence?.flush().catch(() => {
-          wire.onmessage?.({
-            data: JSON.stringify({
-              type: 'error',
-              code: 'storage_failed',
-              reason:
-                'This world could not be saved in browser storage. Export your personal save and free storage before closing.',
-            }),
-          });
-        })
-      : undefined;
+  const persist = (latest = false) => {
+    if (!activated || !persistence) return;
+    return (latest ? persistence.flushLatest() : persistence.flush()).catch(() => {
+      wire.onmessage?.({
+        data: JSON.stringify({
+          type: 'error',
+          code: 'storage_failed',
+          reason:
+            'This world could not be saved in browser storage. Export your personal save and free storage before closing.',
+        }),
+      });
+    });
+  };
   const onPageHide = () => {
-    void persist();
+    void persist(true);
   };
   if (hosting) globalThis.addEventListener?.('pagehide', onPageHide);
   const wire: RoomTransport = {
     readyState: 0,
+    get channelBinding() {
+      return local ? 'loopback' : fingerprint(channel?.peerConnection?.remoteDescription?.sdp);
+    },
     onopen: null,
     onmessage: null,
     onerror: null,
@@ -148,7 +162,7 @@ export function createPeerTransport(
       clearInterval(persistenceClock);
       clearTimeout(initialSave);
       globalThis.removeEventListener?.('pagehide', onPageHide);
-      void persist();
+      void persist(true);
       clearTimeout(reconnectTimer);
       for (const pending of pendingChannels) pending.close();
       pendingChannels.clear();
@@ -216,6 +230,8 @@ export function createPeerTransport(
       local = new HostSocket(
         (message) => queueMicrotask(() => receive(message)),
         () => wire.close(),
+        () => 0,
+        () => 'loopback',
       );
       sockets.add(local);
       hub.attach(local);
@@ -263,6 +279,7 @@ export function createPeerTransport(
         (message) => connection.send(message),
         () => connection.close(),
         () => connection.dataChannel?.bufferedAmount ?? 0,
+        () => fingerprint(connection.peerConnection?.localDescription?.sdp),
       );
       sockets.add(socket);
       hub.attach(socket);

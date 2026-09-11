@@ -32,6 +32,7 @@ export interface RoomCredential {
   token: string;
   peerId: string;
   serial: number;
+  authority?: JsonWebKey;
 }
 const credentialKey = (endpoint: string, room: string) =>
   `credential:${endpoint}:${room.toUpperCase()}`;

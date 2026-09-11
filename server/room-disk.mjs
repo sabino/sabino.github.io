@@ -34,10 +34,12 @@ export async function attachRoomDisk(hub, directory, { onCheckpoint = async () =
     hub.publishCheckpoint(record.checkpoint);
   }
   return {
-    async flush() {
+    async flush(latest = false) {
       for (const id of hub.rooms.keys())
         if (!writers.has(id)) writers.set(id, new RoomPersistence(singleRoom(hub, id), save));
-      await Promise.all([...writers.values()].map((writer) => writer.flush()));
+      await Promise.all(
+        [...writers.values()].map((writer) => (latest ? writer.flushLatest() : writer.flush())),
+      );
     },
   };
 }
@@ -46,5 +48,7 @@ function singleRoom(hub, id) {
     rooms: new Map([[id, null]]),
     exportRoom: (code) => hub.exportRoom(code),
     publishCheckpoint: (c) => hub.publishCheckpoint(c),
+    signingIdentity: (code) => hub.signingIdentity(code),
+    setSigningIdentity: (code, identity) => hub.setSigningIdentity(code, identity),
   };
 }

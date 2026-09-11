@@ -30,6 +30,15 @@ export interface RoomSigningIdentity {
   publicKey: JsonWebKey;
   privateKey: JsonWebKey;
 }
+export interface RoomHelloProof {
+  version: 1;
+  room: string;
+  nonce: string;
+  binding: string;
+  issuedAt: number;
+  authority: JsonWebKey;
+  signature: string;
+}
 const encode = new TextEncoder();
 const object = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
@@ -158,6 +167,94 @@ export async function createRoomSigningIdentity(): Promise<RoomSigningIdentity> 
     publicKey: await crypto.subtle.exportKey('jwk', keys.publicKey),
     privateKey: await crypto.subtle.exportKey('jwk', keys.privateKey),
   };
+}
+export async function signRoomHello(
+  room: string,
+  nonce: string,
+  binding: string,
+  identity: RoomSigningIdentity,
+): Promise<RoomHelloProof> {
+  const payload = {
+    version: 1 as const,
+    room,
+    nonce,
+    binding,
+    issuedAt: Date.now(),
+    authority: identity.publicKey,
+  };
+  const key = await crypto.subtle.importKey(
+    'jwk',
+    identity.privateKey,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign'],
+  );
+  const signature = bytes64(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        { name: 'ECDSA', hash: 'SHA-256' },
+        key,
+        encode.encode(canonical(payload)),
+      ),
+    ),
+  );
+  return { ...payload, signature };
+}
+export async function verifyRoomHello(
+  value: unknown,
+  nonce: string,
+  room: string,
+  binding: string,
+  pinned?: JsonWebKey,
+): Promise<boolean> {
+  try {
+    if (
+      !object(value) ||
+      !onlyKeys(value, [
+        'version',
+        'room',
+        'nonce',
+        'binding',
+        'issuedAt',
+        'authority',
+        'signature',
+      ]) ||
+      value.version !== 1 ||
+      typeof value.room !== 'string' ||
+      !/^[A-Z0-9]{4,16}$/.test(value.room) ||
+      typeof value.binding !== 'string' ||
+      value.binding.length > 200 ||
+      value.nonce !== nonce ||
+      value.room !== room ||
+      value.binding !== binding ||
+      !integer(value.issuedAt, 0, 8640000000000000) ||
+      !object(value.authority) ||
+      value.authority.d !== undefined ||
+      !onlyKeys(value.authority, ['key_ops', 'ext', 'kty', 'x', 'y', 'crv']) ||
+      value.authority.kty !== 'EC' ||
+      value.authority.crv !== 'P-256' ||
+      typeof value.signature !== 'string' ||
+      value.signature.length > 128
+    )
+      return false;
+    if (pinned && (value.authority.x !== pinned.x || value.authority.y !== pinned.y)) return false;
+    const { signature, ...payload } = value;
+    const key = await crypto.subtle.importKey(
+      'jwk',
+      value.authority,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['verify'],
+    );
+    return crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      key,
+      from64(signature),
+      encode.encode(canonical(payload)),
+    );
+  } catch {
+    return false;
+  }
 }
 export async function signRoomCheckpoint(
   state: RoomWorldCheckpoint,

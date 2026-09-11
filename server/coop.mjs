@@ -139,7 +139,7 @@ export function createCoopServer({
       clearInterval(timer);
       clearInterval(combatTimer);
       clearInterval(persistenceTimer);
-      if (disk) await disk.flush();
+      if (disk) await disk.flush(true);
       for (const client of websocket.clients) client.terminate();
       await new Promise((resolve) => websocket.close(resolve));
       if (http.listening) await new Promise((resolve) => http.close(resolve));
