@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import WebSocket from 'ws';
 import { createCoopServer } from '../server/coop.mjs';
 import { InfiniteWorld, appearance } from '../src/stichos/world.ts';
+import { MultiplayerConnection } from '../src/stichos/multiplayer.ts';
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const look = () => ({ ...appearance(42, 'pilgrim', 1), weapon: 'staff' });
@@ -340,4 +341,50 @@ test('HTTP store routing receives the exact raw request body before the shared s
   assert.equal(observed, raw);
   assert.equal((await (await fetch(`${http}/health`)).json()).protocol, 1);
   assert.equal((await fetch(`${http}/missing`)).status, 404);
+});
+
+test('the actual browser client preserves gather and loot actions when given full generated props', async (t) => {
+  const { server, url } = await serverFixture(t);
+  const client = new MultiplayerConnection();
+  t.after(() => client.disconnect());
+  await client.connect(url, {
+    seed: 3886,
+    generation: 3,
+    name: 'Client adapter regression',
+    appearance: { ...appearance(42, 'pilgrim', 1), weapon: 'staff' },
+    position: { x: -1, y: 5 },
+  });
+  const room = server.hub.rooms.get(client.room);
+  const frames: any[] = [];
+  [...server.hub.connections][0].socket.on('message', (data: Buffer) => {
+    const message = JSON.parse(data.toString());
+    if (message.type === 'claim') frames.push(message);
+  });
+  const plant = room.world.propsAround(-2, 5, 0).find((p: any) => p.id === 'origin:cequin');
+  assert.ok(plant);
+  assert.equal(plant.kind, 'cequin');
+  assert.equal((await client.claim(plant.id, 'gather', plant)).ok, true);
+  assert.ok(room.removed.has(plant.id));
+  const chest = room.world.propsAround(0, 0, 30).find((p: any) => p.kind === 'chest');
+  assert.ok(chest);
+  client.pose(
+    { ...adjacent(room.world, chest), heading: 0, phase: 0 },
+    appearance(42, 'pilgrim', 1),
+    true,
+  );
+  assert.equal((await client.claim(chest.id, 'loot', chest)).ok, true);
+  assert.ok(room.opened.has(chest.id));
+  assert.deepEqual(
+    frames.map((message) => message.kind),
+    ['gather', 'loot'],
+  );
+  for (const message of frames)
+    assert.deepEqual(Object.keys(message).sort(), [
+      'kind',
+      'propId',
+      'requestId',
+      'type',
+      'x',
+      'y',
+    ]);
 });
