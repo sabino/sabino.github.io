@@ -32,7 +32,13 @@ test('established priest owns real residence, finite savings and three physical 
   delete old.labor;
   const restored = Stichos.restore(old);
   assert.equal(restored.player.coins, 19);
-  assert.equal(restored.progression.homes.length, 0);
+  assert.equal(restored.progression.homes.length, 1);
+  assert.equal(restored.estate.residence?.id, THEO_ESTATE.residenceId);
+  const furnished: any = g.save();
+  delete furnished.labor;
+  furnished.progression.homes[0].furniture.rest = 'woven-cot';
+  assert.equal(Stichos.restore(furnished).estate.residence?.furniture.rest, 'woven-cot');
+  assert.equal(Stichos.restore(Stichos.restore(furnished).save()).progression.homes.length, 1);
   assert.equal(restored.tools.length, 3);
 });
 test('real resources require matching tools, separate timed strokes, stamina and wear; only final stroke grants and removes', () => {
@@ -126,6 +132,7 @@ test('worker completion preserves allocation and output on capacity failure or c
   assert.equal(g.carried, 0);
   for (const change of [
     (s: any) => (s.labor.orders[0].allocations[0].amount = 20),
+    (s: any) => (s.labor.orders[0].allocations[0].x = 1e308),
     (s: any) => (s.labor.tools[0].tools[0].durability = 1e8),
     (s: any) => (s.labor.tools[0].bodyId = 'unknown'),
   ]) {
@@ -135,4 +142,25 @@ test('worker completion preserves allocation and output on capacity failure or c
   }
   assert.equal(g.cancelLabor(order.id).ok, true);
   assert.equal(g.laborOrders[0].status, 'cancelled');
+});
+
+test('E continues an incomplete ore stroke even with a closer workbench, while explicit other interactions still win', () => {
+  const g = new Stichos(3886),
+    ore = g.world.propsAround(4, 5, 3).find((p) => p.kind === 'rock')!,
+    bench = g.world.propsAround(4, 5, 3).find((p) => p.kind === 'workbench')!;
+  assert.ok(ore && bench);
+  Object.assign(g.player, { x: 3.9, y: 5 });
+  g.equipTool('pickaxe');
+  assert.equal(g.nearby()?.id, bench.id);
+  g.interact(ore.id);
+  assert.equal(g.workProgress?.strokes, 1);
+  assert.equal(g.nearby()?.id, ore.id);
+  wait(g, 1.6);
+  g.interact();
+  assert.equal(g.workProgress?.strokes, 2);
+  assert.equal(g.dialogue, null);
+  g.interact(bench.id);
+  assert.ok(g.dialogue);
+  g.choose('close');
+  assert.equal(g.workProgress?.strokes, 2);
 });

@@ -1521,6 +1521,10 @@ export class Stichos {
     const props = this.world
       .propsAround(this.player.x, this.player.y, 2.2)
       .filter((p) => !this.removed.has(p.id) || p.kind === 'door');
+    const ongoing = this.workProgress;
+    const worked =
+      ongoing && props.find((p) => p.id === ongoing.propId && distance(p, this.player) <= 1.8);
+    if (worked) return worked;
     const npcs = this.npcs.filter((n) => n.hp > 0 && !n.hostile);
     return (
       [...props, ...npcs]
@@ -3798,7 +3802,17 @@ export class Stichos {
     const priestBodyId = `body:theo-priest:${data.seed}`;
     game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
     game.inventory = { ...data.inventory };
+    const establishedResidence = game.estate.residence;
     game.progression = restoreProgression(data.progression, data.seed);
+    // A legacy continuation gains the established address once, never money or
+    // replacements for furnished homes; the existing three-home cap still applies.
+    if (
+      !data.labor &&
+      establishedResidence &&
+      game.progression.homes.length < 3 &&
+      !game.progression.homes.some((home) => home.id === establishedResidence.id)
+    )
+      game.progression.homes.push(clone(establishedResidence));
     if (data.labor) {
       game.laborSerial = data.labor.serial;
       game.estateTrust = { ...data.labor.trust };
@@ -4416,6 +4430,7 @@ function validateSave(value: unknown): SaveData {
     );
     for (const order of orders)
       for (const a of order.allocations) {
+        if (!point(a)) return fail();
         const prop = world.propsAround(a.x, a.y, 1).find((p) => p.id === a.propId);
         if (!prop || prop.kind !== a.kind || prop.x !== a.x || prop.y !== a.y) return fail();
         const expected = ['pine', 'rock'].includes(prop.kind)
