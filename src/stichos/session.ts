@@ -9,6 +9,7 @@ import { deriveSeed } from '../procedural/random.ts';
 import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
 import { resolveForge, type ForgeRecipe, type ForgeResult } from './forge.ts';
+import { generateArtifact, normalizeArtifactDesign, type ArtifactGenome } from './artifacts.ts';
 import {
   createFreeLife,
   restoreFreeLife,
@@ -197,7 +198,8 @@ type Arrow = {
   vx: number;
   vy: number;
   damage: number;
-  enchantment: WeaponProfile['effect'];
+  enchantment?: WeaponProfile['effect'];
+  artifactBenefits?: ArtifactGenome['properties'];
 };
 type EnemyIntent = {
   remaining: number;
@@ -296,6 +298,8 @@ export class Stichos {
     propId?: string;
     failedAtRemovedSize?: number;
   } | null = null;
+  private inventionSerial = 0;
+  private artifactPacks = new Map<string, { designs: string[]; equipped: string | null }>();
   private forgedWeapons = new Map<
     string,
     Partial<Record<Weapon, { seed: number; ownerSeed: number; recipe: ForgeRecipe }>>
@@ -523,7 +527,162 @@ export class Stichos {
       base.weapon === 'none' ? undefined : this.forgedWeapons.get(bodyId)?.[base.weapon];
     if (forged) look.weaponSeed = forged.seed;
     else delete look.weaponSeed;
+    const artifact = this.artifactPacks.get(bodyId)?.equipped;
+    if (artifact) look.artifactDesign = artifact;
+    else delete look.artifactDesign;
     return look;
+  }
+  artifactDesign(index = 0) {
+    const offset = Number.isSafeInteger(index) && index >= 0 ? index : 0;
+    return `verso:${this.seed.toString(36)}:${(this.player.appearance.seed >>> 0).toString(36)}:${this.inventionSerial.toString(36)}:${offset.toString(36)}`;
+  }
+  get nextArtifactDesign() {
+    return this.artifactDesign();
+  }
+  get artifacts() {
+    const pack = this.artifactPacks.get(this.bodyId);
+    return (pack?.designs ?? []).map((design) => ({
+      design,
+      genome: generateArtifact(design),
+      equipped: pack?.equipped === design,
+    }));
+  }
+  get activeArtifact(): ArtifactGenome | null {
+    const design = this.artifactPacks.get(this.bodyId)?.equipped;
+    return design ? generateArtifact(design) : null;
+  }
+  artifactPreview(design: string): { ok: boolean; message: string; genome: ArtifactGenome | null } {
+    let genome: ArtifactGenome;
+    try {
+      genome = generateArtifact(normalizeArtifactDesign(design));
+    } catch {
+      return {
+        ok: false,
+        message: 'Enter a design of one to 64 characters without control characters.',
+        genome: null,
+      };
+    }
+    const result = (ok: boolean, message: string) => ({ ok, message, genome });
+    if (this.phase !== 'playing') return result(false, 'This body cannot work.');
+    if (this.inventionSerial >= Number.MAX_SAFE_INTEGER)
+      return result(false, 'This invention record is full.');
+    if (this.artifactPacks.get(this.bodyId)?.designs.includes(genome.design))
+      return result(false, 'This body already carries that exact design.');
+    if (professionProfile(this.progression, 'crafting').level < 2)
+      return result(false, 'Reach crafting level 2 through actual preparation and construction.');
+    if (!this.progressionContext().nearWorkbench)
+      return result(false, 'Work beside a field or home workbench.');
+    if (this.player.coins < genome.cost.coins || !this.has(genome.cost.items))
+      return result(false, 'This body needs the listed coins and raw materials.');
+    const spent = Object.values(genome.cost.items).reduce((sum, n) => sum + (n ?? 0), 0);
+    if (this.carried - spent + 1 > this.capacity)
+      return result(false, 'There is no room for the completed artifact.');
+    return result(true, `Create ${genome.name}. Its physical properties come from this design.`);
+  }
+  createArtifact(design: string) {
+    const preview = this.artifactPreview(design);
+    if (!preview.ok || !preview.genome) return preview;
+    const genome = preview.genome;
+    this.spend(genome.cost.items);
+    this.player.coins -= genome.cost.coins;
+    const pack = this.artifactPacks.get(this.bodyId) ?? { designs: [], equipped: null };
+    pack.designs.push(genome.design);
+    if (genome.category === 'implement') pack.equipped = genome.design;
+    this.artifactPacks.set(this.bodyId, pack);
+    this.inventionSerial++;
+    grantPractice(this.progression, 'crafting', 8);
+    this.syncFreeLife();
+    this.effect('harvest', this.player, genome.color);
+    const message = `Created ${genome.name}. It remains with this body.`;
+    this.event('harvest', message);
+    return { ok: true, message, genome };
+  }
+  equipArtifact(design: string) {
+    let genome: ArtifactGenome;
+    try {
+      genome = generateArtifact(normalizeArtifactDesign(design));
+    } catch {
+      return { ok: false, message: 'That design is invalid.', genome: null };
+    }
+    const pack = this.artifactPacks.get(this.bodyId);
+    if (
+      this.phase !== 'playing' ||
+      !pack?.designs.includes(genome.design) ||
+      genome.category !== 'implement'
+    )
+      return {
+        ok: false,
+        message: 'This body must carry an implement before equipping it.',
+        genome,
+      };
+    pack.equipped = genome.design;
+    this.event('dialogue', `Equipped ${genome.name}.`);
+    return { ok: true, message: `Equipped ${genome.name}.`, genome };
+  }
+  useArtifact(design: string) {
+    let genome: ArtifactGenome;
+    try {
+      genome = generateArtifact(normalizeArtifactDesign(design));
+    } catch {
+      return { ok: false, message: 'That design is invalid.', genome: null };
+    }
+    const pack = this.artifactPacks.get(this.bodyId),
+      p = this.player,
+      benefits = genome.properties;
+    if (
+      this.phase !== 'playing' ||
+      !pack?.designs.includes(genome.design) ||
+      genome.delivery !== 'consume'
+    )
+      return {
+        ok: false,
+        message: 'This body must carry a consumable artifact before using it.',
+        genome,
+      };
+    if (
+      !(
+        (benefits.healing > 0 && p.hp < p.maxHp) ||
+        (benefits.breath > 0 && p.breath < 100) ||
+        (benefits.warmth > 0 && p.warmth < 100)
+      )
+    )
+      return { ok: false, message: 'This body does not need its restorative effects yet.', genome };
+    this.artifactBenefits(benefits);
+    pack.designs = pack.designs.filter((value) => value !== genome.design);
+    if (!pack.designs.length) this.artifactPacks.delete(this.bodyId);
+    this.effect('heal', p, genome.color);
+    const message = `Used ${genome.name}; its vessel is spent.`;
+    this.event('heal', message);
+    return { ok: true, message, genome };
+  }
+  salvageArtifact(design: string) {
+    let genome: ArtifactGenome;
+    try {
+      genome = generateArtifact(normalizeArtifactDesign(design));
+    } catch {
+      return { ok: false, message: 'That design is invalid.', genome: null };
+    }
+    const pack = this.artifactPacks.get(this.bodyId);
+    if (this.phase !== 'playing' || !pack?.designs.includes(genome.design))
+      return { ok: false, message: 'This body must carry the artifact to salvage it.', genome };
+    const item: ItemId = genome.cost.items.ore ? 'ore' : 'wood';
+    pack.designs = pack.designs.filter((value) => value !== genome.design);
+    if (pack.equipped === genome.design) pack.equipped = null;
+    if (!pack.designs.length) this.artifactPacks.delete(this.bodyId);
+    this.inventory[item] = (this.inventory[item] ?? 0) + 1;
+    const message = `Salvaged ${genome.name} into one ${item}.`;
+    this.event('harvest', message);
+    return { ok: true, message, genome };
+  }
+  private artifactBenefits(properties: ArtifactGenome['properties']) {
+    this.player.hp = clamp(this.player.hp + properties.healing, 0, this.player.maxHp);
+    this.player.breath = clamp(this.player.breath + properties.breath);
+    this.player.warmth = clamp(this.player.warmth + properties.warmth);
+  }
+  private clearArtifact() {
+    const pack = this.artifactPacks.get(this.bodyId);
+    if (pack) pack.equipped = null;
+    delete this.player.appearance.artifactDesign;
   }
   weaponSeed(kind: Weapon) {
     return this.forgedWeapons.get(this.bodyId)?.[kind]?.seed ?? this.player.appearance.seed;
@@ -607,6 +766,7 @@ export class Stichos {
     this.forgedWeapons.set(this.bodyId, belongings);
     this.weapons.add(recipe.kind);
     this.player.appearance.weapon = recipe.kind;
+    this.clearArtifact();
     grantPractice(this.progression, 'crafting', 10);
     this.syncFreeLife();
     this.effect('harvest', this.player, made.profile.color, 1);
@@ -665,7 +825,7 @@ export class Stichos {
       bodyId: this.bodyId,
       position: this.player,
       time: this.time,
-      capacity: this.capacity,
+      capacity: this.capacity - (this.artifactPacks.get(this.bodyId)?.designs.length ?? 0),
       nearWorkbench:
         !!this.nearProp('workbench') ||
         !!(this.nearHome() && homeEffects(this.nearHome()!).hasWorkbench),
@@ -735,7 +895,10 @@ export class Stichos {
     return CAPACITY;
   }
   get carried() {
-    return Object.values(this.inventory).reduce((sum, n) => sum + (n ?? 0), 0);
+    return (
+      Object.values(this.inventory).reduce((sum, n) => sum + (n ?? 0), 0) +
+      (this.artifactPacks.get(this.bodyId)?.designs.length ?? 0)
+    );
   }
 
   weaponProfile(kind: Weapon): WeaponProfile {
@@ -1302,8 +1465,13 @@ export class Stichos {
       return { ok: false, reason: 'Already gathered.' };
     if (['chest', 'crate'].includes(prop.kind) && this.opened.has(prop.id))
       return { ok: false, reason: 'Already searched.' };
-    if (['pine', 'rock'].includes(prop.kind) && this.player.appearance.weapon !== 'staff')
-      return { ok: false, reason: 'Equip the staff to gather timber or ore.' };
+    if (
+      ['pine', 'rock'].includes(prop.kind) &&
+      (this.activeArtifact
+        ? this.activeArtifact.properties.harvest <= 0
+        : this.player.appearance.weapon !== 'staff')
+    )
+      return { ok: false, reason: 'Equip a staff or a gathering implement for timber and ore.' };
     const amount = ['chest', 'crate'].includes(prop.kind)
       ? prop.id.startsWith('vault:')
         ? 6
@@ -1311,7 +1479,7 @@ export class Stichos {
       : ['cequin', 'heartleaf', 'emberroot', 'mushroom'].includes(prop.kind)
         ? this.botanicalProfile(prop)!.yield
         : ['pine', 'rock'].includes(prop.kind)
-          ? 2
+          ? 2 + (this.activeArtifact?.properties.harvest ?? 0)
           : 0;
     if (
       prop.kind === 'door' &&
@@ -1796,18 +1964,29 @@ export class Stichos {
     if (this.world.generation === 1 || prop.id.startsWith('origin:'))
       return {
         ...profile,
-        yield: (prop.kind === 'cequin' ? 3 : 2) + skillBonuses(this.progression).harvestExtra,
+        yield:
+          (prop.kind === 'cequin' ? 3 : 2) +
+          skillBonuses(this.progression).harvestExtra +
+          (this.activeArtifact?.properties.harvest ?? 0),
         description: `${profile.description} Cultivated harvest.`,
       };
-    return { ...profile, yield: profile.yield + skillBonuses(this.progression).harvestExtra };
+    return {
+      ...profile,
+      yield:
+        profile.yield +
+        skillBonuses(this.progression).harvestExtra +
+        (this.activeArtifact?.properties.harvest ?? 0),
+    };
   }
 
   private harvest(prop: Prop) {
     if (
       (prop.kind === 'pine' || prop.kind === 'rock') &&
-      this.player.appearance.weapon !== 'staff'
+      (this.activeArtifact
+        ? this.activeArtifact.properties.harvest <= 0
+        : this.player.appearance.weapon !== 'staff')
     ) {
-      this.event('dialogue', 'Equip the staff to gather timber or ore.');
+      this.event('dialogue', 'Equip a staff or a gathering implement for timber and ore.');
       return;
     }
     const item: ItemId =
@@ -1819,7 +1998,9 @@ export class Stichos {
             ? 'rations'
             : (prop.kind as ItemId);
     const botanical = this.botanicalProfile(prop);
-    const amount = botanical?.yield ?? (item === 'cequin' ? 3 : 2);
+    const amount =
+      botanical?.yield ??
+      (item === 'cequin' ? 3 : 2) + (this.activeArtifact?.properties.harvest ?? 0);
     if (!this.gain({ [item]: amount })) return;
     this.removed.add(prop.id);
     if (botanical) grantPractice(this.progression, 'botany', 3);
@@ -2517,6 +2698,11 @@ export class Stichos {
     if (this.phase !== 'playing' || this.dialogue || p.attackCooldown > 0 || p.stamina < 8) return;
     if (target && finite(target.x) && finite(target.y) && distance(target, p) > 0.01)
       p.heading = Math.atan2(target.y - p.y, target.x - p.x);
+    const artifact = this.activeArtifact;
+    if (artifact) {
+      this.attackArtifact(artifact);
+      return;
+    }
     const weapon = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon;
     const profile = this.weaponProfile(weapon);
     p.stamina -= 8;
@@ -2542,6 +2728,40 @@ export class Stichos {
     );
     candidates.sort((a, b) => distance(a, p) - distance(b, p));
     if (candidates[0]) this.damageNpc(candidates[0], profile.damage, profile.effect);
+  }
+
+  private attackArtifact(genome: ArtifactGenome) {
+    const p = this.player,
+      properties = genome.properties;
+    p.stamina -= 8;
+    p.attackCooldown = properties.cooldown;
+    this.event('attack');
+    if (genome.delivery === 'projectile') {
+      const effect = this.effect('arrow', p, genome.color, properties.range / 9, p.heading);
+      this.arrows.push({
+        owner: 'player',
+        effect,
+        vx: Math.cos(p.heading) * 9,
+        vy: Math.sin(p.heading) * 9,
+        damage: properties.damage,
+        artifactBenefits: properties,
+      });
+      return;
+    }
+    const pulse = genome.delivery === 'pulse';
+    this.effect(pulse ? 'ward' : 'slash', p, genome.color, pulse ? 0.6 : 0.22, p.heading);
+    const candidates = this.npcs
+      .filter(
+        (n) =>
+          n.hp > 0 &&
+          distance(n, p) <= properties.range &&
+          (pulse ? n.hostile : this.inCone(n, p.heading)) &&
+          this.lineOfSight(p, n),
+      )
+      .sort((a, b) => distance(a, p) - distance(b, p));
+    const targets = pulse ? candidates : candidates.slice(0, 1);
+    for (const target of targets) this.damageNpc(target, properties.damage);
+    if (targets.length) this.artifactBenefits(properties);
   }
 
   ward() {
@@ -2593,6 +2813,7 @@ export class Stichos {
         const hit = this.npcs.find((n) => n.hp > 0 && distance(n, arrow.effect) < 0.4);
         if (hit) {
           this.damageNpc(hit, arrow.damage, arrow.enchantment);
+          if (arrow.artifactBenefits) this.artifactBenefits(arrow.artifactBenefits);
           arrow.effect.age = arrow.effect.duration;
           break;
         }
@@ -2736,6 +2957,7 @@ export class Stichos {
       return;
     }
     this.player.appearance.weapon = weapon;
+    this.clearArtifact();
     this.event('dialogue', `Equipped ${weapon}.`);
   }
 
@@ -2812,6 +3034,7 @@ export class Stichos {
         heading: this.player.heading,
         appearance: {
           ...clone(this.player.appearance),
+          ...(this.activeArtifact ? { artifactDesign: this.activeArtifact.design } : {}),
           ...(this.player.appearance.weapon !== 'none' &&
           this.forgedWeapons.get(this.bodyId)?.[this.player.appearance.weapon]
             ? { weaponSeed: this.weaponSeed(this.player.appearance.weapon) }
@@ -2850,6 +3073,7 @@ export class Stichos {
       this.player.clan = target.clan;
       this.player.appearance = clone(target.appearance);
       delete this.player.appearance.weaponSeed;
+      delete this.player.appearance.artifactDesign;
       this.player.appearance.weapon = belongings.equipped;
       this.player.cequinTime = 0;
       this.player.maxHp = target.maxHp;
@@ -3151,6 +3375,12 @@ export class Stichos {
       campaign: this.campaignState,
       progression: this.progression,
       freeLife: this.freeLifeState,
+      inventionSerial: this.inventionSerial,
+      artifactPacks: [...this.artifactPacks].map(([bodyId, pack]) => ({
+        bodyId,
+        designs: [...pack.designs],
+        equipped: pack.equipped,
+      })),
       forgedWeapons: [...this.forgedWeapons].flatMap(([bodyId, weapons]) =>
         Object.entries(weapons).map(([kind, record]) => ({ bodyId, kind, ...record })),
       ),
@@ -3186,6 +3416,13 @@ export class Stichos {
     game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
     game.inventory = { ...data.inventory };
     game.progression = restoreProgression(data.progression, data.seed);
+    game.inventionSerial = data.inventionSerial ?? 0;
+    game.artifactPacks = new Map(
+      (data.artifactPacks ?? []).map((pack) => [
+        pack.bodyId,
+        { designs: [...pack.designs], equipped: pack.equipped },
+      ]),
+    );
     for (const record of data.forgedWeapons ?? []) {
       const owned = game.forgedWeapons.get(record.bodyId) ?? {};
       owned[record.kind as Weapon] = {
@@ -3396,6 +3633,13 @@ function validateSave(value: unknown): SaveData {
     number(v.y, Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
   const strings = (v: unknown) =>
     Array.isArray(v) && v.every((x) => text(x, 160)) && new Set(v).size === v.length;
+  const validArtifactDesign = (v: unknown) => {
+    try {
+      return normalizeArtifactDesign(v) === v;
+    } catch {
+      return false;
+    }
+  };
   const look = (v: unknown) =>
     object(v) &&
     number(v.seed, -0xffffffff, 0xffffffff, true) &&
@@ -3406,6 +3650,7 @@ function validateSave(value: unknown): SaveData {
     ['hairStyle', 'hat'].every((k) => number(v[k], 0, 100, true)) &&
     typeof v.cloak === 'boolean' &&
     (v.weaponSeed === undefined || number(v.weaponSeed, 0, 0xffffffff, true)) &&
+    (v.artifactDesign === undefined || validArtifactDesign(v.artifactDesign)) &&
     ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
   if (!object(value) || value.version !== 1 || !number(value.seed, 0, 0xffffffff, true))
     return fail();
@@ -3674,6 +3919,62 @@ function validateSave(value: unknown): SaveData {
       )
     )
       return fail();
+  }
+  if (
+    value.inventionSerial !== undefined &&
+    !number(value.inventionSerial, 0, Number.MAX_SAFE_INTEGER, true)
+  )
+    return fail();
+  if (value.artifactPacks !== undefined) {
+    if (
+      !Array.isArray(value.artifactPacks) ||
+      value.artifactPacks.length > (value.npcs as Npc[]).length + 1
+    )
+      return fail();
+    const owners = new Set<string>();
+    for (const pack of value.artifactPacks) {
+      if (
+        !object(pack) ||
+        Object.keys(pack).some((key) => !['bodyId', 'designs', 'equipped'].includes(key)) ||
+        !text(pack.bodyId, 160) ||
+        owners.has(pack.bodyId as string) ||
+        !Array.isArray(pack.designs) ||
+        pack.designs.length < 1 ||
+        pack.designs.length > CAPACITY ||
+        new Set(pack.designs).size !== pack.designs.length
+      )
+        return fail();
+      owners.add(pack.bodyId as string);
+      const belongings =
+        pack.bodyId === currentBodyId
+          ? { inventory: value.inventory }
+          : (value.bodyPossessions as BodyPossessions[] | undefined)?.find(
+              (body) => body.npcId === pack.bodyId,
+            );
+      if (
+        !belongings ||
+        Object.values(belongings.inventory).reduce<number>((sum, n) => sum + (n as number), 0) +
+          pack.designs.length >
+          CAPACITY
+      )
+        return fail();
+      for (const design of pack.designs) {
+        if (typeof design !== 'string') return fail();
+        try {
+          if (normalizeArtifactDesign(design) !== design) return fail();
+          generateArtifact(design);
+        } catch {
+          return fail();
+        }
+      }
+      if (
+        pack.equipped !== null &&
+        (typeof pack.equipped !== 'string' ||
+          !pack.designs.includes(pack.equipped) ||
+          generateArtifact(pack.equipped).category !== 'implement')
+      )
+        return fail();
+    }
   }
   if (value.forgedWeapons !== undefined) {
     if (!Array.isArray(value.forgedWeapons) || value.forgedWeapons.length > 768) return fail();
