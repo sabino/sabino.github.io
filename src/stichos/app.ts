@@ -1210,7 +1210,7 @@ function updatePack() {
   if (selectedItem) {
     const item = ITEMS[selectedItem];
     el('s-item-detail').innerHTML =
-      `<strong>${esc(game.itemName(selectedItem))}</strong><p>${esc(item.description)}</p>${['cequin', 'salve', 'tonic', 'rations', 'bandage'].includes(selectedItem) ? `<button data-use="${selectedItem}">Use ${esc(item.name.toLowerCase())}</button>` : ''}`;
+      `<strong>${esc(game.itemName(selectedItem))}</strong><p>${esc(item.description)}</p>${['cequin', 'salve', 'tonic', 'rations', 'bandage'].includes(selectedItem) ? `<button data-use="${selectedItem}">Use ${esc(game.itemName(selectedItem).toLowerCase())}</button>` : ''}`;
   }
 }
 let tradeTab: 'buy' | 'sell' = 'buy';

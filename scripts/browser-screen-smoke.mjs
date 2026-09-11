@@ -15,12 +15,9 @@ if (
 )
   throw Error('Use the verified workspace endpoint and the local or published Verso frontend.');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, '.dream-loop/screen-fix-fixtures');
+const out = path.join(root, '.dream-loop/screen-smoke');
 fs.mkdirSync(out, { recursive: true });
-const observations =
-  process.argv.includes('--extra') || process.argv.includes('--changed-only')
-    ? JSON.parse(fs.readFileSync(path.join(out, 'observations.json'), 'utf8')).observations
-    : [];
+const observations = [];
 const started = new Date(),
   results = [],
   errors = [],
@@ -253,272 +250,67 @@ async function select(c, selector, index) {
   for (let i = 0; i < index; i++) await c.key('ArrowDown', 'ArrowDown', 40);
   await c.key('Enter', 'Enter', 13);
 }
-async function startTheo(c) {
-  await c.fill('#s-seed-input', '3886');
-  await c.click('#v-theo-story');
-  await c.wait('window.stichos.state.transfer', 'intro');
-  await capture(c, 'intro-01');
-  const pages = await c.read(`document.querySelector('#s-intro-page').textContent`);
-  const count = Number(pages.match(/\/\s*(\d+)/)?.[1] || 6);
-  for (let i = 1; i < count; i++) {
-    await c.click('#s-intro-next');
-    await delay(130);
-    await capture(c, 'intro-' + String(i + 1).padStart(2, '0'));
-  }
-  await c.click('#s-skip');
-  await delay(450);
-  await capture(c, 'world');
-}
-async function mainScreens(c) {
-  await capture(c, 'title');
-  await c.click('#v-title-galaxy');
-  await capture(c, 'galaxy-unvisited');
-  await c.click('#v-sector-next');
-  await capture(c, 'galaxy-sector');
-  await c.click('#v-galaxy-close');
-  await c.fill('#s-seed-input', '3886');
+async function smoke(c) {
+  await c.fill('#s-seed-input', '8');
   await c.click('#s-start button[type=submit]');
   await c.wait("window.stichos.state.modal==='creation'", 'creator');
-  await capture(c, 'creator');
-  await bottom(c, 'creator-bottom');
-  await c.click('#v-reroll');
-  await capture(c, 'creator-rerolled');
-  await c.click('#v-create-back');
-  await startTheo(c);
-  await c.click('#s-pause');
-  await capture(c, 'pause');
-  await c.click('#v-ai');
-  await capture(c, 'ai');
-  await c.fill('#v-ai-code', 'audit');
-  await c.click('#v-ai-pair button');
-  await delay(500);
-  await capture(c, 'ai-unavailable');
-  await c.click('#v-ai-close');
-  await c.click('#s-pause');
-  await c.click('#v-retire');
-  await capture(c, 'retire');
-  await c.click('#v-retire-confirm');
-  await capture(c, 'retire-creator');
-  await c.click('#v-create-back');
-  await c.click('#v-pause-resume');
-  await c.click('#s-pause');
-  await c.click('#s-pause-help');
-  await capture(c, 'controls');
-  await bottom(c, 'controls-bottom');
-  await c.click('#s-help-return');
-  await c.click('#v-chat-toggle');
-  await capture(c, 'chat-toggled');
-  await c.click('#v-chat-settings');
-  await capture(c, 'shortcuts');
-  await c.click('#v-shortcuts-close');
-  await c.key('k', 'KeyK', 75);
-  await capture(c, 'gear');
-  await bottom(c, 'gear-bottom');
-  await c.click('#s-gear-return');
-  await c.click('#s-life');
-  for (const tab of [
-    'purpose',
-    'compact',
-    'skills',
-    'forge',
-    'discover',
-    'estate',
-    'homes',
-    'wardrobe',
-    'store',
-  ]) {
-    await c.click(`[data-life-tab="${tab}"]`);
-    await delay(tab === 'store' ? 450 : 100);
-    await capture(c, 'life-' + tab);
-    await bottom(c, 'life-' + tab + '-bottom');
-    if (tab === 'forge') {
-      await select(c, '#s-forge-kind', 1);
-      await capture(c, 'forge-sword');
-      await select(c, '#s-forge-kind', 2);
-      await capture(c, 'forge-bow');
-    }
-    if (tab === 'discover') {
-      await c.click('.s-invention-parts summary');
-      await capture(c, 'invention-parts');
-      await bottom(c, 'invention-parts-bottom');
-      await c.click('#s-invention-next');
-      await capture(c, 'invention-next');
-    }
-  }
-  await c.click('#s-life-return');
-  await c.click('#v-work');
-  await capture(c, 'work-empty');
-  await bottom(c, 'work-empty-bottom');
-  await c.click('#v-work-close');
-  await c.key('m', 'KeyM', 77);
-  await capture(c, 'atlas');
-  await bottom(c, 'atlas-bottom');
-  await c.click('#s-atlas-plus');
-  await capture(c, 'atlas-zoom');
-  await c.click('#s-map-return');
-  await c.click('#v-galaxy');
-  await capture(c, 'galaxy-known');
-  await bottom(c, 'galaxy-known-bottom');
-  await c.click('#v-galaxy-close');
-  await c.key('j', 'KeyJ', 74);
-  await capture(c, 'notebook-cover');
-  await c.click('#s-notebook-open');
-  await delay(450);
-  for (const section of ['years', 'botany', 'glossary', 'threads']) {
-    await c.click(`[data-notebook-section="${section}"]`);
-    await capture(c, 'notebook-' + section);
-    await bottom(c, 'notebook-' + section + '-bottom');
-    if (section === 'years' || section === 'botany') {
-      const leaves = await c.read(`document.querySelectorAll('#s-notebook-select option').length`);
-      for (let i = 1; i < leaves; i++) {
-        await c.click('#s-leaf-next');
-        await capture(c, `notebook-${section}-leaf-${i + 1}`);
-      }
-    }
-    if (section === 'glossary') {
-      await c.fill('#s-glossary-search', 'zznotaword');
-      await capture(c, 'glossary-empty');
-      await c.fill('#s-glossary-search', 'cequin');
-      await capture(c, 'glossary-match');
-    }
-  }
-  await c.click('#s-notebook-type');
-  await capture(c, 'notebook-plain');
-  await c.click('#s-journal-return');
-  await delay(350);
-  await capture(c, 'notebook-closed');
-  await c.click('#s-journal-return');
-  await c.key('i', 'KeyI', 73);
-  await capture(c, 'satchel');
-  await c.click('#s-tab-craft');
-  await capture(c, 'prepare');
-  await c.click('#s-tab-pack');
-  await c.click('[data-item="cequin"]');
-  await capture(c, 'item-detail');
-  if (c.mobile) await c.click('#s-mobile-pack');
-  await c.click('#s-together');
-  await capture(c, 'room-offline');
-  await c.click('.v-room-mode summary');
-  await capture(c, 'room-options');
-  await select(c, '#s-room-mode', 1);
-  await capture(c, 'room-dedicated');
-  await select(c, '#s-room-mode', 0);
-  await c.fill('#s-room-name', c.name + ' audit');
-  await c.click('#s-room-form button[type=submit]');
-  await c.wait("window.stichos.state.multiplayer.status==='online'", 'hostroom', 30000);
-  await capture(c, 'room-host');
-  await bottom(c, 'room-host-bottom');
-  await c.click('#s-room-leave');
-  await capture(c, 'room-saved');
-  await c.click('#s-room-return');
-  await capture(c, 'world-final');
-}
-
-async function fixture(c, name, screen) {
-  if (!(await c.read(`document.querySelector('#review-fixtures details').open`)))
-    await c.click('#review-fixtures summary');
-  const n = await c.read(
-    `[...document.querySelector('#review-fixture').options].findIndex(o=>o.value===${JSON.stringify(name)})`,
-  );
-  const k = await c.read(
-    `[...document.querySelector('#review-screen').options].findIndex(o=>o.value===${JSON.stringify(screen)})`,
-  );
-  if (n < 0 || k < 0) throw Error('Unknown fixture');
-  await select(c, '#review-fixture', n);
-  await select(c, '#review-screen', k);
-  await c.click('#review-load');
-  await delay(300);
-  const status = await c.read(`document.querySelector('#review-status').textContent`);
-  if (status.startsWith('Error')) {
-    console.log('UNAVAILABLE ' + name + '/' + screen + ' ' + status);
-    return false;
-  }
-  return true;
-}
-async function fixtures(c) {
-  for (const [name, screen] of [
-    ['fresh', 'botanist'],
-    ['fresh', 'engineer'],
-    ['fresh', 'merchant'],
-    ['fresh', 'archivist'],
-    ['fresh', 'refugee'],
-    ['fresh', 'guard'],
-    ['fresh', 'radio'],
-    ['fresh', 'workbench'],
-    ['fresh', 'notice'],
-    ['fresh', 'shrine'],
-    ['before-first-encounter', 'objective'],
-    ['before-final-puzzle', 'objective'],
-    ['before-ending', 'objective'],
-    ['campaign-complete', 'ending'],
-    ['campaign-complete', 'life'],
-    ['free-life-home', 'homes'],
-    ['campaign-complete', 'shrine'],
-    ['fresh', 'clinic-loss'],
-    ['campaign-complete', 'signal-loss'],
-    ['campaign-complete', 'journal-remembered'],
-    ['production-idle', 'work'],
-    ['production-working', 'work'],
-    ['production-ready', 'work'],
-    ['production-blocked', 'work'],
-    ['compact-work', 'compact'],
-    ['compact-delivery', 'compact'],
-    ['compact-complete', 'compact'],
-  ]) {
-    if (process.argv.includes('--changed-only') && screen !== 'merchant' && screen !== 'work')
-      continue;
-    if (
-      process.argv.includes('--extra') &&
-      !['archivist', 'homes', 'journal-remembered'].includes(screen) &&
-      name !== 'production-idle'
-    )
-      continue;
-    if (!(await fixture(c, name, screen))) continue;
-    await capture(c, `${name}-${screen}`, 'Visual-only fixture loaded via explicit review UI.');
-    if (await c.read(`!document.querySelector('#s-modal').hidden`))
-      await bottom(c, `${name}-${screen}-bottom`);
-    if (screen === 'merchant') {
-      for (const kind of ['staff', 'sword', 'bow']) {
-        await c.click(`[data-trade-select="weapon:${kind}"]`);
-        await capture(c, `merchant-${kind}-construction`);
-      }
-      await c.click('[data-trade-select="buy:cequin"]');
-      await capture(c, 'merchant-item-quantity');
-      await c.click('[data-trade-tab="sell"]');
-      await capture(c, 'merchant-sell');
-    }
-    if (name === 'before-ending' && screen === 'objective') {
-      await c.click('[data-choice="campaign:stay"]');
-      await c.wait(`window.stichos.state.modal==='ending'`, 'stay ending');
-      await capture(c, 'ending-stay');
-    }
-    if (name === 'free-life-home' && screen === 'homes') {
-      const usable = await c.read(
-        `document.querySelector('[data-plant-plot="0"]')?.disabled===false`,
+  await c.click('#v-accept-life');
+  await c.wait('window.stichos.state.transfer', 'arrival');
+  await c.click('#s-skip');
+  await c.wait('!window.stichos.state.transfer', 'arrived');
+  if (!c.mobile) {
+    for (const [width, height] of [
+      [1440, 960],
+      [1366, 768],
+    ]) {
+      await c.page.send('Emulation.setDeviceMetricsOverride', {
+        width,
+        height,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+      await capture(c, `hud-${width}`);
+      const geometry = await c.read(
+        '(()=>{const p=document.querySelector("#s-portrait").getBoundingClientRect(),h=document.querySelector(".s-meter.health label").getBoundingClientRect(),s=document.querySelector(".s-sidebar"),f=document.querySelector(".s-side-footer").getBoundingClientRect();return{portrait:p.bottom,health:h.top,scroll:s.scrollHeight,height:s.clientHeight,footer:f.bottom,vh:innerHeight};})()',
       );
-      if (usable) {
-        await c.click('[data-plant-plot="0"]');
-        await capture(c, 'home-growing');
-        for (let i = 0; i < 5; i++) await c.click('#s-home-rest');
-        await capture(c, 'home-ready');
-      }
+      assert(geometry.portrait <= geometry.health, 'portrait clears health label');
+      assert(geometry.scroll <= geometry.height + 1, 'sidebar fits');
+      assert(geometry.footer <= geometry.vh, 'footer visible');
     }
-    if (screen === 'compact') {
-      const outcomes = await c.read(`!!document.querySelector('.s-compact-outcomes summary')`);
-      if (outcomes) {
-        await c.click('.s-compact-outcomes summary');
-        await capture(c, `${name}-outcomes`);
-        await bottom(c, `${name}-outcomes-bottom`);
-      }
+  } else {
+    await c.key('j', 'KeyJ', 74);
+    await c.click('#s-notebook-open');
+    await delay(450);
+    await capture(c, 'book-years-controls');
+    const controls = await c.read(
+      '(()=>{return[...document.querySelectorAll(".s-notebook button")].filter(b=>b.getClientRects().length).map(b=>{const r=b.getBoundingClientRect();return{id:b.id,x:r.x,right:r.right,y:r.y,bottom:r.bottom,w:innerWidth,h:innerHeight}})})()',
+    );
+    for (const control of controls) {
+      assert(control.x >= 0 && control.right <= control.w, control.id + ' horizontally visible');
+      assert(control.y >= 0 && control.bottom <= control.h, control.id + ' vertically visible');
     }
+    await c.click('#s-notebook-type');
+    assert(
+      await c.read('!!document.querySelector(".s-notebook.plain-type")'),
+      'plain type selected',
+    );
+    await capture(c, 'book-plain-controls');
+    await c.click('#s-notebook-type');
+    await c.click('#s-journal-return');
+    await delay(450);
+    assert(
+      await c.read('!!document.querySelector(".s-notebook.is-shut")'),
+      'physical cover closed',
+    );
+    await capture(c, 'book-closed');
   }
 }
 try {
   const version = await (await fetch(`${endpoint}/json/version`)).json();
   browser = await connect(version.webSocketDebuggerUrl);
   for (const mobile of [false, true]) {
-    const c = await traveler(mobile ? 'fixture-mobile' : 'fixture-desktop', url, mobile);
-    await fixtures(c);
+    const c = await traveler(mobile ? 'mobile' : 'desktop', url, mobile);
+    await smoke(c);
   }
 } catch (error) {
   failure = String(error.stack || error);
