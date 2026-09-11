@@ -30,7 +30,7 @@ The first sequence is a memory of the failed transmission. Play resumes in **388
 - **Gather and prepare:** cequin supports breathing, heartleaf becomes medicine, emberroot restores warmth. Timber and conductive ore supply equipment and radio repairs. Gathering changes the actual world, and harvested objects stay removed when you leave and return.
 - **Talk and decide:** botanists offer local supply work; a merchant buys supplies and sells provisions and weapons; the archivist and engineer advance the Sallas investigation. The opening cequin choice changes clan trust and consumes the same scarce bundle either way.
 - **Fight and recover:** aim a staff, sword, or bow at an attacker, use a botanical ward, consume medicine, or rest at a bench or shrine. Weapon material, name, strength, reach, recovery, and successful-hit effects are seeded. Attacking residents has consequences.
-- **Inhabit another person:** after restoring the mind signal, concentrate at a shrine. The candidate is an existing living human with a name, location, appearance, and clan. Your consciousness moves into that body; the previous body remains in the world. The occupied character is not duplicated. Your investigation and the world's changes persist.
+- **Inhabit another person:** after restoring the mind signal, concentrate at a shrine. The candidate is an existing living human with a name, location, appearance, and clan. Your consciousness moves into that body; the previous body remains in the world. The occupied character is not duplicated. Each body keeps its own supplies, coins, and weapons; returning restores what you left with that person. Your knowledge, experience, investigation, and the world's changes follow your mind.
 
 <details>
 <summary>Opening investigation hints</summary>
@@ -57,11 +57,12 @@ A repaired signal allows voluntary mind travel at a shrine. It opens a way to co
 | Q / 2                    | Botanical ward                                     |
 | 3 / 4 / 5 / 6            | Cequin / salve / warming tonic / food              |
 | I / B                    | Satchel / preparation recipes                      |
+| K                        | Inspect this body’s generated equipment            |
 | J / M                    | Journal / map                                      |
 | Escape                   | Close conversation, close a panel, or pause        |
 | Mouse wheel              | Zoom                                               |
 
-Touch controls provide movement, interaction, attacks, medicine, and the satchel. Desktop equipment buttons select weapons you own; buy additional types from a merchant. The journal records quest details and clan trust. Click an inventory item to read what it does. Lens preparation requires a workbench; botanical preparations can be made while traveling.
+Touch controls provide movement, interaction, attacks, medicine, and the satchel. Desktop equipment buttons select weapons you own; buy additional types from a merchant. The journal records quest details and clan trust. Choose **Follow this thread** to track an active task in the sidebar and on the map. Click an inventory item to read what it does. Lens preparation requires a workbench; botanical preparations can be made while traveling.
 
 ## Saving and offline use
 
@@ -77,7 +78,7 @@ Storage belongs to a browser and origin: different ports, `localhost`, and `127.
 
 `src/stichos/session.ts` owns gameplay, persistent world changes, inventory, trade, quests, clan trust, combat, and body occupancy. Untouched NPCs have a bounded runtime cache; meaningful changes remain in saved state. The browser UI and narrative transition live in `app.ts`; `audio.ts` synthesizes ambience, breath, radio interference, heartbeat, and transfer sounds.
 
-Read [story canon and adaptation decisions](docs/stichos/CANON.md), [visual direction](docs/stichos/VISUALS.md), and [browser QA](docs/stichos/QA.md).
+Read the [generation references supplied by Sabino](docs/stichos/REFERENCES.md), [story canon and adaptation decisions](docs/stichos/CANON.md), [visual direction](docs/stichos/VISUALS.md), and [browser QA](docs/stichos/QA.md).
 
 ## Verification
 
@@ -95,7 +96,7 @@ The browser harness uses actual input in an isolated Agent Workspace Chromium an
 node scripts/browser-stichos-check.mjs http://127.0.0.1:CDP_PORT http://localhost:4174/
 ```
 
-The QA report distinguishes what was verified in the browser from simulation tests. Physical gamepads are not currently integrated into Stíchos. This is an expanding playable foundation, with an opening investigation and repeatable local work; the full Sallas story, large-scale war simulation, multiplayer, and richer long-term quest generation are not finished.
+The QA report distinguishes what was verified in the browser from simulation tests. Save download/import, invalid-file preservation, and service-worker offline reload and play are also exercised by `scripts/browser-stichos-storage.mjs`. Physical gamepads are not currently integrated into Stíchos. This is an expanding playable foundation, with an opening investigation and repeatable local work; the full Sallas story, large-scale war simulation, multiplayer, and richer long-term quest generation are not finished.
 
 ## Earlier work
 

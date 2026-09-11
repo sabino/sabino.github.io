@@ -21,3 +21,5 @@ The continuous world contains humanoid inhabitants and cold botanical settlement
 The game's present-day waking scene is not the first arrival on Stíchos. Theo has already spent twenty local years in the priest's body. Regaining a signal is progress toward understanding the transmission, not a claim that the entire Sallas mystery has been solved.
 
 World layout, settlement details, local people, resources, and encounters vary with the seed. The author's narrative anchors remain coherent across seeds. The user explicitly prioritized humanoids for this iteration; the previous arbitrary-species experiment remains a separate reference implementation.
+
+Physical belongings stay with each inhabited body. The traveler's experience, memories, promises, and discoveries survive a transfer. The first time a generated resident is inhabited, their role and seed supply finite possessions; returning to them restores their actual remaining belongings. Clinic recovery treats the same body and is shown differently from entering another person.

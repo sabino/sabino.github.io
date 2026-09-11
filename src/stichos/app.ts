@@ -1,7 +1,9 @@
 import './style.css';
 import { Stichos, ITEMS, RECIPES } from './session';
 import { StichosRenderer } from './render';
-import { drawHumanoid } from './art';
+import { drawPortrait } from './portrait';
+import { weaponIcon } from './equipment';
+import type { WeaponKind } from './equipment';
 import { itemIcon } from './icons';
 import { parseSeed, formatSeed } from '../seed';
 import { AudioDirector } from '../audio';
@@ -13,12 +15,12 @@ const root = document.getElementById('app')!;
 root.innerHTML = `<main class="s-shell">
  <header class="s-header"><a class="s-brand" href="?">VERSO<span>Destino: Stíchos</span></a><div class="s-location"><strong id="s-place">The cathedral quarter</strong><span id="s-coordinates">Stíchos · 3886</span></div><nav><button id="s-sound" title="Sound">♫</button><button id="s-journal" title="Journal (J)">Journal <kbd>J</kbd></button><button id="s-pause" aria-label="Pause">Ⅱ</button></nav></header>
  <section class="s-world-wrap"><canvas id="s-world" tabindex="0" aria-label="The continuous world of Stíchos. WASD or click to walk. E to interact."></canvas><div class="s-weather"><i></i><span id="s-weather">A cold morning</span></div><div class="s-mobile-status"><span>♥ <b id="s-mobile-hp"></b><i><em id="s-mobile-hp-bar"></em></i></span><span>Breath <b id="s-mobile-breath"></b><i><em id="s-mobile-breath-bar"></em></i></span></div><div class="s-compass">N<span>◇</span></div><div id="s-hover" class="s-hover" hidden></div><button id="s-context" class="s-context" hidden></button><div id="s-toast" class="s-toast" role="status" aria-live="polite"></div><div class="s-world-caption">The road disappears into snow.</div></section>
- <aside class="s-sidebar"><section class="s-person"><div class="s-person-heading"><canvas id="s-portrait" width="64" height="72" aria-label="Your current human host"></canvas><div><small id="s-body-label">A borrowed life</small><h1 id="s-person-name">Theo Bishop</h1></div><strong id="s-level">1</strong></div><div class="s-meter health"><label>Vitality <b id="s-hp-label"></b></label><div><i id="s-hp"></i></div></div><div class="s-meter breath"><label>Breath <b id="s-breath-label"></b></label><div><i id="s-breath"></i></div></div><div class="s-person-minor"><span id="s-warmth"></span><span id="s-stamina"></span></div><div class="s-xp"><i id="s-xp"></i></div></section>
+ <aside class="s-sidebar"><section class="s-person"><div class="s-person-heading"><canvas id="s-portrait" width="96" height="112" aria-label="Your current human host"></canvas><div><small id="s-body-label">A borrowed life</small><h1 id="s-person-name">Theo Bishop</h1></div><strong id="s-level">1</strong></div><div class="s-meter health"><label>Vitality <b id="s-hp-label"></b></label><div><i id="s-hp"></i></div></div><div class="s-meter breath"><label>Breath <b id="s-breath-label"></b></label><div><i id="s-breath"></i></div></div><div class="s-person-minor"><span id="s-warmth"></span><span id="s-stamina"></span></div><div class="s-xp"><i id="s-xp"></i></div></section>
  <section class="s-map-block"><canvas id="s-map" width="240" height="150" aria-label="Map around your current position"></canvas><div><span id="s-map-label">Cathedral district</span><button id="s-expand-map" title="Map (M)">⤢</button></div></section>
- <section class="s-task"><small>Following a thread</small><h2 id="s-quest-title"></h2><p id="s-quest-objective"></p><button id="s-track">Read journal</button></section>
+ <section class="s-task"><small>Following a thread</small><h2 id="s-quest-title"></h2><p id="s-quest-objective"></p><span id="s-quest-distance"></span><button id="s-track">Read journal</button></section>
  <section class="s-pack"><div class="s-pack-heading"><h2>Your satchel</h2><span id="s-coins"></span></div><div class="s-tabs" role="tablist" aria-label="Satchel view"><button id="s-tab-pack" role="tab" aria-selected="true">Belongings</button><button id="s-tab-craft" role="tab" aria-selected="false">Prepare</button></div><div id="s-pack-content"></div><div id="s-item-detail" class="s-item-detail">Select an item to examine it.</div></section>
  <footer class="s-side-footer"><span id="s-distance">0 paces traveled</span><button id="s-help">Controls</button></footer></aside>
- <footer class="s-actionbar"><div class="s-equipment"><button data-equip="staff" title="Equip staff">${itemIcon('staff')}</button><button data-equip="sword" title="Equip sword">${itemIcon('sword')}</button><button data-equip="bow" title="Equip bow">${itemIcon('bow')}</button></div><div class="s-hotkeys"><button data-action="attack" title="Attack (F / 1)"><kbd>1</kbd>${itemIcon('sword')}<span>Strike</span></button><button data-action="ward" title="Botanical ward (Q / 2)"><kbd>2</kbd>${itemIcon('ward')}<span>Ward</span><i id="s-ward-cooldown"></i></button><button data-use="cequin" title="Breathe cequin (3)"><kbd>3</kbd>${itemIcon('cequin')}<b data-count="cequin"></b><span>Breathe</span></button><button data-use="salve" title="Apply salve (4)"><kbd>4</kbd>${itemIcon('salve')}<b data-count="salve"></b><span>Heal</span></button><button data-use="tonic" title="Use warming tonic (5)"><kbd>5</kbd>${itemIcon('tonic')}<b data-count="tonic"></b><span>Warm</span></button><button data-use="rations" title="Eat (6)"><kbd>6</kbd>${itemIcon('rations')}<b data-count="rations"></b><span>Eat</span></button><button data-action="interact" title="Interact (E)"><kbd>E</kbd>${itemIcon('hand')}<span>Interact</span></button></div><button id="s-mobile-pack">Satchel</button><span class="s-walk-help">WASD / click to walk<br>Shift to run</span></footer>
+ <footer class="s-actionbar"><div class="s-equipment"><button data-equip="staff" title="Equip staff">${itemIcon('staff')}</button><button data-equip="sword" title="Equip sword">${itemIcon('sword')}</button><button data-equip="bow" title="Equip bow">${itemIcon('bow')}</button><button id="s-inspect-gear" title="Inspect equipment (K)">Gear</button></div><div class="s-hotkeys"><button data-action="attack" title="Attack (F / 1)"><kbd>1</kbd>${itemIcon('sword')}<span>Strike</span></button><button data-action="ward" title="Botanical ward (Q / 2)"><kbd>2</kbd>${itemIcon('ward')}<span>Ward</span><i id="s-ward-cooldown"></i></button><button data-use="cequin" title="Breathe cequin (3)"><kbd>3</kbd>${itemIcon('cequin')}<b data-count="cequin"></b><span>Breathe</span></button><button data-use="salve" title="Apply salve (4)"><kbd>4</kbd>${itemIcon('salve')}<b data-count="salve"></b><span>Heal</span></button><button data-use="tonic" title="Use warming tonic (5)"><kbd>5</kbd>${itemIcon('tonic')}<b data-count="tonic"></b><span>Warm</span></button><button data-use="rations" title="Eat (6)"><kbd>6</kbd>${itemIcon('rations')}<b data-count="rations"></b><span>Eat</span></button><button data-action="interact" title="Interact (E)"><kbd>E</kbd>${itemIcon('hand')}<span>Interact</span></button></div><button id="s-mobile-pack">Satchel</button><span class="s-walk-help">WASD / click to walk<br>Shift to run</span></footer>
  <div class="s-mobile-move"><button data-move="w">↑</button><button data-move="a">←</button><button data-move="s">↓</button><button data-move="d">→</button></div>
  <div id="s-dialogue" class="s-dialogue" hidden></div><div id="s-modal" class="s-modal" hidden></div><div id="s-transfer" class="s-transfer" hidden><div class="s-transfer-ring"></div><span id="s-transfer-time"></span><h2 id="s-transfer-line"></h2><p id="s-transfer-sub"></p><button id="s-skip">Continue</button></div></main>`;
 
@@ -40,6 +42,11 @@ let started = false,
   modal = '',
   packView: 'pack' | 'craft' = 'pack';
 let selectedItem: ItemId | null = null;
+let trackedQuestId: string | null = null;
+function trackedQuest() {
+  const active = game.quests.filter((q) => !q.complete);
+  return active.find((q) => q.id === trackedQuestId) ?? active.find((q) => q.target) ?? active[0];
+}
 let stored: string | null = null;
 try {
   stored = localStorage.getItem(storageKey);
@@ -59,10 +66,11 @@ let frameLast = performance.now(),
 let toastUntil = 0,
   packSignature = '',
   portraitSignature = '',
+  equipmentSignature = '',
   dialogueSignature = '',
   lastPhase = game.phase;
 let transferStarted = 0,
-  transferKind: 'opening' | 'return' = 'opening',
+  transferKind: 'opening' | 'return' | 'clinic' = 'opening',
   transferStep = -1;
 let pendingTransfer: (() => void) | null = null;
 let ignoreNextTransfer = false;
@@ -111,6 +119,7 @@ function activate(next: Stichos) {
   walk = [];
   keys.clear();
   packSignature = '';
+  trackedQuestId = null;
   dialogueSignature = '';
   audio.setWorld(0, game.world.seed);
   renderer.draw(game);
@@ -210,7 +219,19 @@ const returning = [
     'The world has not forgotten what you did.',
   ],
 ];
-function transfer(kind: 'opening' | 'return', after?: () => void) {
+const recovering = [
+  [
+    'A voice beyond the cold',
+    'Stay with this breath.',
+    'Warm cequin. Someone at the clinic knows this face.',
+  ],
+  [
+    'The same hands',
+    'Not every silence is the end.',
+    'Your body recovers. The unanswered questions remain.',
+  ],
+];
+function transfer(kind: 'opening' | 'return' | 'clinic', after?: () => void) {
   closeModal();
   paused = true;
   keys.clear();
@@ -224,12 +245,12 @@ function transfer(kind: 'opening' | 'return', after?: () => void) {
   setInert(true);
   el('s-skip').focus({ preventScroll: true });
   audio.pause(false);
-  audio.play('mind-transfer');
+  audio.play(kind === 'clinic' ? 'breath' : 'mind-transfer');
 }
 function endTransfer() {
   if (pendingTransfer) {
-    ignoreNextTransfer = true;
     pendingTransfer();
+    ignoreNextTransfer = game.phase === 'playing';
   }
   pendingTransfer = null;
   transferStarted = 0;
@@ -238,6 +259,10 @@ function endTransfer() {
   paused = false;
   canvas.focus({ preventScroll: true });
   save();
+  if (game.phase === 'lost') {
+    lost();
+    return;
+  }
   toast(
     transferKind === 'opening'
       ? 'Cequin helps this body breathe. Speak to the botanist beside the garden.'
@@ -248,7 +273,8 @@ function endTransfer() {
 el('s-skip').onclick = endTransfer;
 function updateTransfer(now: number) {
   if (!transferStarted) return;
-  const lines = transferKind === 'opening' ? opening : returning,
+  const lines =
+      transferKind === 'opening' ? opening : transferKind === 'clinic' ? recovering : returning,
     seconds = (now - transferStarted) / 1000;
   const duration = reducedMotion.matches ? 2.5 : 3.1;
   const step = Math.min(lines.length - 1, Math.floor(seconds / duration));
@@ -300,17 +326,32 @@ function pauseMenu() {
     }
   };
 }
+function equipmentMenu() {
+  openModal(
+    'gear',
+    `<span class="s-chapter">Belongings of ${esc(game.player.bodyName)}</span><h2>Wood, metal, and a living core.</h2><p>Longer weapons reach farther. Denser materials strike harder and recover more slowly. These belongings stay with this body when your mind travels.</p><div class="s-gear-cards">${(
+      ['staff', 'sword', 'bow'] as WeaponKind[]
+    )
+      .map((kind) => {
+        const p = game.weaponProfile(kind);
+        const owned = game.weapons.has(kind);
+        return `<article>${weaponIcon(game.player.appearance.seed, kind, 112)}<small>${owned ? (game.player.appearance.weapon === kind ? 'Equipped' : 'In this body’s keeping') : 'Available from merchants'}</small><h3>${esc(p.name)}</h3><dl><div><dt>Strength</dt><dd>${p.damage}</dd></div><div><dt>Reach</dt><dd>${p.range.toFixed(2)}</dd></div><div><dt>Recovery</dt><dd>${p.cooldown.toFixed(2)}s</dd></div></dl><p>${esc(p.effectDescription)}</p><button data-equip="${kind}" ${!owned ? 'disabled' : ''}>${owned ? 'Equip' : 'Not owned'}</button></article>`;
+      })
+      .join('')}</div><button id="s-gear-return" class="s-primary">Return to this life</button>`,
+  );
+  el('s-gear-return').onclick = closeModal;
+}
 function controls() {
   openModal(
     'help',
-    `<span class="s-chapter">Living on Stíchos</span><h2>Take your time. Keep breathing.</h2><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click the ground</b><span>Follow a path; click a person or object to approach</span></p><p><b>E</b><span>Talk, gather, open, read, or use a nearby object</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor</span></p><p><b>Q / 2</b><span>Release a botanical ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Cequin · salve · tonic · food</span></p><p><b>I / B</b><span>Satchel / prepare botanical supplies</span></p><p><b>J / M / Escape</b><span>Journal / map / pause</span></p><p><b>Mouse wheel</b><span>Zoom the world</span></p></div><p>Cequin sustains breath. Tonics help with cold. Rest near a shrine or bench. Roads connect inhabited districts; wilderness contains supplies and danger. Dialogue choices and violence affect clan trust.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
+    `<span class="s-chapter">Living on Stíchos</span><h2>Take your time. Keep breathing.</h2><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click the ground</b><span>Follow a path; click a person or object to approach</span></p><p><b>E</b><span>Talk, gather, open, read, or use a nearby object</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor</span></p><p><b>Q / 2</b><span>Release a botanical ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Cequin · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare supplies / inspect equipment</span></p><p><b>J / M / Escape</b><span>Journal / map / pause</span></p><p><b>Mouse wheel</b><span>Zoom the world</span></p></div><p>Cequin sustains breath. Tonics help with cold. Rest near a shrine or bench. Roads connect inhabited districts; wilderness contains supplies and danger. Dialogue choices and violence affect clan trust.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
   );
   el('s-help-return').onclick = closeModal;
 }
 function journal() {
   openModal(
     'journal',
-    `<span class="s-chapter">Theo Bishop's record · 3886</span><h2>What survives the transmission.</h2><div class="s-journal-columns"><div><h3>Threads to follow</h3>${game.quests.map((q) => `<article class="s-quest-record ${q.complete ? 'complete' : ''}"><small>${q.complete ? 'Resolved' : 'Unfinished'}</small><h4>${esc(q.title)}</h4><p>${esc(q.description)}</p><b>${esc(q.objective)}</b>${q.target ? `<span>Near ${Math.round(q.target.x)}, ${Math.round(q.target.y)}</span>` : ''}</article>`).join('')}<h3>The six families</h3>${game.world.clans.map((c, i) => `<div class="s-clan-row"><i style="background:${c.color}"></i><strong>${esc(c.name)}</strong><span>Trust ${game.reputation[i] ?? 0}</span></div>`).join('')}</div><div><h3>Remembered words</h3><blockquote>“Não, eu devo fazer algo!”</blockquote><p>I have avoided changing history for twenty years. Orlando Brown is preparing to industrialize the plants that keep this world alive. The Sallas secret may be my way home. Silence is becoming a choice.</p>${game.journal
+    `<span class="s-chapter">Theo Bishop's record · 3886</span><h2>What survives the transmission.</h2><div class="s-journal-columns"><div><h3>Threads to follow</h3>${game.quests.map((q) => `<article class="s-quest-record ${q.complete ? 'complete' : ''}"><small>${q.complete ? 'Resolved' : 'Unfinished'}</small><h4>${esc(q.title)}</h4><p>${esc(q.description)}</p><b>${esc(q.objective)}</b>${q.target ? `<span>Near ${Math.round(q.target.x)}, ${Math.round(q.target.y)}</span>` : ''}${!q.complete ? `<button class="s-track-quest" data-track-quest="${esc(q.id)}">Follow this thread</button>` : ''}</article>`).join('')}<h3>The six families</h3>${game.world.clans.map((c, i) => `<div class="s-clan-row"><i style="background:${c.color}"></i><strong>${esc(c.name)}</strong><span>Trust ${game.reputation[i] ?? 0}</span></div>`).join('')}</div><div><h3>Remembered words</h3><blockquote>“Não, eu devo fazer algo!”</blockquote><p>I have avoided changing history for twenty years. Orlando Brown is preparing to industrialize the plants that keep this world alive. The Sallas secret may be my way home. Silence is becoming a choice.</p>${game.journal
       .slice()
       .reverse()
       .map(
@@ -332,12 +373,13 @@ function mapModal() {
   el('s-map-return').onclick = closeModal;
 }
 function lost() {
+  const anotherMind = game.transferReady && !!game.transferCandidate;
   openModal(
     'lost',
-    `<span class="s-chapter">The breath stops</span><h2>${game.transferReady ? 'Your mind is still here.' : 'A voice pulls you back.'}</h2><p>${game.transferReady ? 'The restored signal can hold your consciousness while another body wakes. Your choices remain in Stíchos.' : 'The clinic knows this face. Somewhere beyond the cold, someone is still trying to reach you.'}</p><button id="s-return-life" class="s-primary">${game.transferReady ? 'Follow the other heartbeat' : 'Wake at the clinic'}</button>`,
+    `<span class="s-chapter">The breath stops</span><h2>${anotherMind ? 'Your mind is still here.' : 'A voice pulls you back.'}</h2><p>${anotherMind ? 'The restored signal can hold your consciousness while another body wakes. Your choices remain in Stíchos.' : 'The clinic knows this face. Somewhere beyond the cold, someone is still trying to reach you.'}</p><button id="s-return-life" class="s-primary">${anotherMind ? 'Follow the other heartbeat' : 'Wake at the clinic'}</button>`,
   );
   el('s-return-life').onclick = () =>
-    transfer('return', () => {
+    transfer(anotherMind ? 'return' : 'clinic', () => {
       game.reincarnate();
       lastPhase = game.phase;
     });
@@ -410,10 +452,7 @@ function updateUI() {
   if (portraitSignature !== bodySignature) {
     portraitSignature = bodySignature;
     const portrait = el<HTMLCanvasElement>('s-portrait').getContext('2d')!;
-    portrait.imageSmoothingEnabled = false;
-    portrait.fillStyle = '#1a2832';
-    portrait.fillRect(0, 0, 64, 72);
-    drawHumanoid(portrait, p.appearance, 32, 103, 2.45, 2, 0, false, 0, true);
+    drawPortrait(portrait, p.appearance);
   }
   el('s-body-label').textContent =
     p.name === 'Theo Bishop' ? 'Theo Bishop · a borrowed life' : `${p.name} · a borrowed life`;
@@ -449,15 +488,46 @@ function updateUI() {
   const romer = (tile.temperature * 21) / 40 + 7.5;
   el('s-weather').textContent =
     `${romer.toFixed(1)}° Rø · ${tile.temperature.toFixed(0)}° C · ${p.cequinTime > 0 ? 'Cequin in your breath' : 'The air bites'}`;
-  const q = game.quests.find((q) => !q.complete);
+  const q = trackedQuest();
   el('s-quest-title').textContent = q?.title ?? 'A life beyond the cathedral';
   el('s-quest-objective').textContent =
     q?.objective ?? 'Follow the roads. Find the people whose lives touch yours.';
+  const target = q?.target;
+  if (target) {
+    const dx = target.x - p.x,
+      dy = target.y - p.y;
+    const bearing = [
+      'east',
+      'southeast',
+      'south',
+      'southwest',
+      'west',
+      'northwest',
+      'north',
+      'northeast',
+    ][((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8];
+    const steps = Math.round(Math.hypot(dx, dy));
+    el('s-quest-distance').textContent =
+      steps < 3 ? 'Your destination is nearby.' : `${steps} paces ${bearing}`;
+  } else el('s-quest-distance').textContent = '';
   el('s-distance').textContent = `${Math.floor(game.distanceTraveled)} paces traveled`;
   document
     .querySelectorAll<HTMLElement>('[data-count]')
     .forEach((n) => (n.textContent = String(game.inventory[n.dataset.count as ItemId] ?? 0)));
+  const equipmentKey = `${p.appearance.seed}:${p.appearance.weapon}`;
+  const equipmentChanged = equipmentSignature !== equipmentKey;
+  equipmentSignature = equipmentKey;
+  if (equipmentChanged) {
+    const kind = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon;
+    document
+      .querySelector('[data-action="attack"] svg')
+      ?.replaceWith(
+        document.createRange().createContextualFragment(weaponIcon(p.appearance.seed, kind, 30)),
+      );
+  }
   document.querySelectorAll<HTMLButtonElement>('[data-equip]').forEach((n) => {
+    if (equipmentChanged)
+      n.innerHTML = weaponIcon(p.appearance.seed, n.dataset.equip as WeaponKind, 38);
     n.classList.toggle('equipped', n.dataset.equip === p.appearance.weapon);
     n.disabled = !game.weapons.has(n.dataset.equip as 'staff' | 'sword' | 'bow');
     n.title = n.disabled ? `Buy a ${n.dataset.equip} from a merchant` : `Equip ${n.dataset.equip}`;
@@ -470,7 +540,7 @@ function updateUI() {
   const context = el<HTMLButtonElement>('s-context');
   context.hidden = !near || !!game.dialogue || !!modal || !!transferStarted;
   if (near)
-    context.textContent = `E · ${'role' in near ? 'Speak to ' + near.name : (({ cequin: 'Gather cequin', heartleaf: 'Gather heartleaf', emberroot: 'Gather emberroot', pine: 'Gather wood', rock: 'Mine stone', chest: 'Open chest', radio: 'Listen to the radio', workbench: 'Use workbench', shrine: 'Rest and remember', notice: 'Read the notice', door: 'Open door', bench: 'Rest here', crate: 'Search crate' } as Record<string, string>)[near.kind] ?? near.name)}`;
+    context.textContent = `E · ${'role' in near ? 'Speak to ' + near.name : (({ cequin: 'Gather cequin', heartleaf: 'Gather heartleaf', emberroot: 'Gather emberroot', pine: 'Gather wood', rock: 'Mine stone', chest: 'Open chest', radio: 'Listen to the radio', workbench: 'Use workbench', shrine: 'Rest and remember', notice: 'Read the notice', door: game.opened.has(near.id) ? 'Close door' : 'Open door', bench: 'Rest here', crate: 'Search crate' } as Record<string, string>)[near.kind] ?? near.name)}`;
   updatePack();
   updateDialogue();
 }
@@ -513,7 +583,7 @@ function drawMap(target = el<HTMLCanvasElement>('s-map'), scale = 5) {
       ctx.fillText(town.name, x + 7, y);
     }
   }
-  const q = game.quests.find((q) => !q.complete && q.target);
+  const q = trackedQuest();
   if (q?.target) {
     const x = w / 2 + (q.target.x - game.player.x) * scale,
       y = h / 2 + (q.target.y - game.player.y) * scale;
@@ -529,7 +599,7 @@ function drawMap(target = el<HTMLCanvasElement>('s-map'), scale = 5) {
   ctx.fill();
 }
 function act(command: string) {
-  if (!started || paused || transferStarted || game.phase !== 'playing') return;
+  if (!started || paused || transferStarted || game.dialogue || game.phase !== 'playing') return;
   if (command === 'attack') game.attack(pointer ?? undefined);
   if (command === 'ward') game.ward();
   if (command === 'interact') game.interact();
@@ -605,11 +675,11 @@ function identify(point: Point): Prop | Npc | null {
   const candidates: [Prop | Npc, number][] = [];
   for (const npc of game.npcs) {
     if (npc.hp <= 0) continue;
-    const d = Math.hypot(npc.x - point.x, npc.y - 0.5 - point.y);
-    if (d < 0.85) candidates.push([npc, d]);
+    const d = Math.hypot((npc.x - point.x) / 0.6, (npc.y - 0.8 - point.y) / 1.1);
+    if (d < 1) candidates.push([npc, d]);
   }
   for (const prop of game.world.propsAround(point.x, point.y, 2)) {
-    if (game.removed.has(prop.id)) continue;
+    if (game.removed.has(prop.id) && prop.kind !== 'door') continue;
     const d = Math.hypot(prop.x - point.x, prop.y - 0.25 - point.y);
     if (d < 0.75) candidates.push([prop, d]);
   }
@@ -674,15 +744,23 @@ root.addEventListener('click', (event) => {
   if (!button) return;
   const d = button.dataset;
   audio.play('click');
+  if (d.trackQuest) {
+    trackedQuestId = d.trackQuest;
+    closeModal();
+    updateUI();
+    drawMap();
+  }
   if (d.action) act(d.action);
   if (d.use && !paused) {
     game.use(d.use as ItemId);
     updateUI();
     save();
   }
-  if (d.equip && !paused) {
+  if (d.equip && (!paused || modal === 'gear')) {
     game.equip(d.equip as 'staff' | 'sword' | 'bow');
+    if (modal === 'gear') closeModal();
     updateUI();
+    save();
   }
   if (d.item) {
     selectedItem = d.item as ItemId;
@@ -706,6 +784,7 @@ el('s-journal').onclick = journal;
 el('s-track').onclick = journal;
 el('s-expand-map').onclick = mapModal;
 el('s-help').onclick = controls;
+el('s-inspect-gear').onclick = equipmentMenu;
 el('s-tab-pack').onclick = () => inventory('pack');
 el('s-tab-craft').onclick = () => inventory('craft');
 el('s-mobile-pack').onclick = () => root.classList.toggle('satchel-open');
@@ -771,6 +850,10 @@ addEventListener('keydown', (e) => {
   }
   if (modal || !started) return;
   if (!e.repeat) {
+    if (k === 'k') {
+      equipmentMenu();
+      return;
+    }
     if (k === 'j') {
       journal();
       return;
@@ -905,7 +988,6 @@ function frame(now: number) {
           heal: 'heal',
           quest: 'complete',
           dialogue: 'click',
-          transfer: 'mind-transfer',
           level: 'scanned',
           trade: 'relay',
           ward: 'pulse',

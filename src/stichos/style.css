@@ -8,7 +8,7 @@
   --s-border: #58605b;
   --s-gold: #c6af77;
   --s-muted: #9cafb5;
-  --s-width: 296px;
+  --s-width: 340px;
 }
 * {
   box-sizing: border-box;
@@ -292,8 +292,8 @@ svg {
   margin-bottom: 13px;
 }
 #s-portrait {
-  width: 44px;
-  height: 50px;
+  width: 64px;
+  height: 75px;
   image-rendering: pixelated;
   border: 1px solid #b69d69;
   box-shadow:
@@ -395,7 +395,7 @@ svg {
 .s-map-block canvas {
   display: block;
   width: 100%;
-  height: 135px;
+  height: 118px;
   border: 1px solid #708176;
   image-rendering: pixelated;
   filter: saturate(0.8);
@@ -1578,5 +1578,89 @@ svg {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+}
+
+.s-track-quest {
+  display: block;
+  margin-top: 12px;
+  padding: 7px 11px;
+  color: #d6c595;
+  border: 1px solid #7c7458;
+  background: #1b3038;
+}
+
+#s-quest-distance {
+  display: block;
+  color: #bdc8b0;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 10px 0;
+}
+
+#s-inspect-gear {
+  width: auto;
+  padding: 5px 9px;
+  font-size: 11px;
+  color: #d7c69a;
+}
+.s-gear-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 25px 0;
+}
+.s-gear-cards article {
+  border: 1px solid #6b745d;
+  padding: 17px;
+  background: #11212b;
+}
+.s-gear-cards article > svg {
+  margin: 0 auto 12px;
+  width: 112px;
+  height: 112px;
+}
+.s-gear-cards small {
+  color: #9aaa9d;
+  font-size: 10px;
+}
+.s-gear-cards h3 {
+  font-size: 17px;
+  line-height: 1.4;
+  color: #ddcda5;
+  min-height: 48px;
+  font-weight: normal;
+}
+.s-gear-cards dl {
+  display: flex;
+  gap: 18px;
+  border-block: 1px solid #626c5955;
+  padding: 12px 0;
+}
+.s-gear-cards dt {
+  color: #95a9ac;
+  font-size: 11px;
+}
+.s-gear-cards dd {
+  margin: 6px 0 0;
+  color: #decb99;
+}
+.s-window .s-gear-cards p {
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 40px;
+}
+.s-gear-cards button {
+  width: 100%;
+}
+@media (max-width: 700px) {
+  .s-gear-cards {
+    grid-template-columns: 1fr;
+  }
+  .s-gear-cards article > svg {
+    float: right;
+  }
+  #s-inspect-gear {
+    display: none;
   }
 }

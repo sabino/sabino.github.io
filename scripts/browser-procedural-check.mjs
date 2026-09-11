@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const endpoint = process.argv[2];
-const url = process.argv[3] || 'http://localhost:4174/';
+const labUrl = new URL(process.argv[3] || 'http://localhost:4174/');
+labUrl.searchParams.set('generative', '1');
+const url = labUrl.href;
 if (!endpoint || !['localhost', '127.0.0.1'].includes(new URL(endpoint).hostname))
   throw new Error('Pass workspace-owned loopback CDP endpoint.');
 if (new URL(url).hostname !== 'localhost')
