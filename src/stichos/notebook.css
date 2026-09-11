@@ -7,11 +7,12 @@
 }
 .s-modal.is-notebook {
   padding: 48px 30px;
-  background: #07151be6;
+  background: #07151b55;
+  backdrop-filter: none;
   overflow: hidden;
 }
 .is-notebook .s-window {
-  width: min(1280px, 100%);
+  width: min(1320px, 100%);
   padding: 0;
   border: 1px solid #7e8b73;
   box-shadow:
@@ -26,7 +27,7 @@
   display: none;
 }
 .is-notebook .s-window:not(:has(.is-shut)) {
-  height: min(850px, calc(100dvh - 96px));
+  height: min(820px, calc(100dvh - 96px));
   min-height: 0;
   padding: 11px 17px 14px 20px;
   border-radius: 7px 13px 11px 5px;
@@ -45,7 +46,7 @@
   content: '';
   display: block;
   position: absolute;
-  inset: 89px 8px 9px 9px;
+  inset: 102px 8px 9px 9px;
   width: auto;
   height: auto;
   padding: 0;
@@ -76,7 +77,7 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-rows: 82px 40px minmax(0, 1fr) 54px;
+  grid-template-rows: 58px 38px minmax(0, 1fr) 54px;
   height: 100%;
   min-height: 0;
 }
@@ -249,6 +250,7 @@
 .s-notebook-header h2 {
   margin: 1px 0 0;
   font-size: 22px;
+  line-height: 1.15;
   color: #ebdfbb;
 }
 .s-notebook-header p {
@@ -284,7 +286,7 @@
   gap: 3px;
   padding: 3px 18px 0;
   align-items: end;
-  background: transparent;
+  background: #203b3a;
   border-bottom: 1px solid #917c57;
 }
 .s-notebook-tabs button {
@@ -384,7 +386,7 @@
   align-items: baseline;
   width: 100%;
   gap: 11px;
-  padding: 9px 5px;
+  padding: 8px 5px;
   margin: 0;
   border: 0;
   border-bottom: 1px solid #a89b762a;
@@ -393,13 +395,13 @@
   text-align: left;
   color: #344749;
   font:
-    14px/1.45 Georgia,
-    serif;
+    22px/1.2 'Theo Hand',
+    cursive;
 }
 .s-notebook-contents nav button small {
   font:
-    10px/1.4 system-ui,
-    sans-serif;
+    16px/1.4 'Theo Hand',
+    cursive;
   color: #75654b;
 }
 .s-notebook-contents nav button[aria-current] {
@@ -416,8 +418,39 @@
   font:
     22px/1.1 'Theo Hand',
     cursive;
-  margin: 24px 0 0;
+  margin: 18px 0 0;
   transform: rotate(-2deg);
+}
+.s-notebook-marginalia {
+  position: relative;
+  flex: 0 0 105px;
+  margin-top: 8px;
+}
+.s-notebook-marginalia .s-notebook-aside {
+  position: relative;
+  z-index: 1;
+  width: 66%;
+}
+.s-notebook-marginalia .s-botanical-study {
+  position: absolute;
+  right: -9px;
+  bottom: -4px;
+  width: 133px;
+  height: 130px;
+  margin: 0;
+  color: #354e4a;
+  opacity: 0.78;
+  transform: rotate(8deg);
+}
+.plain-type .s-notebook-contents nav button {
+  font:
+    14px/1.45 Georgia,
+    serif;
+}
+.plain-type .s-notebook-contents nav button small {
+  font:
+    10px/1.4 system-ui,
+    sans-serif;
 }
 .s-notebook-select {
   display: none;
@@ -736,6 +769,33 @@
     sans-serif;
   color: #8daba9;
 }
+@media (min-width: 1000px) {
+  .s-notebook:not(.is-shut) {
+    grid-template-rows: 62px minmax(0, 1fr) 54px;
+  }
+  .s-notebook-tabs {
+    position: absolute;
+    top: 15px;
+    right: 137px;
+    left: 39%;
+    height: 39px;
+    padding: 0;
+    justify-content: flex-end;
+    border-bottom: 0;
+    z-index: 4;
+    background: none;
+  }
+  .s-notebook-tabs button {
+    padding: 8px 13px;
+    white-space: nowrap;
+  }
+  .s-notebook-header > div {
+    max-width: 37%;
+  }
+  .is-notebook .s-window:not(:has(.is-shut))::before {
+    top: 68px;
+  }
+}
 @media (max-width: 1050px) {
   .s-notebook-spread {
     grid-template-columns: 34% minmax(0, 1fr);
@@ -837,6 +897,7 @@
   }
   .s-notebook-contents > .s-notebook-overline,
   .s-notebook-contents nav,
+  .s-notebook-marginalia,
   .s-notebook-aside {
     display: none;
   }
