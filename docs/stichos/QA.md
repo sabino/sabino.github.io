@@ -1,8 +1,12 @@
 # Release verification · 2026-09-11
 
-## Current source and local preview
+## Current published source
 
-The source at `c667dfd` passed **345/345 automated tests in 67.69 seconds**, plus formatting and production build checks. Its frozen output is `app-BsBd1dau.js`, CSS `app-BbuTIZnE.css`, service worker `d19dcf298d5a2831573b`. The new public-frequency, chat, tab-lock and saved-host browser acceptance is pending at this documentation checkpoint; the earlier results below must not be stretched to cover it. Publication of this newer build has not been asserted here.
+The source at `0a4e2ed` passed **347/347 automated tests in 81.66 seconds**, formatting and production build. Its output is `app-4jvai5g6.js`, CSS `app-BbuTIZnE.css`, service worker `347aaea8a71453ab0c63`. Pages commit `148fe34` and deployment `34617829015` publish that exact build; all 30 non-HTML files match local hashes. [Deployment details](PAGES.md).
+
+The final build passed seven actual-input browser checks both locally and on the published HTTPS URL with zero errors and approximately 60 FPS: Local/Room chat, persistent phrase shortcuts, exact shared resource depletion after host restart and visitor reconnection, a single-tab continuing-life gate, public planet rendezvous and mobile layout. The first visual review was 7.2/10; the revised interface reached 8.1/10 in a fresh independent review. [Multiplayer universe proof](UNIVERSE-RELEASE-QA.md).
+
+The local and deployed nested path each passed four continuing-life/offline checks: exact reload continuity, active service worker and scope, decoded install icons, and actual offline navigation/Continue/walking with page and service-worker networking disabled. Native iOS/Android installation remains untested. [Continuing-life and offline proof](LIFE-OFFLINE-QA.md).
 
 The previous local checkpoint `app-tZDgoFWJ.js` / `app-B_fqJ_rx.css` passed **10 universe/creation/invitation checks** and **9 constructed-production checks**, with zero runtime errors in both runs. The first uses real mobile/desktop controls, a native color picker, chosen-resident arrival, reload, cancellation, galaxy navigation, QR/link invitations and code-only joining. The second gathers real timber/ore with tools, constructs a bed for exact costs, advances an 80-second batch through active walking, prevents remote collection, awards three portions once and reloads the same life. [Universe proof](UNIVERSE-QA.md), [production proof](PRODUCTION.md).
 
@@ -12,9 +16,9 @@ The optional native Pear package passed **4/4 integration tests in 2.027 seconds
 
 Current user flows are described in [UNIVERSE.md](UNIVERSE.md). Normal life storage is automatic and browser-local. **The main UI no longer provides routine Download save or Restore a save controls.** All file-import/export browser results and scripts below are historical checks of explicitly named older builds; they are retained for provenance, not presented as current UI instructions. The unique-life preview uses actual reload/Continue for persistence. Native PWA installation and model inference have not been verified; the optional AI companion explicitly does not generate NPC dialogue.
 
-## Last verified public deployment · earlier UI
+## Archived public deployment · earlier UI
 
-**[Play Verso](https://sabino.pro/games/verso/)** is deployed from Pages commit `3db0182`, successful run `34571768214`. Public build `app-CxKixEoO.js` passed 8 real two-browser room checks (including identical raider HP and one shared defeat), 4 game/mobile/Compact/cosmetic checks, and 7 actual save/import/offline checks. Cosmetic purchase controls were present and disabled. Public JavaScript, manifest and service worker match the local build byte-for-byte. The offline cache is scoped to `https://sabino.pro/games/verso/` and contains 23 assets. [Deployment details](PAGES.md).
+The earlier public game was deployed from Pages commit `3db0182`, successful run `34571768214`. Public build `app-CxKixEoO.js` passed 8 real two-browser room checks (including identical raider HP and one shared defeat), 4 game/mobile/Compact/cosmetic checks, and 7 actual save/import/offline checks. Cosmetic purchase controls were present and disabled. Public JavaScript, manifest and service worker match the local build byte-for-byte. The offline cache is scoped to `https://sabino.pro/games/verso/` and contains 23 assets. [Deployment details](PAGES.md).
 
 A separate source-only eight-participant RTC fixture reassembled complete combat frames above 22 KB and signalling reconnection without duplicate welcomes, then closed all transports. Evidence: `.dream-loop/stichos-peer-transport/fixture.json`. The fixture does not stand in for eight human players on separate networks.
 
