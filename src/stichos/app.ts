@@ -52,6 +52,7 @@ let trackedQuestId: string | null = null;
 let mapWaypoint: Point | null = null;
 let chartView: AtlasView | null = null;
 let chartControl: AtlasController | null = null;
+let modalRevision = 0;
 const atlasPainter = new AtlasPainter();
 function trackedQuest() {
   if (trackedQuestId === 'map-waypoint' && mapWaypoint)
@@ -177,6 +178,7 @@ function setInert(value: boolean) {
     .forEach((n) => (n.inert = value));
 }
 function openModal(kind: string, html: string) {
+  modalRevision++;
   chartControl?.dispose();
   chartControl = null;
   modal = kind;
@@ -199,6 +201,7 @@ function openModal(kind: string, html: string) {
   container.scrollTop = 0;
 }
 function closeModal() {
+  modalRevision++;
   chartControl?.dispose();
   chartControl = null;
   modal = '';
@@ -430,11 +433,12 @@ function journal(section?: NotebookSection) {
   const open = el('s-notebook-open');
   if (open) {
     open.onclick = () => {
+      const revision = ++modalRevision;
       el('s-modal').querySelector('.s-notebook')?.classList.add('is-unfolding');
       open.setAttribute('disabled', '');
       setTimeout(
         () => {
-          if (modal !== 'journal') return;
+          if (modal !== 'journal' || modalRevision !== revision) return;
           notebookView.open = true;
           refresh();
         },
@@ -509,17 +513,20 @@ function foldNotebook(putAway: boolean) {
   }
   const book = el('s-modal').querySelector<HTMLElement>('.s-notebook');
   if (!book || book.classList.contains('is-folding')) return;
+  const revision = ++modalRevision;
   book.classList.add('is-folding');
   book.inert = true;
   setTimeout(
     () => {
-      if (modal !== 'journal') return;
+      if (modal !== 'journal' || modalRevision !== revision) return;
       notebookView.open = false;
       journal();
+      const closedRevision = modalRevision;
       if (putAway)
         setTimeout(
           () => {
-            if (modal === 'journal' && !notebookView.open) closeModal();
+            if (modal === 'journal' && modalRevision === closedRevision && !notebookView.open)
+              closeModal();
           },
           reducedMotion.matches ? 0 : 180,
         );
@@ -690,10 +697,10 @@ function updateDialogue() {
     return;
   }
   const d = game.dialogue;
+  el('s-dialogue').hidden = !d;
   const signature = JSON.stringify(d);
   if (signature === dialogueSignature) return;
   dialogueSignature = signature;
-  el('s-dialogue').hidden = !d;
   if (!d) return;
   keys.clear();
   walk = [];
@@ -1084,12 +1091,12 @@ addEventListener('keydown', (e) => {
   }
   if (k === 'escape') {
     e.preventDefault();
-    if (game.dialogue) {
+    if (modal === 'journal') foldNotebook(true);
+    else if (modal && modal !== 'title' && modal !== 'lost') closeModal();
+    else if (game.dialogue) {
       game.dialogue = null;
       updateDialogue();
-    } else if (modal === 'journal') foldNotebook(true);
-    else if (modal && modal !== 'title' && modal !== 'lost') closeModal();
-    else if (!modal) pauseMenu();
+    } else if (!modal) pauseMenu();
     return;
   }
   if (modal === 'journal' && k === 'j') {
