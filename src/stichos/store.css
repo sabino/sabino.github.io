@@ -124,6 +124,67 @@
   line-height: 1.5;
   color: #a9babb;
 }
+.s-store-wallet {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid #4d605c;
+}
+.s-store-wallet h4 {
+  margin: 0 0 8px;
+  color: #e1d2ac;
+  font-size: 21px;
+  font-weight: 400;
+}
+.s-store-wallet p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #afc0bf;
+  max-width: 80ch;
+}
+.s-store-wallet label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 13px;
+  color: #d5d5bd;
+  min-width: 0;
+}
+.s-store-wallet input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #62736b;
+  background: #11252b;
+  color: #dde1d1;
+  padding: 8px;
+  font: 12px/1.5 monospace;
+}
+.s-store-recovery-code {
+  margin-top: 12px;
+  background: #223d3e;
+  padding: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.s-store-recovery-code label {
+  flex-basis: 100%;
+}
+.s-store-recovery-code p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.s-store-restore {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 22px;
+}
+.s-store-restore p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
 @media (max-width: 650px) {
   .s-store-grid {
     grid-template-columns: 1fr;
@@ -152,5 +213,8 @@
   }
   .s-store-heading {
     gap: 8px;
+  }
+  .s-store-restore {
+    grid-template-columns: 1fr;
   }
 }

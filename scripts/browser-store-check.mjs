@@ -92,6 +92,8 @@ try {
         changes: 0,
         fail: false,
         game: null,
+        csrf: 'fixture-csrf-0123456789',
+        recoveryConfigured: false,
       };
       const game = {
         player: { appearance: appearance(703) },
@@ -131,8 +133,24 @@ try {
             })),
           };
         else if (String(url).endsWith('/wallet'))
-          data = { csrf: 'fixture-csrf-0123456789', entitlements: state.ids };
-        else if (String(url).endsWith('/checkout')) {
+          data = {
+            csrf: state.csrf,
+            entitlements: state.ids,
+            recoveryConfigured: state.recoveryConfigured,
+          };
+        else if (String(url).endsWith('/recovery')) {
+          state.recoveryConfigured = true;
+          data = {
+            csrf: state.csrf,
+            entitlements: state.ids,
+            recoveryConfigured: true,
+            recoveryCode: 'VR1-' + 'a'.repeat(64),
+          };
+        } else if (String(url).endsWith('/recover')) {
+          state.csrf = 'rotated-fixture-csrf-0123456789';
+          state.ids = ['sallas-silver'];
+          data = { csrf: state.csrf, entitlements: state.ids, recoveryConfigured: true };
+        } else if (String(url).endsWith('/checkout')) {
           if (state.response === 'owned') {
             state.ids = ['aurora-mantle'];
             data = { owned: true };
@@ -170,7 +188,7 @@ try {
   );
   const click = async (selector) => {
     const p = await evaluate(
-      `(() => { const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:b.x+b.width/2,y:b.y+b.height/2}; })()`,
+      `(() => { const node = document.querySelector(${JSON.stringify(selector)});node.scrollIntoView({block:'center'}); const b = node.getBoundingClientRect(); return {x:b.x+b.width/2,y:b.y+b.height/2}; })()`,
     );
     await page.send('Input.dispatchMouseEvent', {
       type: 'mousePressed',
@@ -202,6 +220,41 @@ try {
     'Owned outfit equips for current body through normal progression adapter',
     `storeFixture.game.progression.equippedStyles['fixture-priest'] === 'aurora-mantle' && document.querySelector('[data-store-action="equip:aurora-mantle"]').disabled`,
   );
+  await click('[data-store-action="recovery"]');
+  await check(
+    'Explicit Generate requests a recovery code with CSRF and hides it initially',
+    `storeFixture.calls.filter(c => c.url.endsWith('/recovery')).length === 1 && storeFixture.calls.at(-1).csrf === 'fixture-csrf-0123456789' && document.querySelector('[data-store-action="recovery-code"]').type === 'password' && document.querySelector('[data-store-action="recovery-code"]').value.length === 68 && !location.search.includes('VR1-') && !Object.values(localStorage).some(v=>v.includes('VR1-'))`,
+  );
+  await evaluate(
+    `window.downloadFixture = {blob:null,filename:null}; window.fixtureCreateURL=URL.createObjectURL; window.fixtureAnchorClick=HTMLAnchorElement.prototype.click;URL.createObjectURL=(blob)=>{downloadFixture.blob=blob;return 'blob:mock-private-recovery'};HTMLAnchorElement.prototype.click=function(){downloadFixture.filename=this.download};`,
+  );
+  await click('[data-store-action="download-code"]');
+  await check(
+    'Private recovery download contains the code and its ownership warning',
+    `(async()=>downloadFixture.filename === 'stichos-wallet-recovery.txt' && (await downloadFixture.blob.text()).includes(document.querySelector('[data-store-action="recovery-code"]').value) && (await downloadFixture.blob.text()).includes('Anyone with it'))()`,
+  );
+  await evaluate(
+    `URL.createObjectURL=fixtureCreateURL; HTMLAnchorElement.prototype.click=fixtureAnchorClick; delete window.downloadFixture;`,
+  );
+  await click('[data-store-action="restore-wallet"]');
+  await check(
+    'Malformed recovery input is rejected before any network request',
+    `!storeFixture.calls.some(c=>c.url.endsWith('/recover')) && storeFixture.text().includes('Enter the complete recovery code')`,
+  );
+  await evaluate(
+    `(()=>{const input=document.querySelector('[data-store-action="restore-code"]');input.value='VR1-'+'b'.repeat(64);input.dispatchEvent(new Event('input',{bubbles:true}));})()`,
+  );
+  await click('[data-store-action="restore-wallet"]');
+  await check(
+    'Restore applies only returned wallet entitlements, clears secret inputs and discloses previous-session signout',
+    `storeFixture.game.verified.join() === 'sallas-silver' && document.querySelector('[data-store-action="restore-code"]').value === '' && !document.querySelector('[data-store-action="recovery-code"]') && storeFixture.text().includes('previous wallet session is signed out')`,
+  );
+  await click('[data-store-action="recovery"]');
+  await check(
+    'Subsequent wallet mutation uses rotated CSRF from recovered wallet',
+    `storeFixture.calls.at(-1).csrf === 'rotated-fixture-csrf-0123456789'`,
+  );
+  await evaluate(`window.scrollTo(0,0)`);
   fs.writeFileSync(
     path.join(out, 'store-desktop.png'),
     Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'),

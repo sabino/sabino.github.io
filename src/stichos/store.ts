@@ -109,6 +109,10 @@ export async function mountStore(
     loaded = false,
     notice = 'Checking the outfit catalog and your browser wallet…';
   let problem = false;
+  let recoveryConfigured = false,
+    generatedCode = '',
+    restoreDraft = '',
+    revealCode = false;
 
   const request = async (path: string, init: RequestInit = {}) => {
     let response: Response;
@@ -249,10 +253,113 @@ export async function mountStore(
       element(
         'p',
         '',
-        'A purchase opens Stripe Checkout. Outfits appear here after payment is verified. This browser wallet is separate from your game save; keep its cookies to retain access.',
+        'A purchase opens Stripe Checkout. Outfits appear here after payment is verified. Paid ownership belongs to your browser wallet, separately from your game save.',
       ),
     );
     root.append(footer);
+    const wallet = element('section', 's-store-wallet');
+    wallet.setAttribute('aria-label', 'Wallet recovery');
+    wallet.append(element('h4', '', 'Keep your wardrobe safe'));
+    wallet.append(
+      element(
+        'p',
+        '',
+        recoveryConfigured
+          ? 'This wallet has a recovery code. Keep it privately; anyone with the code can restore this wardrobe. Generating a new code replaces the previous one.'
+          : 'Save a private recovery code before clearing browser cookies or changing devices. It restores paid outfits; your game save remains separate.',
+      ),
+    );
+    wallet.append(
+      button(
+        recoveryConfigured ? 'Replace recovery code' : 'Generate recovery code',
+        'recovery',
+        () => {
+          void recoverWallet('recovery');
+        },
+        busy || !csrf,
+      ),
+    );
+    if (generatedCode) {
+      const generated = element('div', 's-store-recovery-code');
+      const codeLabel = element('label', '', 'Your private recovery code');
+      const code = element('input', '');
+      code.type = revealCode ? 'text' : 'password';
+      code.readOnly = true;
+      code.value = generatedCode;
+      code.autocomplete = 'off';
+      code.spellcheck = false;
+      code.dataset.storeAction = 'recovery-code';
+      codeLabel.append(code);
+      generated.append(codeLabel);
+      generated.append(
+        button(revealCode ? 'Hide code' : 'Show code', 'reveal-code', () => {
+          revealCode = !revealCode;
+          render();
+        }),
+      );
+      generated.append(
+        button('Download private code', 'download-code', () => {
+          const blob = new Blob(
+            [
+              `Stichos wallet recovery\n\n${generatedCode}\n\nKeep this code private. Anyone with it can restore your wardrobe. Restoring signs out the previous wallet session. This is not your game save.\n`,
+            ],
+            { type: 'text/plain;charset=utf-8' },
+          );
+          const url = URL.createObjectURL(blob),
+            link = document.createElement('a');
+          link.href = url;
+          link.download = 'stichos-wallet-recovery.txt';
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }),
+      );
+      generated.append(
+        element(
+          'p',
+          '',
+          'Save this code now. It disappears when this shop closes and cannot be shown again.',
+        ),
+      );
+      wallet.append(generated);
+    }
+    const restore = element('form', 's-store-restore');
+    const label = element('label', '', 'Restore another wallet');
+    const input = element('input', '');
+    input.type = 'password';
+    input.value = restoreDraft;
+    input.placeholder = 'VR1-…';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.maxLength = 80;
+    input.dataset.storeAction = 'restore-code';
+    input.disabled = busy || !csrf;
+    input.addEventListener('input', () => {
+      restoreDraft = input.value;
+    });
+    label.append(input);
+    restore.append(label);
+    const submit = button(
+      'Restore wallet',
+      'restore-wallet',
+      () => {
+        void recoverWallet('recover');
+      },
+      busy || !csrf,
+    );
+    restore.append(submit);
+    restore.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void recoverWallet('recover');
+    });
+    restore.append(
+      element(
+        'p',
+        '',
+        'Restoring signs out the previous wallet session. Your current wardrobe is replaced here; save its recovery code first if you want to return to it.',
+      ),
+    );
+    wallet.append(restore);
+    root.append(wallet);
     container.replaceChildren(root);
     if (focused)
       [...container.querySelectorAll<HTMLButtonElement>('[data-store-action]')]
@@ -283,12 +390,14 @@ export async function mountStore(
       wallet.value.entitlements.every((id: unknown) => typeof id === 'string')
     ) {
       csrf = wallet.value.csrf;
+      recoveryConfigured = wallet.value.recoveryConfigured === true;
       if (walletRequests.get(game) === walletRequest)
         changed = setWallet(wallet.value.entitlements);
     } else {
       csrf = '';
       if (walletRequests.get(game) === walletRequest) changed = setWallet([]);
     }
+    entitlements = verifiedWallets.get(game) ?? [];
     problem = prices.status === 'rejected' || !csrf;
     notice = problem
       ? 'The store is unavailable. Your save and earned outfits are unaffected; refresh to retry.'
@@ -299,6 +408,57 @@ export async function mountStore(
           : 'Choose an outfit to continue to secure payment. The final total is shown at checkout.';
     render();
     if (changed) onChange();
+  };
+  const recoverWallet = async (path: 'recovery' | 'recover') => {
+    if (busy || !csrf || !current()) return;
+    const code = restoreDraft.trim();
+    if (path === 'recover' && !/^VR1-[a-f0-9]{64}$/.test(code)) {
+      problem = true;
+      notice = 'Enter the complete recovery code from your private backup.';
+      render();
+      return;
+    }
+    busy = true;
+    problem = false;
+    notice =
+      path === 'recovery' ? 'Preparing a private recovery code…' : 'Verifying your recovery code…';
+    render();
+    const walletRequest = nextWalletRequest(game);
+    try {
+      const result = await request(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Verso-CSRF': csrf },
+        body: JSON.stringify(path === 'recover' ? { recoveryCode: code } : {}),
+      });
+      if (!current() || walletRequests.get(game) !== walletRequest) return;
+      if (
+        typeof result?.csrf !== 'string' ||
+        result.csrf.length < 16 ||
+        !Array.isArray(result.entitlements) ||
+        !result.entitlements.every((id: unknown) => typeof id === 'string') ||
+        (path === 'recovery' && !/^VR1-[a-f0-9]{64}$/.test(result.recoveryCode))
+      )
+        throw Error('The wallet response could not be verified. Refresh before trying again.');
+      csrf = result.csrf;
+      recoveryConfigured = result.recoveryConfigured === true;
+      const changed = setWallet(result.entitlements);
+      generatedCode = path === 'recovery' ? result.recoveryCode : '';
+      revealCode = false;
+      if (path === 'recover') restoreDraft = '';
+      busy = false;
+      notice =
+        path === 'recovery'
+          ? 'Save your private recovery code now. The previous recovery code no longer works.'
+          : 'Your wardrobe was restored. The previous wallet session is signed out.';
+      render();
+      if (changed) onChange();
+    } catch (error) {
+      if (!current()) return;
+      busy = false;
+      problem = true;
+      notice = error instanceof Error ? error.message : 'The wallet could not be restored.';
+      render();
+    }
   };
   const checkout = async (skinId: string) => {
     if (busy || !loaded || !csrf || !catalog?.enabled || !current()) return;
