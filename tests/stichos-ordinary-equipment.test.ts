@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Stichos } from '../src/stichos/session.ts';
-import { weaponGenome, weaponPixels, weaponProfileFromGenome } from '../src/stichos/equipment.ts';
+import {
+  weaponGenome,
+  weaponPixels,
+  weaponProfileFromGenome,
+  technologyWeaponSeed,
+  weaponTechnology,
+  MAX_WEAPON_SEED,
+} from '../src/stichos/equipment.ts';
 import { generateLifeCandidate } from '../src/stichos/life-origin.ts';
 import { appearance } from '../src/stichos/world.ts';
 import type { Npc } from '../src/stichos/types.ts';
@@ -172,4 +179,92 @@ test('civilian origins can have empty hands and do not conjure a staff in invent
   assert.equal(g.displayAppearance.weapon, 'none');
   assert.equal(g.weapons.size, 0);
   assert(g.tools.length > 0, 'Working life keeps its actual profession tools.');
+});
+
+test('technology addresses preserve old seeds and generate connected primitive, mechanical and electronic equipment', () => {
+  assert.equal(weaponTechnology(0xffffffff), null);
+  for (const bad of [MAX_WEAPON_SEED + 1, NaN, 1.5]) assert.throws(() => weaponTechnology(bad));
+  const forms = new Set<string>();
+  for (const tier of [0, 1, 2, 3] as const)
+    for (const kind of ['staff', 'sword', 'bow'] as const)
+      for (let source = 0; source < 80; source++) {
+        const address = technologyWeaponSeed(source, tier),
+          g = weaponGenome(address, kind),
+          sprite = weaponPixels(g);
+        assert.equal(weaponTechnology(address), tier);
+        assert.equal(address % 0x100000000, source);
+        assert.deepEqual(g, weaponGenome(address, kind));
+        assert.equal(g.technology, tier);
+        forms.add(g.subtype);
+        const solid = [...sprite.pixels].flatMap((v, i) => (v ? [i] : [])),
+          queue = [solid[0]],
+          seen = new Set(queue);
+        for (let i = 0; i < queue.length; i++)
+          for (const [dx, dy] of [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+          ]) {
+            const x = (queue[i] % 32) + dx,
+              y = Math.floor(queue[i] / 32) + dy,
+              p = y * 32 + x;
+            if (x >= 0 && x < 32 && y >= 0 && y < 64 && sprite.pixels[p] && !seen.has(p)) {
+              seen.add(p);
+              queue.push(p);
+            }
+          }
+        assert.equal(seen.size, solid.length, `${g.subtype} components must connect.`);
+        if (tier === 3 && kind === 'bow')
+          assert(['coilcaster', 'rail carbine', 'pulse thrower'].includes(g.subtype));
+        if (tier === 2 && kind === 'bow')
+          assert(['crossbow', 'repeating crossbow', 'spring launcher'].includes(g.subtype));
+        if (tier === 3) assert(!g.material.includes('Sallas'));
+      }
+  assert(forms.size >= 29);
+});
+
+test('electronic world merchants sell actual encoded ranged equipment and preserve it through reload', () => {
+  let g = new Stichos(8, 4);
+  merchant(g);
+  const stock = g.merchantWeaponStock('origin:resident:3').find((w) => w.kind === 'bow')!;
+  assert(stock.seed > 0xffffffff);
+  assert.equal(weaponTechnology(stock.seed), 3);
+  assert(/coilcaster|rail carbine|pulse thrower/.test(stock.profile.name));
+  g.choose('weapon:bow');
+  g.choose('close');
+  const item = g.weaponInventory.find((w) => w.kind === 'bow')!;
+  assert(g.equipWeapon(item.id).ok);
+  assert.equal(g.displayAppearance.weaponSeed, stock.seed);
+  g.equip('bow');
+  assert.equal(g.displayAppearance.weaponSeed, stock.seed);
+  g = Stichos.restore(g.save());
+  assert.equal(g.displayAppearance.weaponSeed, stock.seed);
+  assert.equal(g.weaponProfile('bow').name, stock.profile.name);
+});
+
+test('a real electronic workshop crafts the world technology using its exact physical component preview', () => {
+  let g = new Stichos(8, 4);
+  Object.assign(g.player, { x: 4, y: 5, coins: 250 });
+  g.inventory = { wood: 20, ore: 20, cequin: 8, heartleaf: 8, emberroot: 8 };
+  g.progression.xp.crafting = 160;
+  const recipe = {
+    kind: 'bow' as const,
+    material: 1 as const,
+    core: 'breath' as const,
+    span: 'long' as const,
+  };
+  const preview = g.forgePreview(recipe);
+  assert(preview.ok, preview.message);
+  assert.equal(preview.construction!.recipe.technology, 3);
+  assert.equal(preview.construction!.genome.technology, 3);
+  assert(/coilcaster|rail carbine|pulse thrower/.test(preview.construction!.profile.name));
+  const coins = g.player.coins;
+  assert(g.forge(recipe).ok);
+  assert.equal(g.player.coins, coins - preview.construction!.cost.coins);
+  assert.equal(g.displayAppearance.weaponSeed, preview.construction!.seed);
+  assert.deepEqual(g.weaponProfile('bow'), preview.construction!.profile);
+  g = Stichos.restore(g.save());
+  assert.equal(g.displayAppearance.weaponSeed, preview.construction!.seed);
+  assert.equal(g.save().forgedWeapons[0].recipe.technology, 3);
 });

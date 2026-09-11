@@ -1,12 +1,19 @@
 import { deriveSeed } from '../procedural/random.ts';
-import { weaponGenome, weaponProfileFromGenome } from './equipment.ts';
-import type { WeaponGenome, WeaponKind } from './equipment.ts';
+import {
+  weaponGenome,
+  weaponProfileFromGenome,
+  technologyWeaponSeed,
+  weaponMaterialCatalog,
+} from './equipment.ts';
+import type { WeaponGenome, WeaponKind, WeaponTechnology } from './equipment.ts';
 import type { ItemId } from './types.ts';
 
 export type ForgeMaterial = 0 | 1 | 2;
 export type ForgeCore = WeaponGenome['effect'];
 export type ForgeSpan = 'swift' | 'balanced' | 'long';
 export interface ForgeRecipe {
+  /** Omitted for legacy designs; the actual world pins this tier for new construction. */
+  technology?: WeaponTechnology;
   kind: WeaponKind;
   material: ForgeMaterial;
   core: ForgeCore;
@@ -32,6 +39,9 @@ export const FORGE_MATERIALS = {
   sword: ['blue steel', 'tempered iron', 'Sallas alloy'],
   bow: ['frostwood', 'ironbark', 'silver birch'],
 } as const;
+export function forgeMaterials(kind: WeaponKind, technology?: WeaponTechnology) {
+  return weaponMaterialCatalog(kind, technology ?? null).map((m) => m[0]);
+}
 export const FORGE_CORES = [
   {
     id: 'stagger',
@@ -88,6 +98,7 @@ export function validForgeRecipe(value: unknown): value is ForgeRecipe {
   const r = value as ForgeRecipe;
   return (
     ['staff', 'sword', 'bow'].includes(r.kind) &&
+    (r.technology === undefined || [0, 1, 2, 3].includes(r.technology)) &&
     [0, 1, 2].includes(r.material) &&
     FORGE_CORES.some((c) => c.id === r.core) &&
     FORGE_SPANS.some((s) => s.id === r.span)
@@ -139,12 +150,12 @@ export function resolveForge(
   )
     return null;
   const normalized = ownerSeed >>> 0;
-  const key = `${normalized}:${recipe.kind}:${recipe.material}:${recipe.core}:${recipe.span}`;
+  const key = `${normalized}:${recipe.kind}:${recipe.material}:${recipe.core}:${recipe.span}:${recipe.technology ?? 'legacy'}`;
   const span = FORGE_SPANS.find((s) => s.id === recipe.span)!;
   let match = resolved.get(key);
   if (!match) {
     for (let attempt = 0; attempt < FORGE_SEARCH_LIMIT; attempt++) {
-      const seed = deriveSeed(
+      const source = deriveSeed(
         normalized,
         'stichos-forge',
         recipe.kind,
@@ -153,9 +164,11 @@ export function resolveForge(
         recipe.span,
         attempt,
       );
+      const seed =
+        recipe.technology === undefined ? source : technologyWeaponSeed(source, recipe.technology);
       const genome = weaponGenome(seed, recipe.kind);
       if (
-        genome.material === FORGE_MATERIALS[recipe.kind][recipe.material] &&
+        genome.material === forgeMaterials(recipe.kind, recipe.technology)[recipe.material] &&
         genome.effect === recipe.core &&
         genome.length >= span.min &&
         genome.length <= span.max &&
@@ -175,7 +188,13 @@ export function resolveForge(
   const genome = weaponGenome(match.seed, recipe.kind);
   return {
     seed: match.seed,
-    recipe: { kind: recipe.kind, material: recipe.material, core: recipe.core, span: recipe.span },
+    recipe: {
+      kind: recipe.kind,
+      material: recipe.material,
+      core: recipe.core,
+      span: recipe.span,
+      ...(recipe.technology === undefined ? {} : { technology: recipe.technology }),
+    },
     genome,
     profile: weaponProfileFromGenome(genome, level),
     cost: forgeCost(recipe)!,

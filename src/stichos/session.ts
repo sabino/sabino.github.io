@@ -60,7 +60,12 @@ import {
   type ProductionState,
   type ProductionStructure,
 } from './production.ts';
-import { weaponProfile as generatedWeaponProfile } from './equipment.ts';
+import {
+  weaponProfile as generatedWeaponProfile,
+  technologyWeaponSeed,
+  MAX_WEAPON_SEED,
+} from './equipment.ts';
+import { civilizationFor, civilizationTechnologyTier } from './civilization.ts';
 import { plantProfile, type PlantKind } from './botany.ts';
 import { resolveForge, type ForgeRecipe, type ForgeResult } from './forge.ts';
 import { generateArtifact, normalizeArtifactDesign, type ArtifactGenome } from './artifacts.ts';
@@ -221,6 +226,17 @@ type SupplyJob = {
   active: boolean;
   target: Point;
 };
+function ordinaryMarketSeed(
+  seed: number,
+  generation: WorldGeneration,
+  sourceId: string,
+  kind: string,
+) {
+  const base = deriveSeed(seed, 'ordinary-stock-v2', sourceId, kind);
+  return generation < 4
+    ? base
+    : technologyWeaponSeed(base, civilizationTechnologyTier(civilizationFor(seed)));
+}
 type OrdinaryWeapon = {
   version: 2;
   kind: Weapon;
@@ -2525,7 +2541,7 @@ export class Stichos {
     );
     if (!npc) return [];
     return (['staff', 'sword', 'bow'] as const).map((kind) => {
-      const seed = deriveSeed(this.seed, 'ordinary-stock-v2', npc.id, kind),
+      const seed = ordinaryMarketSeed(this.seed, this.world.generation, npc.id, kind),
         profile = generatedWeaponProfile(seed, kind, this.player.level);
       return {
         version: 2 as const,
@@ -2541,12 +2557,21 @@ export class Stichos {
       };
     });
   }
+  get equipmentTechnology() {
+    return this.world.generation >= 4
+      ? civilizationTechnologyTier(civilizationFor(this.seed))
+      : undefined;
+  }
   forgePreview(recipe: ForgeRecipe): {
     ok: boolean;
     message: string;
     construction: ForgeResult | null;
   } {
-    const raw = resolveForge(this.player.appearance.seed, recipe, this.player.level);
+    const contextual =
+      this.equipmentTechnology === undefined
+        ? recipe
+        : { ...recipe, technology: this.equipmentTechnology };
+    const raw = resolveForge(this.player.appearance.seed, contextual, this.player.level);
     let expectedLevel = this.player.level,
       expectedXp = this.player.xp;
     if (raw && this.campaignState.ending) {
@@ -2615,7 +2640,7 @@ export class Stichos {
     belongings[recipe.kind] = {
       seed: made.seed,
       ownerSeed: this.player.appearance.seed,
-      recipe: clone(recipe),
+      recipe: clone(made.recipe),
     };
     this.forgedWeapons.set(this.bodyId, belongings);
     const ordinary = this.ordinaryEquipment.get(this.bodyId);
@@ -4934,7 +4959,8 @@ export class Stichos {
     this.player.appearance.weapon = weapon;
     if (
       this.ordinaryEquipment.get(this.bodyId)?.selected[weapon] !== undefined ||
-      this.forgedWeapons.get(this.bodyId)?.[weapon]
+      this.forgedWeapons.get(this.bodyId)?.[weapon] ||
+      seed !== this.player.appearance.seed
     )
       this.player.appearance.weaponSeed = seed;
     else delete this.player.appearance.weaponSeed;
@@ -5751,7 +5777,7 @@ function validateSave(value: unknown): SaveData {
     ['height', 'build'].every((k) => number(v[k], 0.1, 10)) &&
     ['hairStyle', 'hat'].every((k) => number(v[k], 0, 100, true)) &&
     typeof v.cloak === 'boolean' &&
-    (v.weaponSeed === undefined || number(v.weaponSeed, 0, 0xffffffff, true)) &&
+    (v.weaponSeed === undefined || number(v.weaponSeed, 0, MAX_WEAPON_SEED, true)) &&
     (v.artifactDesign === undefined || validArtifactDesign(v.artifactDesign)) &&
     ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
   if (!object(value) || value.version !== 1 || !number(value.seed, 0, 0xffffffff, true))
@@ -6282,7 +6308,7 @@ function validateSave(value: unknown): SaveData {
           ) ||
           raw.version !== 2 ||
           !['staff', 'sword', 'bow'].includes(raw.kind as string) ||
-          !number(raw.seed, 0, 0xffffffff, true) ||
+          !number(raw.seed, 0, MAX_WEAPON_SEED, true) ||
           !['merchant', 'loot'].includes(raw.source as string) ||
           !text(raw.sourceId, 160)
         )
@@ -6296,7 +6322,12 @@ function validateSave(value: unknown): SaveData {
           raw.source === 'merchant' &&
           (source.role !== 'merchant' ||
             raw.seed !==
-              deriveSeed(value.seed as number, 'ordinary-stock-v2', source.id, raw.kind as string))
+              ordinaryMarketSeed(
+                value.seed as number,
+                (value.worldGeneration ?? 1) as WorldGeneration,
+                source.id,
+                raw.kind as string,
+              ))
         )
           return fail();
         if (
@@ -6313,7 +6344,7 @@ function validateSave(value: unknown): SaveData {
         !Object.entries(pack.selected).every(
           ([kind, seed]) =>
             ['staff', 'sword', 'bow'].includes(kind) &&
-            number(seed, 0, 0xffffffff, true) &&
+            number(seed, 0, MAX_WEAPON_SEED, true) &&
             keys.has(`${kind}:${seed}`),
         )
       )
@@ -6323,7 +6354,7 @@ function validateSave(value: unknown): SaveData {
         (!object(pack.inherited) ||
           !Object.entries(pack.inherited).every(
             ([kind, seed]) =>
-              ['staff', 'sword', 'bow'].includes(kind) && number(seed, 0, 0xffffffff, true),
+              ['staff', 'sword', 'bow'].includes(kind) && number(seed, 0, MAX_WEAPON_SEED, true),
           ))
       )
         return fail();
@@ -6348,7 +6379,7 @@ function validateSave(value: unknown): SaveData {
         !object(record) ||
         !text(record.bodyId, 160) ||
         !['staff', 'sword', 'bow'].includes(record.kind as string) ||
-        !number(record.seed, 0, 0xffffffff, true) ||
+        !number(record.seed, 0, MAX_WEAPON_SEED, true) ||
         !number(record.ownerSeed, -0xffffffff, 0xffffffff, true) ||
         !object(record.recipe) ||
         record.recipe.kind !== record.kind

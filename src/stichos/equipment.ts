@@ -1,6 +1,19 @@
 import { deriveSeed, random } from '../procedural/random.ts';
 
 export type WeaponKind = 'staff' | 'sword' | 'bow';
+export type WeaponTechnology = 0 | 1 | 2 | 3;
+/** Exact safe integers keep all old uint32 designs unchanged and retain 32 bits of new entropy. */
+export const MAX_WEAPON_SEED = 0x4ffffffff;
+export function technologyWeaponSeed(sourceSeed: number, tier: WeaponTechnology): number {
+  if (!Number.isSafeInteger(sourceSeed) || ![0, 1, 2, 3].includes(tier))
+    throw new Error('Invalid equipment technology address.');
+  return 0x100000000 * (tier + 1) + (sourceSeed >>> 0);
+}
+export function weaponTechnology(seed: number): WeaponTechnology | null {
+  if (!Number.isSafeInteger(seed) || seed < -0xffffffff || seed > MAX_WEAPON_SEED)
+    throw new Error('Invalid equipment seed.');
+  return seed <= 0xffffffff ? null : ((Math.floor(seed / 0x100000000) - 1) as WeaponTechnology);
+}
 export type WeaponSubtype =
   | 'arming sword'
   | 'sabre'
@@ -15,7 +28,22 @@ export type WeaponSubtype =
   | 'longbow'
   | 'recurve bow'
   | 'flatbow'
-  | 'reflex bow';
+  | 'reflex bow'
+  | 'knapped knife'
+  | 'broad cleaver'
+  | 'spearblade'
+  | 'crossbow'
+  | 'repeating crossbow'
+  | 'spring launcher'
+  | 'coilcaster'
+  | 'rail carbine'
+  | 'pulse thrower'
+  | 'vibroblade'
+  | 'ceramic sabre'
+  | 'phase lancet'
+  | 'sensor probe'
+  | 'resonance baton'
+  | 'induction rod';
 export interface WeaponConstruction {
   version: 2;
   edge: number;
@@ -34,6 +62,7 @@ export interface WeaponConstruction {
 }
 export interface WeaponGenome {
   generatorVersion: 2;
+  technology: WeaponTechnology | null;
   subtype: WeaponSubtype;
   parts: WeaponConstruction;
   seed: number;
@@ -65,6 +94,85 @@ const materials = {
     ['silver birch', 0.8, '#b5afa0'],
   ],
 } as const;
+const techMaterials: Record<
+  number,
+  Record<WeaponKind, readonly (readonly [string, number, string])[]>
+> = {
+  0: {
+    sword: [
+      ['flint', 1.2, '#828883'],
+      ['bone', 0.7, '#c6bd9e'],
+      ['obsidian', 1.1, '#5d526d'],
+    ],
+    staff: [
+      ['heartwood', 0.65, '#987452'],
+      ['reedwood', 0.48, '#b19e60'],
+      ['ironwood', 1.1, '#765c4b'],
+    ],
+    bow: [
+      ['heartwood', 0.65, '#987452'],
+      ['reedwood', 0.48, '#b19e60'],
+      ['ironwood', 1.1, '#765c4b'],
+    ],
+  },
+  1: {
+    sword: [
+      ['forged steel', 1.05, '#92a9b6'],
+      ['wrought iron', 1.3, '#a49b90'],
+      ['folded bronze', 1.15, '#be9a65'],
+    ],
+    staff: [
+      ['heartwood', 0.65, '#987452'],
+      ['ironwood', 1.15, '#765c4b'],
+      ['silverwood', 0.8, '#b5afa0'],
+    ],
+    bow: [
+      ['heartwood', 0.65, '#987452'],
+      ['ironwood', 1.15, '#765c4b'],
+      ['silverwood', 0.8, '#b5afa0'],
+    ],
+  },
+  2: {
+    sword: [
+      ['spring steel', 1.05, '#9daebb'],
+      ['laminated iron', 1.3, '#949991'],
+      ['machined alloy', 0.9, '#bdaf87'],
+    ],
+    staff: [
+      ['copperwood', 0.95, '#ac805d'],
+      ['reinforced ash', 0.8, '#a69374'],
+      ['brass laminate', 1.2, '#b49a67'],
+    ],
+    bow: [
+      ['spring steel', 1.05, '#9daebb'],
+      ['brass laminate', 1.2, '#b49a67'],
+      ['machined alloy', 0.9, '#bdaf87'],
+    ],
+  },
+  3: {
+    sword: [
+      ['ceramic composite', 0.72, '#b2c6ca'],
+      ['carbon alloy', 0.6, '#536b79'],
+      ['titanium mesh', 0.8, '#a7a5bc'],
+    ],
+    staff: [
+      ['ceramic composite', 0.72, '#b2c6ca'],
+      ['carbon alloy', 0.6, '#536b79'],
+      ['titanium mesh', 0.8, '#a7a5bc'],
+    ],
+    bow: [
+      ['ceramic composite', 0.72, '#b2c6ca'],
+      ['carbon alloy', 0.6, '#536b79'],
+      ['titanium mesh', 0.8, '#a7a5bc'],
+    ],
+  },
+};
+export function weaponMaterialCatalog(
+  kind: WeaponKind,
+  technology: WeaponTechnology | null = null,
+) {
+  return technology === null ? materials[kind] : techMaterials[technology][kind];
+}
 const shade = (hex: string, delta: number) => {
   const n = parseInt(hex.slice(1), 16);
   return (
@@ -80,9 +188,17 @@ const shade = (hex: string, delta: number) => {
 };
 /** Independent construction parameters drive both the silhouette and its actual handling. */
 export function weaponGenome(ownerSeed: number, kind: WeaponKind): WeaponGenome {
-  const seed = deriveSeed(ownerSeed, 'stichos-artifact', kind),
+  const technology = weaponTechnology(ownerSeed);
+  const seed =
+      technology === null
+        ? deriveSeed(ownerSeed, 'stichos-artifact', kind)
+        : deriveSeed(ownerSeed, 'universe-equipment-v1', technology, kind),
     rng = random(seed);
-  const material = materials[kind][Math.floor(rng() * 3)];
+  const materialIndex = Math.floor(rng() * 3);
+  const material =
+    technology === null
+      ? materials[kind][materialIndex]
+      : techMaterials[technology][kind][materialIndex];
   const effect = (['stagger', 'breath', 'warmth'] as const)[Math.floor(rng() * 3)];
   const core = { stagger: '#adbad3', breath: '#7fbea8', warmth: '#d69769' }[effect];
   // Keep the original structural random stream stable: saved forge recipes remain resolvable.
@@ -93,15 +209,27 @@ export function weaponGenome(ownerSeed: number, kind: WeaponKind): WeaponGenome 
     binding = 3 + Math.floor(rng() * 4);
   const part = random(deriveSeed(seed, 'ordinary-construction', 2));
   const choose = <T>(xs: readonly T[]): T => xs[Math.floor(part() * xs.length)];
-  const subtype = choose<WeaponSubtype>(
+  let subtype = choose<WeaponSubtype>(
     kind === 'sword'
       ? ['arming sword', 'sabre', 'dagger', 'falchion', 'needleblade']
       : kind === 'staff'
         ? ['walking pole', 'forked staff', 'crook', 'root staff', 'seed sceptre']
         : ['longbow', 'recurve bow', 'flatbow', 'reflex bow'],
   );
-  const wood = choose(materials.staff),
-    metal = choose(materials.sword);
+  if (technology === 0 && kind === 'sword')
+    subtype = choose(['knapped knife', 'broad cleaver', 'spearblade']);
+  if (technology === 2 && kind === 'bow')
+    subtype = choose(['crossbow', 'repeating crossbow', 'spring launcher']);
+  if (technology === 3)
+    subtype = choose(
+      kind === 'bow'
+        ? ['coilcaster', 'rail carbine', 'pulse thrower']
+        : kind === 'sword'
+          ? ['vibroblade', 'ceramic sabre', 'phase lancet']
+          : ['sensor probe', 'resonance baton', 'induction rod'],
+    );
+  const wood = choose(technology === null ? materials.staff : techMaterials[technology].staff),
+    metal = choose(technology === null ? materials.sword : techMaterials[technology].sword);
   const parts: WeaponConstruction = {
     version: 2,
     edge: 0.65 + part() * 0.65,
@@ -120,6 +248,7 @@ export function weaponGenome(ownerSeed: number, kind: WeaponKind): WeaponGenome 
   };
   return {
     generatorVersion: 2,
+    technology,
     subtype,
     parts,
     seed,
@@ -172,12 +301,27 @@ export function weaponProfileFromGenome(g: WeaponGenome, level: number) {
     'recurve bow': [0.96, 0.95, 1.15],
     flatbow: [0.95, 1.2, 1.05],
     'reflex bow': [0.9, 0.82, 1.2],
+    'knapped knife': [0.64, 0.9, 0.85],
+    'broad cleaver': [0.82, 1.2, 1.05],
+    spearblade: [1.07, 0.88, 1.15],
+    crossbow: [0.92, 1.2, 1.3],
+    'repeating crossbow': [0.83, 1.3, 1.2],
+    'spring launcher': [0.9, 1, 1.15],
+    coilcaster: [1.05, 1.12, 1.5],
+    'rail carbine': [1.18, 1.2, 1.55],
+    'pulse thrower': [0.91, 0.9, 1.35],
+    vibroblade: [1, 0.84, 1.2],
+    'ceramic sabre': [1, 0.7, 1.15],
+    'phase lancet': [1.08, 0.74, 1.2],
+    'sensor probe': [1, 0.78, 0.9],
+    'resonance baton': [0.8, 1.1, 1.35],
+    'induction rod': [1, 0.88, 1.2],
   }[g.subtype] ?? [1, 1, 1];
   const mass = g.density * (g.length / 45) * (0.7 + g.breadth * 0.12) * shape[1];
   const leverage = 0.8 + g.parts.balance * 0.4;
   const prefix = { stagger: 'Steadfast', breath: 'Breathkeeper', warmth: 'Emberbound' }[g.effect];
   return {
-    name: `${prefix} ${g.material} ${g.subtype}`,
+    name: `${g.technology === 3 ? { stagger: 'Impact', breath: 'Recirculating', warmth: 'Thermal' }[g.effect] : prefix} ${g.material} ${g.subtype}`,
     material: g.material,
     effect: g.effect,
     effectDescription: {
@@ -204,7 +348,7 @@ export function weaponProfileFromGenome(g: WeaponGenome, level: number) {
     cooldown: Number(
       ((kind === 'sword' ? 0.34 : kind === 'bow' ? 0.5 : 0.42) + mass * 0.13 * leverage).toFixed(2),
     ),
-    construction: `${g.subtype} · ${g.material} · ${g.length} span · ${g.parts.handleWood} ${g.parts.grip} grip · ${kind === 'sword' ? `${g.parts.guard} guard / ${g.parts.pommel} pommel` : kind === 'bow' ? `${g.parts.flex.toFixed(2)} flex / ${g.breadth} limb` : `${g.parts.shaft} shaft / ${g.parts.headMetal} ferrule`}`,
+    construction: `${g.technology === null ? '' : ['Shaped', 'Forged', 'Mechanical', 'Electronic'][g.technology] + ' · '}${g.subtype} · ${g.material} · ${g.length} span · ${g.parts.handleWood} ${g.parts.grip} grip · ${kind === 'sword' ? `${g.parts.guard} guard / ${g.parts.pommel} pommel` : kind === 'bow' ? `${g.parts.flex.toFixed(2)} flex / ${g.breadth} limb` : `${g.parts.shaft} shaft / ${g.parts.headMetal} ferrule`}`,
   };
 }
 export interface WeaponPixels {
@@ -274,21 +418,92 @@ export function weaponPixels(g: WeaponGenome): WeaponPixels {
       for (let y = a + 1; y < b; y += g.binding - 1)
         stroke(x, y, x + width - 1, y - (p.grip === 'woven' ? 1 : 0), p.grip === 'cord' ? 12 : 4);
   };
-  if (g.kind === 'sword') {
+  const form =
+    (
+      {
+        'knapped knife': 'dagger',
+        'broad cleaver': 'falchion',
+        spearblade: 'needleblade',
+        vibroblade: 'arming sword',
+        'ceramic sabre': 'sabre',
+        'phase lancet': 'needleblade',
+      } as Record<string, string>
+    )[g.subtype] ?? g.subtype;
+  if (g.technology === 3 && g.kind === 'bow') {
+    const barrel = g.subtype === 'rail carbine' ? top : top + 6,
+      end = g.subtype === 'pulse thrower' ? 36 : 30;
+    stroke(14, barrel, 14, 43, 6, 5);
+    stroke(15, barrel, 15, end, 5, 3);
+    stroke(12, end, 12, 44, 3, 9);
+    stroke(13, end + 1, 13, 41, 4, 2);
+    grip(15, 43, 55, 4);
+    stroke(12, 56, 20, 56, 6, 1);
+    if (g.subtype === 'coilcaster')
+      for (let y = barrel + 3; y < end; y += g.binding) stroke(12, y, 20, y, 9, 1);
+    if (g.subtype === 'rail carbine') {
+      stroke(11, barrel + 3, 11, 33, 4, 2);
+      stroke(20, barrel + 3, 20, 33, 4, 2);
+      stroke(11, 33, 21, 33, 6);
+    }
+    if (g.subtype === 'pulse thrower') {
+      ring(16, end - 1, 6, 6, 6);
+      stroke(16, end - 5, 16, end + 3, 9, 2);
+    }
+    stroke(20, 35, 24, 35, 6);
+    stroke(23, 27, 23, 38, 5, 2);
+    set(23, 28, 10);
+    stroke(14, 44, 11, 49, 6);
+    stroke(11, 49, 16, 49, 6);
+  } else if (g.technology === 2 && g.kind === 'bow') {
+    const cy = top + 10,
+      span = 10 + g.crown;
+    stroke(14, top + 4, 14, 57, 3, 4);
+    stroke(15, top + 4, 15, 43, 6, 1);
+    stroke(16, cy, 16 - span, cy + 5, 6, 2);
+    stroke(16, cy, 16 + span - 1, cy + 5, 6, 2);
+    stroke(16 - span, cy + 5, 16, cy + 12, 7);
+    stroke(16, cy + 12, 16 + span, cy + 5, 7);
+    grip(14, 45, 54, 4);
+    if (g.subtype === 'repeating crossbow') stroke(11, cy + 6, 11, cy + 15, 12, 10);
+    if (g.subtype === 'spring launcher')
+      for (let y = cy + 7; y < 42; y += 4) stroke(12, y, 19, y + 1, 12);
+    stroke(17, 47, 22, 47, 6);
+    stroke(22, 47, 18, 52, 6);
+  } else if (g.technology === 3 && g.kind === 'staff') {
+    const instrument = g.subtype === 'resonance baton' ? top + 9 : top;
+    stroke(15, instrument, 15, 59, 6, 3);
+    grip(14, 44, 53, 4);
+    if (g.subtype === 'sensor probe') {
+      stroke(11, instrument + 4, 11, instrument + 13, 3, 10);
+      stroke(13, instrument + 6, 13, instrument + 10, 9, 6);
+      stroke(12, instrument, 12, instrument + 4, 6);
+      stroke(20, instrument, 20, instrument + 4, 6);
+    }
+    if (g.subtype === 'resonance baton') {
+      stroke(12, instrument, 12, instrument + 16, 3, 9);
+      for (let y = instrument + 2; y < instrument + 16; y += g.binding) stroke(11, y, 21, y, 9);
+    }
+    if (g.subtype === 'induction rod') {
+      stroke(12, instrument + 2, 12, instrument + 12, 6);
+      stroke(19, instrument + 2, 19, instrument + 12, 6);
+      stroke(12, instrument + 12, 19, instrument + 12, 6);
+      stroke(14, instrument + 6, 17, instrument + 6, 9);
+    }
+  } else if (g.kind === 'sword') {
     const guardY = 44,
-      bladeTop = g.subtype === 'dagger' ? top + 12 : top;
+      bladeTop = form === 'dagger' ? top + 12 : top;
     let prev = { x: 16, y: guardY };
     for (let y = guardY; y >= bladeTop; y--) {
       const t = (guardY - y) / Math.max(1, guardY - bladeTop);
       const curve =
-        g.subtype === 'sabre'
+        form === 'sabre'
           ? (4 + Math.abs(g.curvature)) * t * t
-          : g.subtype === 'falchion'
+          : form === 'falchion'
             ? 3 * t * t
             : g.curvature * 0.2 * Math.sin(t * Math.PI);
       const center = 16 + curve;
-      const bulb = g.subtype === 'falchion' ? 1 + Math.sin(t * Math.PI) * 0.65 : 1;
-      const base = g.subtype === 'needleblade' ? 1.1 : g.breadth * 0.65;
+      const bulb = form === 'falchion' ? 1 + Math.sin(t * Math.PI) * 0.65 : 1;
+      const base = form === 'needleblade' ? 1.1 : g.breadth * 0.65;
       const half = Math.max(0.2, base * bulb * (1 - t * p.taper) * Math.min(1, (1 - t) * 7 + 0.15));
       stroke(prev.x, prev.y, center, y, 6);
       for (let x = Math.floor(center - half); x <= Math.ceil(center + half); x++)
@@ -319,6 +534,11 @@ export function weaponPixels(g: WeaponGenome): WeaponPixels {
     if (p.pommel === 'drop') {
       stroke(15, 57, 17, 57, 6);
       stroke(16, 57, 16, 60, 12);
+    }
+    if (g.technology === 3) {
+      for (let y = bladeTop + 6; y < 43; y += g.binding) stroke(16, y, 17, y, 9);
+      stroke(13, 46, 13, 54, 6);
+      stroke(13, 54, 17, 54, 6);
     }
     if (p.exposedCore) {
       set(16, 44, 9);
