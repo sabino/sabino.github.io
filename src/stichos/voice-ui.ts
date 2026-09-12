@@ -8,6 +8,9 @@ type VoiceUiOptions = {
   peers: () => readonly Traveler[];
   canTalk: () => boolean;
   openSettings: (html: string, mount: (element: HTMLElement) => void) => void;
+  /** Navigation only: opening setup never joins a room or requests a microphone. */
+  openRoomSetup?: () => void;
+  closeSettings?: () => void;
   onChange?: () => void;
 };
 const escape = (value: unknown) =>
@@ -36,11 +39,11 @@ export function mountVoiceUi(options: VoiceUiOptions) {
     voice.release();
   }
   function toggleOrPress() {
-    if (!options.canTalk()) return;
-    if (!voice.snapshot.microphone) {
+    if (!voice.snapshot.microphone || !voice.snapshot.availability.canCapture) {
       showSettings();
       return;
     }
+    if (!options.canTalk()) return;
     if (
       voice.settings.ptt === 'toggle' &&
       (voice.snapshot.transmitting || voice.snapshot.requesting)
@@ -76,7 +79,7 @@ export function mountVoiceUi(options: VoiceUiOptions) {
   function keydown(event: KeyboardEvent) {
     if (event.repeat || event.isComposing || editable(event.target)) return;
     const focusedTalk = event.target === talk && (event.key === ' ' || event.key === 'Enter');
-    if (!(event.code === 'KeyV' || focusedTalk) || !options.canTalk()) return;
+    if (!(event.code === 'KeyV' || focusedTalk) || (!focusedTalk && !options.canTalk())) return;
     // Enter/Space in toggle mode are handled by the native button click.
     if (focusedTalk && voice.settings.ptt === 'toggle') return;
     event.preventDefault();
@@ -101,11 +104,14 @@ export function mountVoiceUi(options: VoiceUiOptions) {
     if (disposed) return;
     const state = voice.snapshot,
       settings = voice.settings;
+    const availability = state.availability;
     bar.dataset.state = state.transmitting ? 'speaking' : state.status;
     talk.textContent = state.requesting
       ? 'Waiting…'
       : !state.microphone
-        ? 'Enable mic'
+        ? availability.canCapture
+          ? 'Set up mic'
+          : 'Voice setup'
         : settings.ptt === 'toggle'
           ? state.transmitting
             ? 'Stop talking'
@@ -116,18 +122,25 @@ export function mountVoiceUi(options: VoiceUiOptions) {
       'aria-label',
       `${talk.textContent}. ${settings.mode}, ${state.ranges[settings.mode]} paces. V shortcut.`,
     );
-    talk.disabled = !state.supported;
+    // Unavailable capture is a setup state, never a dead/faded primary control.
+    talk.disabled = false;
+    talk.dataset.setup = String(!state.microphone);
+    talk.title = state.microphone ? 'Hold to speak nearby. Release to stop.' : availability.message;
     range.value = settings.mode;
     const status = bar.querySelector<HTMLElement>('#v-voice-status')!;
     const label = state.requesting
       ? 'Waiting for voice'
-      : state.transmitting
-        ? `${settings.mode} · ${state.ranges[settings.mode]} paces`
-        : state.status === 'ready'
-          ? 'Mic ready · V to talk'
-          : state.status === 'listening'
-            ? 'Listen only'
-            : state.message;
+      : !availability.canListen
+        ? availability.reason === 'room-required'
+          ? 'Join for voice'
+          : 'Setup needed'
+        : state.transmitting
+          ? `${settings.mode} · ${state.ranges[settings.mode]} paces`
+          : state.status === 'ready'
+            ? 'Mic ready · V to talk'
+            : state.status === 'listening'
+              ? 'Listen only'
+              : state.message;
     if (status.textContent !== label) status.textContent = label;
     status.title = state.message;
     const names = new Map(options.peers().map((peer) => [peer.id, peer.name]));
@@ -135,7 +148,26 @@ export function mountVoiceUi(options: VoiceUiOptions) {
       .map((id) => names.get(id) ?? 'Traveler')
       .join(', ');
     if (panel?.isConnected) {
-      panel.querySelector<HTMLElement>('#v-voice-detail-status')!.textContent = state.message;
+      panel.querySelector<HTMLElement>('#v-voice-detail-status')!.textContent =
+        state.microphoneIssue ?? state.message;
+      panel.querySelector<HTMLElement>('#v-voice-setup-message')!.textContent =
+        availability.message;
+      const join = panel.querySelector<HTMLButtonElement>('#v-voice-room-setup')!;
+      join.hidden =
+        !options.openRoomSetup ||
+        !['room-required', 'host-unsupported'].includes(availability.reason);
+      panel.querySelector<HTMLButtonElement>('#v-listen-consent')!.hidden = !availability.canListen;
+      panel.querySelector<HTMLButtonElement>('#v-mic-consent')!.hidden =
+        !availability.canCapture && !state.microphone;
+      const ready = panel.querySelector<HTMLElement>('#v-voice-ready-help')!;
+      ready.hidden = !state.microphone;
+      ready.textContent =
+        settings.ptt === 'hold'
+          ? 'Ready. Return to the game, then press and hold the talk button beside the range selector. Release to stop. No sound is sent until you press.'
+          : 'Ready. Return to the game and tap Talk to start. Tap again to stop. No sound is sent until you press.';
+      const back = panel.querySelector<HTMLButtonElement>('#v-voice-return')!;
+      back.hidden = !options.closeSettings;
+      back.textContent = state.microphone ? 'Return to game · microphone ready' : 'Return to game';
       const meter = panel.querySelector<HTMLMeterElement>('#v-mic-meter');
       if (meter) meter.value = state.inputLevel;
       const button = panel.querySelector<HTMLButtonElement>('#v-mic-consent');
@@ -149,7 +181,7 @@ export function mountVoiceUi(options: VoiceUiOptions) {
     release();
     const settings = voice.settings;
     options.openSettings(
-      `<div class="v-window-heading"><h2>Nearby voices</h2></div><p>Hear people around your body. Choose Listen only, or enable your microphone and hold the talk button. Voice travels through this world’s operator; it is never recorded in saves.</p><div class="v-voice-consent"><button id="v-listen-consent">Listen only</button><button id="v-mic-consent">${voice.snapshot.microphone ? 'Turn microphone off' : 'Enable my microphone'}</button><button id="v-voice-off">Turn voice off</button></div><p id="v-voice-detail-status" class="v-voice-message" role="status">${escape(voice.snapshot.message)}</p><div class="v-audio-controls"><label>Voice output <input data-voice-setting="output" type="range" min="0" max="1" step="0.05" value="${settings.output}"></label><label>Microphone gain <input data-voice-setting="input" type="range" min="0" max="2" step="0.05" value="${settings.input}"></label><label>Input level <meter id="v-mic-meter" min="0" max="1" low="0.02" high="0.85" optimum="0.45" value="0"></meter></label><label>Talk button <select id="v-ptt-behavior"><option value="hold" ${settings.ptt === 'hold' ? 'selected' : ''}>Hold to talk</option><option value="toggle" ${settings.ptt === 'toggle' ? 'selected' : ''}>Tap to start / tap to stop</option></select></label><label>Microphone <select id="v-input-device"><option value="">System default</option></select></label></div><p class="v-muted">Whisper: ${voice.snapshot.ranges.whisper} paces. Normal: ${voice.snapshot.ranges.normal}. Shout: ${voice.snapshot.ranges.shout}. Walls and distance soften sound. Headphones help prevent echo. Your browser and operating system choose speaker/Bluetooth routing.</p><h3>Other travelers</h3><div class="v-voice-people">${
+      `<div class="v-window-heading"><h2>Nearby voices</h2></div><div class="v-voice-setup-card"><p id="v-voice-setup-message">${escape(voice.snapshot.availability.message)}</p><button id="v-voice-room-setup">Choose a shared planet / room</button><p id="v-voice-ready-help" class="v-voice-ready-help" hidden></p><button id="v-voice-return">Return to game</button></div><p>Listen only needs no microphone permission. Enable my microphone asks for your permission; only the talk button transmits. Voice travels through this world’s operator and is never recorded in saves.</p><div class="v-voice-consent"><button id="v-listen-consent">Listen only</button><button id="v-mic-consent">${voice.snapshot.microphone ? 'Turn microphone off' : 'Enable my microphone'}</button><button id="v-voice-off">Turn voice off</button></div><p id="v-voice-detail-status" class="v-voice-message" role="status">${escape(voice.snapshot.message)}</p><div class="v-audio-controls"><label>Voice output <input data-voice-setting="output" type="range" min="0" max="1" step="0.05" value="${settings.output}"></label><label>Microphone gain <input data-voice-setting="input" type="range" min="0" max="2" step="0.05" value="${settings.input}"></label><label>Input level <meter id="v-mic-meter" min="0" max="1" low="0.02" high="0.85" optimum="0.45" value="0"></meter></label><label>Talk button <select id="v-ptt-behavior"><option value="hold" ${settings.ptt === 'hold' ? 'selected' : ''}>Hold to talk</option><option value="toggle" ${settings.ptt === 'toggle' ? 'selected' : ''}>Tap to start / tap to stop</option></select></label><label>Microphone <select id="v-input-device"><option value="">System default</option></select></label></div><p class="v-muted">Whisper: ${voice.snapshot.ranges.whisper} paces. Normal: ${voice.snapshot.ranges.normal}. Shout: ${voice.snapshot.ranges.shout}. Walls and distance soften sound. Headphones help prevent echo. Your browser and operating system choose speaker/Bluetooth routing.</p><h3>Other travelers</h3><div class="v-voice-people">${
         options
           .peers()
           .map((peer) => {
@@ -164,24 +196,41 @@ export function mountVoiceUi(options: VoiceUiOptions) {
         element = element.querySelector<HTMLElement>('[data-screen="voice"]') ?? element;
         panel = element;
         const active = () => !disposed && element.isConnected;
+        element.querySelector<HTMLButtonElement>('#v-voice-room-setup')!.onclick = () => {
+          release();
+          options.openRoomSetup?.();
+        };
+        element.querySelector<HTMLButtonElement>('#v-voice-return')!.onclick = () => {
+          release();
+          options.closeSettings?.();
+        };
         let busy = false;
+        let consentEpoch = 0;
+        const consentButtons = element.querySelectorAll<HTMLButtonElement>(
+          '#v-listen-consent,#v-mic-consent',
+        );
+        function cancelConsent() {
+          consentEpoch++;
+          busy = false;
+          consentButtons.forEach((button) => {
+            button.disabled = false;
+          });
+        }
         async function consent(action: () => Promise<void>) {
           if (busy) return;
           busy = true;
-          const buttons = element.querySelectorAll<HTMLButtonElement>(
-            '#v-listen-consent,#v-mic-consent',
-          );
-          buttons.forEach((button) => {
+          const epoch = ++consentEpoch;
+          consentButtons.forEach((button) => {
             button.disabled = true;
           });
           try {
             await action();
           } catch (error) {
-            showError(error);
+            if (epoch === consentEpoch) showError(error);
           } finally {
-            busy = false;
-            if (active())
-              buttons.forEach((button) => {
+            if (epoch === consentEpoch) busy = false;
+            if (epoch === consentEpoch && active())
+              consentButtons.forEach((button) => {
                 button.disabled = false;
               });
           }
@@ -205,8 +254,10 @@ export function mountVoiceUi(options: VoiceUiOptions) {
               await loadDevices();
             });
         };
-        element.querySelector<HTMLButtonElement>('#v-voice-off')!.onclick = () =>
+        element.querySelector<HTMLButtonElement>('#v-voice-off')!.onclick = () => {
+          cancelConsent();
           voice.disconnect();
+        };
         element.querySelectorAll<HTMLInputElement>('[data-voice-setting]').forEach((input) => {
           input.oninput = () =>
             voice.setSettings({ [input.dataset.voiceSetting!]: Number(input.value) });

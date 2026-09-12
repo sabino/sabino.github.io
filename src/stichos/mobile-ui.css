@@ -213,21 +213,46 @@ summary:focus-visible {
   .s-shell .s-mobile-move,
   .s-shell.chat-collapsed .s-mobile-move,
   .s-shell:not(.chat-collapsed) .s-mobile-move {
+    display: grid;
     position: absolute;
     bottom: 10px;
     left: 10px;
     grid-template-columns: repeat(3, 46px);
     grid-template-rows: repeat(2, 46px);
     gap: 3px;
+    z-index: 9;
+    opacity: 0.8;
+    touch-action: none;
   }
   .s-mobile-move button {
+    padding: 0;
     width: 46px;
     height: 46px;
     min-height: 46px;
     font-size: 24px;
+    font-family: system-ui, sans-serif;
+    background: #112b38c9;
+    color: #d5dfd4;
+    border-color: #9baf9855;
     touch-action: none;
     -webkit-touch-callout: none;
     user-select: none;
+  }
+  .s-mobile-move button[data-move='w'] {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .s-mobile-move button[data-move='a'] {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .s-mobile-move button[data-move='s'] {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .s-mobile-move button[data-move='d'] {
+    grid-column: 3;
+    grid-row: 2;
   }
   .s-world-wrap {
     min-height: 0;
@@ -407,8 +432,8 @@ summary:focus-visible {
     top: 6px;
   }
   .s-shell .s-mobile-move {
-    transform: scale(0.9);
-    transform-origin: bottom left;
+    /* Keep the actual hit boxes >=44px when a phone rotates. */
+    transform: none;
   }
   .s-dialog-heading {
     padding: 3px 8px;
@@ -482,6 +507,17 @@ summary:focus-visible {
   }
   .s-window[data-screen='sound'] .s-menu-buttons {
     max-width: none;
+  }
+}
+/* Desktop sidebar rules start at 900px. Explicitly establish both columns at
+   that boundary: the older universe sheet's max-width:900px rule is inclusive. */
+@media (min-width: 900px) {
+  .s-shell {
+    --s-width: clamp(286px, 24.4vw, 400px);
+    grid-template-columns: minmax(0, 1fr) var(--s-width);
+  }
+  .s-header {
+    grid-area: 1 / 1 / 2 / 3;
   }
 }
 @media (pointer: coarse) and (min-width: 900px) {

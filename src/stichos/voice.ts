@@ -37,6 +37,88 @@ export interface VoiceSnapshot {
   speakers: string[];
   ranges: Record<VoiceMode, number>;
   supported: boolean;
+  availability: VoiceAvailability;
+  microphoneIssue: string | null;
+}
+export interface VoiceAvailability {
+  reason:
+    | 'room-required'
+    | 'host-unsupported'
+    | 'insecure'
+    | 'browser-unsupported'
+    | 'capture-unsupported'
+    | 'available';
+  canListen: boolean;
+  canCapture: boolean;
+  message: string;
+}
+/** Capability and membership are separate from microphone consent. This never requests access. */
+export function voiceAvailability(environment: {
+  joined: boolean;
+  endpoint: boolean;
+  secure: boolean;
+  webAudio: boolean;
+  worklet: boolean;
+  capture: boolean;
+  policyAllowsCapture?: boolean;
+}): VoiceAvailability {
+  const unavailable = (
+    reason: VoiceAvailability['reason'],
+    message: string,
+  ): VoiceAvailability => ({ reason, canListen: false, canCapture: false, message });
+  if (!environment.secure)
+    return unavailable(
+      'insecure',
+      'Voice needs a secure HTTPS page. Open the HTTPS game address; text chat still works.',
+    );
+  if (!environment.webAudio)
+    return unavailable(
+      'browser-unsupported',
+      'This browser cannot play room voice. Open Verso in a current Safari or Chrome browser, or use text chat.',
+    );
+  if (!environment.joined)
+    return unavailable(
+      'room-required',
+      'You are playing on your own. Join a shared planet or room first, then choose listening or microphone access.',
+    );
+  if (!environment.endpoint)
+    return unavailable(
+      'host-unsupported',
+      'This room does not offer voice. Choose a shared planet on a voice-enabled world server, or keep using text here.',
+    );
+  if (!environment.worklet || !environment.capture || environment.policyAllowsCapture === false)
+    return {
+      reason: 'capture-unsupported',
+      canListen: true,
+      canCapture: false,
+      message:
+        environment.policyAllowsCapture === false
+          ? 'This embedded page blocks microphone access. Open the game directly in your browser. Listen only and text remain available.'
+          : 'Microphone capture is unavailable in this browser. You can listen without a microphone, or open the game in a current Safari or Chrome browser.',
+    };
+  return {
+    reason: 'available',
+    canListen: true,
+    canCapture: true,
+    message:
+      'Choose Listen only, or enable your microphone. Then return to the game and hold the talk button to speak.',
+  };
+}
+export function microphoneErrorMessage(error: unknown): string {
+  const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError')
+    return 'Microphone access was denied or blocked. Allow Microphone for this site in your browser settings, then tap Enable my microphone again. Listen only and text still work.';
+  if (name === 'NotFoundError')
+    return 'No microphone was found. Connect a microphone or use Listen only and text.';
+  if (name === 'NotReadableError')
+    return 'The microphone is unavailable or in use. Close other recording apps, check your headset, then try again. Listen only still works.';
+  if (name === 'OverconstrainedError')
+    return 'The selected microphone is unavailable. Choose System default, then enable your microphone again.';
+  if (name === 'InvalidStateError' || name === 'AbortError')
+    return 'Microphone setup was interrupted. Return to this game tab and tap Enable my microphone again.';
+  return error instanceof Error
+    ? error.message
+    : 'Microphone setup failed. Check browser permissions, then try again. Listen only and text remain available.';
 }
 export interface SpatialVoiceOptions {
   listener: () => VoicePoint;
@@ -92,6 +174,15 @@ export class SpatialVoice {
     speakers: [],
     ranges: { ...VOICE_RANGES },
     supported: false,
+    availability: voiceAvailability({
+      joined: false,
+      endpoint: false,
+      secure: true,
+      webAudio: true,
+      worklet: true,
+      capture: true,
+    }),
+    microphoneIssue: null,
   };
   private socket: WebSocket | null = null;
   private context: AudioContext | null = null;
@@ -169,17 +260,39 @@ export class SpatialVoice {
     };
   }
   get snapshot(): Readonly<VoiceSnapshot> {
-    return { ...this.state, speakers: [...this.state.speakers], ranges: { ...this.state.ranges } };
+    this.refreshSupport();
+    return {
+      ...this.state,
+      speakers: [...this.state.speakers],
+      ranges: { ...this.state.ranges },
+      availability: { ...this.state.availability },
+    };
   }
   private changed() {
     this.onChange();
   }
   private refreshSupport() {
-    this.state.supported =
-      !!this.connection.voiceEndpoint &&
-      typeof AudioContext !== 'undefined' &&
-      typeof AudioWorkletNode !== 'undefined' &&
-      isSecureContext;
+    const policy = document as Document & {
+      permissionsPolicy?: { allowsFeature(name: string): boolean };
+      featurePolicy?: { allowsFeature(name: string): boolean };
+    };
+    let policyAllowsCapture = true;
+    try {
+      policyAllowsCapture =
+        (policy.permissionsPolicy ?? policy.featurePolicy)?.allowsFeature('microphone') !== false;
+    } catch {
+      /* Unknown policy is resolved by getUserMedia. */
+    }
+    this.state.availability = voiceAvailability({
+      joined: this.connection.status === 'online',
+      endpoint: !!this.connection.voiceEndpoint,
+      secure: typeof isSecureContext !== 'undefined' && isSecureContext,
+      webAudio: typeof AudioContext !== 'undefined',
+      worklet: typeof AudioWorkletNode !== 'undefined',
+      capture: typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia,
+      policyAllowsCapture,
+    });
+    this.state.supported = this.state.availability.canListen;
   }
   private fail(error: unknown) {
     this.state.status = 'error';
@@ -249,10 +362,7 @@ export class SpatialVoice {
   async enableListening() {
     if (this.disposed) return;
     this.refreshSupport();
-    if (!this.state.supported)
-      throw Error(
-        'Voice needs HTTPS, a current browser, and a voice-enabled world node. Text is always available.',
-      );
+    if (!this.state.availability.canListen) throw Error(this.state.availability.message);
     this.listeningWanted = true;
     await this.audio();
     if (this.socket?.readyState === WebSocket.OPEN) {
@@ -317,7 +427,7 @@ export class SpatialVoice {
             if (typeof m.ranges?.[mode] === 'number' && m.ranges[mode] > 0 && m.ranges[mode] <= 128)
               this.state.ranges[mode] = m.ranges[mode];
           this.state.status = 'listening';
-          this.state.message = 'Listening nearby. Microphone is off.';
+          this.state.message = this.state.microphoneIssue ?? 'Listening nearby. Microphone is off.';
           this.sendBlocks();
           this.changed();
           resolve();
@@ -363,11 +473,12 @@ export class SpatialVoice {
     });
   }
   async enableMicrophone() {
+    if (this.disposed) return;
+    this.refreshSupport();
+    if (!this.state.availability.canCapture) throw Error(this.state.availability.message);
     const epoch = ++this.captureEpoch;
-    await this.enableListening();
-    if (epoch !== this.captureEpoch || this.disposed) return;
-    if (!navigator.mediaDevices?.getUserMedia)
-      throw Error('Microphone capture is unavailable. Use listen-only or text.');
+    this.state.microphoneIssue = null;
+    this.release();
     this.disableCapture();
     const constraints: MediaTrackConstraints = {
       channelCount: 1,
@@ -376,30 +487,38 @@ export class SpatialVoice {
       autoGainControl: false,
       ...(this.config.deviceId ? { deviceId: { exact: this.config.deviceId } } : {}),
     };
-    let stream: MediaStream;
+    // Both browser-gated calls begin in the original consent gesture. Neither
+    // microphone permission nor AudioContext.resume waits for a network round trip.
+    const listening = this.enableListening();
+    let permission: Promise<MediaStream>;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: constraints, video: false });
+      permission = navigator.mediaDevices.getUserMedia({ audio: constraints, video: false });
     } catch (e) {
-      this.state.message = 'Microphone was not enabled. Listen-only and text remain available.';
-      this.changed();
-      throw e;
+      permission = Promise.reject(e);
     }
-    if (
-      epoch !== this.captureEpoch ||
-      this.disposed ||
-      document.visibilityState === 'hidden' ||
-      this.connection.status !== 'online'
-    ) {
-      stream.getTracks().forEach((t) => t.stop());
-      return;
-    }
-    for (const track of stream.getAudioTracks()) {
-      track.enabled = false;
-      track.onended = () => this.disableMicrophone();
-      track.onmute = () => this.release();
-    }
-    this.stream = stream;
     try {
+      const capture = permission.then((stream) => {
+        // Permission can resolve while the authenticated voice socket is still
+        // connecting. Keep hardware muted, and make cancellation stop it at once.
+        for (const track of stream.getAudioTracks()) track.enabled = false;
+        if (
+          epoch !== this.captureEpoch ||
+          this.disposed ||
+          document.visibilityState === 'hidden' ||
+          this.connection.status !== 'online'
+        ) {
+          stream.getTracks().forEach((track) => track.stop());
+          return null;
+        }
+        this.stream = stream;
+        for (const track of stream.getAudioTracks()) {
+          track.onended = () => this.disableMicrophone();
+          track.onmute = () => this.release();
+        }
+        return stream;
+      });
+      const [, stream] = await Promise.all([listening, capture]);
+      if (!stream || epoch !== this.captureEpoch || this.disposed || this.stream !== stream) return;
       if (!this.workletLoaded) {
         await this.context!.audioWorklet.addModule(
           new URL('./voice-capture.worklet.js', import.meta.url).href,
@@ -443,11 +562,18 @@ export class SpatialVoice {
       this.audioSession(true);
       this.state.microphone = true;
       this.state.status = 'ready';
-      this.state.message = 'Microphone ready. Hold Talk to transmit.';
+      this.state.message =
+        this.config.ptt === 'toggle'
+          ? 'Microphone ready. Return to the game and tap Talk to start; tap again to stop.'
+          : 'Microphone ready. Return to the game, then press and hold the talk button. Release to stop.';
       this.changed();
     } catch (e) {
+      if (epoch !== this.captureEpoch || this.disposed) return;
       this.disableMicrophone();
-      throw e;
+      this.state.message = microphoneErrorMessage(e);
+      this.state.microphoneIssue = this.state.message;
+      this.changed();
+      throw Error(this.state.message);
     }
   }
   async inputDevices() {
@@ -514,6 +640,7 @@ export class SpatialVoice {
     this.changed();
   }
   release() {
+    const endingPtt = this.state.transmitting || this.state.requesting;
     if (this.admissionTimer) clearTimeout(this.admissionTimer);
     this.admissionTimer = null;
     if (this.holdTimer) clearTimeout(this.holdTimer);
@@ -537,6 +664,16 @@ export class SpatialVoice {
     this.state.transmitting = false;
     this.state.requesting = false;
     this.state.inputLevel = 0;
+    if (
+      endingPtt &&
+      (this.state.status === 'ready' || this.state.status === 'listening') &&
+      !this.state.microphoneIssue
+    )
+      this.state.message = this.state.microphone
+        ? this.config.ptt === 'toggle'
+          ? 'Microphone ready. Tap Talk to start; tap again to stop.'
+          : 'Microphone ready. Press and hold the talk button; release to stop.'
+        : 'Listening nearby. Microphone is off.';
     this.updateActivity();
     this.changed();
   }
@@ -558,6 +695,7 @@ export class SpatialVoice {
   }
   disableMicrophone() {
     this.captureEpoch++;
+    this.state.microphoneIssue = null;
     this.release();
     this.disableCapture();
     this.audioSession(false);

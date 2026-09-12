@@ -21,7 +21,11 @@ import {
   voicePeerId,
 } from '../src/stichos/voice-protocol.ts';
 import { voiceAcoustics, voiceOcclusion } from '../src/stichos/voice-acoustics.ts';
-import { normalizeVoiceSettings } from '../src/stichos/voice.ts';
+import {
+  normalizeVoiceSettings,
+  voiceAvailability,
+  microphoneErrorMessage,
+} from '../src/stichos/voice.ts';
 
 class Socket extends EventEmitter {
   readyState = 1;
@@ -292,6 +296,37 @@ test('personal settings normalization bounds gain and excludes unrelated saved f
   assert.equal(s.ptt, 'hold');
   assert.ok(!JSON.stringify(s).includes('recording'));
 });
+test('voice setup distinguishes room membership, playback support and microphone restrictions', () => {
+  const ready = {
+    joined: true,
+    endpoint: true,
+    secure: true,
+    webAudio: true,
+    worklet: true,
+    capture: true,
+  };
+  assert.equal(voiceAvailability(ready).canCapture, true);
+  const solo = voiceAvailability({ ...ready, joined: false, endpoint: false });
+  assert.equal(solo.reason, 'room-required');
+  assert.match(solo.message, /Join a shared planet or room/);
+  assert.equal(solo.canListen, false);
+  assert.equal(voiceAvailability({ ...ready, endpoint: false }).reason, 'host-unsupported');
+  assert.equal(voiceAvailability({ ...ready, secure: false }).reason, 'insecure');
+  assert.equal(voiceAvailability({ ...ready, webAudio: false }).reason, 'browser-unsupported');
+  for (const restriction of [
+    { worklet: false },
+    { capture: false },
+    { policyAllowsCapture: false },
+  ]) {
+    const capability = voiceAvailability({ ...ready, ...restriction });
+    assert.equal(capability.reason, 'capture-unsupported');
+    assert.equal(capability.canListen, true, 'capture restrictions preserve listen-only');
+    assert.equal(capability.canCapture, false);
+  }
+  assert.match(microphoneErrorMessage({ name: 'NotAllowedError' }), /browser settings/);
+  assert.match(microphoneErrorMessage({ name: 'OverconstrainedError' }), /System default/);
+  assert.match(microphoneErrorMessage({ name: 'NotReadableError' }), /in use/);
+});
 test('capture worklet resamples 48kHz into independent 16kHz frames and emits nothing with PTT off', async () => {
   const source = await readFile(
     new URL('../src/stichos/voice-capture.worklet.js', import.meta.url),
@@ -468,12 +503,15 @@ test('microphone consent cancellation stops late tracks; PTT release/background 
   );
   put('WebSocket', { OPEN: 1 });
   let resolveCapture: (s: any) => void = () => {};
+  let captureCalls = 0;
   put('navigator', {
     mediaDevices: {
-      getUserMedia: () =>
-        new Promise((r) => {
+      getUserMedia: () => {
+        captureCalls++;
+        return new Promise((r) => {
           resolveCapture = r;
-        }),
+        });
+      },
       enumerateDevices: async () => [],
     },
   });
@@ -493,8 +531,12 @@ test('microphone consent cancellation stops late tracks; PTT release/background 
     peerId: 'test',
   };
   voice = new SpatialVoice(game, { listener: () => ({ x: 0, y: 0 }) });
-  voice.enableListening = async () => {
+  let resolveListening: () => void = () => {};
+  voice.enableListening = () => {
     voice.context ??= new Context();
+    return new Promise<void>((resolve) => {
+      resolveListening = resolve;
+    });
   };
   let stops = 0;
   const track = {
@@ -507,13 +549,19 @@ test('microphone consent cancellation stops late tracks; PTT release/background 
     },
     stream = { getTracks: () => [track], getAudioTracks: () => [track] };
   const pending = voice.enableMicrophone();
-  await Promise.resolve();
+  assert.equal(
+    captureCalls,
+    1,
+    'getUserMedia starts inside the consent gesture before awaiting network listening',
+  );
   voice.disableMicrophone();
   resolveCapture(stream);
+  resolveListening();
   await pending;
   assert.equal(stops, 1);
   assert.equal(voice.snapshot.microphone, false);
   assert.equal(voice.snapshot.transmitting, false);
+  voice.enableListening = async () => {};
   const allowed = voice.enableMicrophone();
   await Promise.resolve();
   resolveCapture(stream);
@@ -529,6 +577,7 @@ test('microphone consent cancellation stops late tracks; PTT release/background 
   assert.equal(voice.snapshot.transmitting, false);
   const canceledRequest = voice.pttSerial;
   voice.release();
+  assert.match(voice.snapshot.message, /Microphone ready/);
   voice.admitPtt(canceledRequest, 'normal');
   assert.equal(track.enabled, false, 'a late acknowledgment never resumes released PTT');
   voice.press();
@@ -540,6 +589,12 @@ test('microphone consent cancellation stops late tracks; PTT release/background 
   voice.release();
   assert.equal(track.enabled, false);
   assert.equal(sent.at(-1).active, false);
+  assert.match(voice.snapshot.message, /Microphone ready/);
+  voice.state.status = 'interrupted';
+  voice.state.message = 'Voice interrupted. Tap Listen to retry.';
+  voice.release();
+  assert.equal(voice.snapshot.message, 'Voice interrupted. Tap Listen to retry.');
+  voice.state.status = 'ready';
   const blockedId = crypto.randomUUID();
   voice.setPeerSettings(blockedId, { blocked: true });
   assert.deepEqual(
@@ -564,6 +619,24 @@ test('microphone consent cancellation stops late tracks; PTT release/background 
   assert.equal(voice.snapshot.transmitting, false);
   assert.equal(stops, 2);
   assert.equal(voice.snapshot.status, 'interrupted');
+  documentMock.visibilityState = 'visible';
+  game.status = 'offline';
+  await assert.rejects(voice.enableMicrophone(), /Join a shared planet or room/);
+  assert.equal(captureCalls, 2, 'solo setup never requests microphone permission');
+  game.status = 'online';
+  voice.enableListening = async () => {
+    throw Error('Network unavailable');
+  };
+  const failedNetwork = voice.enableMicrophone();
+  await assert.rejects(failedNetwork, /Network unavailable/);
+  resolveCapture(stream);
+  await Promise.resolve();
+  assert.equal(
+    stops,
+    3,
+    'permission granted after transport failure immediately stops the late track',
+  );
+  assert.equal(voice.snapshot.microphone, false);
 });
 
 test('rejected voice sockets retain connection limits until close and uncooperative closes are bounded', async (t) => {
