@@ -3,6 +3,10 @@ import './notebook.css';
 import './life.css';
 import './universe-ui.css';
 import './screen-ui.css';
+import './mobile-ui.css';
+import { mountMobileViewport, isTextEntry } from './mobile-viewport.ts';
+import { createWorldExperience } from './experience.ts';
+import { mountVoiceUi } from './voice-ui.ts';
 import aiCompanionGuide from '../../docs/stichos/AI-COMPANION.md?url';
 import { drawProduction } from './production-art';
 import { creationHtml, mountCreation } from './creation';
@@ -26,7 +30,7 @@ import {
   publicRoomCode,
 } from './universe';
 import type { Geography, RoomInvitation, Planet } from './universe';
-import { requestInstall } from '../install';
+import { requestInstall, appMode } from '../install';
 import qrcode from 'qrcode-generator';
 import { claimLifeTab, releaseLifeTab } from './life-lease';
 import { mountLife } from './life';
@@ -54,7 +58,7 @@ import type { ItemId, Npc, Point, Prop } from './types';
 void registerOffline();
 const root = document.getElementById('app')!;
 root.innerHTML = `<main class="s-shell">
- <header class="s-header"><a class="s-brand" href="?">VERSO<span>One universe, many lives</span></a><div class="s-location"><strong id="s-place">Vespera</strong><span id="s-coordinates">Stíchos · 3886</span></div><nav><button id="s-sound" title="Sound">♫</button><button id="s-together" title="Play together">Together</button><button id="s-life" title="Professions, homes and clothing (L)">Life</button><button id="s-journal" title="Journal (J)">Journal <kbd>J</kbd></button><button id="s-pause" aria-label="Pause">Ⅱ</button></nav></header>
+ <header class="s-header"><a class="s-brand" href="?">VERSO<span>One universe, many lives</span></a><div class="s-location"><strong id="s-place">Vespera</strong><span id="s-coordinates">Stíchos · 3886</span></div><nav><button id="s-sound" title="Sound and app settings" aria-label="Sound and app settings">♫</button><button id="s-together" title="Play together">Together</button><button id="s-life" title="Professions, homes and clothing (L)">Life</button><button id="s-journal" title="Journal (J)">Journal <kbd>J</kbd></button><button id="s-pause" aria-label="Pause">Ⅱ</button></nav></header>
  <section class="s-world-wrap"><canvas id="s-world" tabindex="0" aria-label="An open world in the Verso universe. WASD or click to walk. E to interact."></canvas><div class="s-weather"><i></i><span id="s-weather">A cold morning</span></div><div class="s-mobile-status"><span>♥ <b id="s-mobile-hp"></b><i><em id="s-mobile-hp-bar"></em></i></span><span>Breath <b id="s-mobile-breath"></b><i><em id="s-mobile-breath-bar"></em></i></span></div><div class="s-compass">N<span>◇</span></div><div id="s-hover" class="s-hover" hidden></div><button id="s-context" class="s-context" hidden></button><div id="s-toast" class="s-toast" role="status" aria-live="polite"></div><div class="s-world-caption">Every road leads to another life.</div></section>
  <aside class="s-sidebar"><section class="s-person"><div class="s-person-heading"><canvas id="s-portrait" width="96" height="112" aria-label="Your current human host"></canvas><div><small id="s-body-label">A borrowed life</small><h1 id="s-person-name">Theo Bishop</h1></div><strong id="s-level">1</strong></div><div class="s-meter health"><label>Vitality <b id="s-hp-label"></b></label><div><i id="s-hp"></i></div></div><div class="s-meter breath"><label>Breath <b id="s-breath-label"></b></label><div><i id="s-breath"></i></div></div><div class="s-person-minor"><span id="s-warmth"></span><span id="s-stamina"></span></div><div class="s-xp"><i id="s-xp"></i></div></section>
  <section class="s-map-block"><canvas id="s-map" width="240" height="150" aria-label="Map around your current position"></canvas><div><span id="s-map-label">Vespera</span><button id="s-expand-map" aria-label="Open world atlas" title="Map (M)">⤢</button></div></section>
@@ -62,7 +66,7 @@ root.innerHTML = `<main class="s-shell">
  <section class="s-pack"><div class="s-pack-heading"><h2>Your satchel</h2><span id="s-coins"></span><button id="v-pack-close" aria-label="Close satchel">×</button></div><div class="s-tabs" role="tablist" aria-label="Satchel view"><button id="s-tab-pack" role="tab" aria-selected="true">Belongings</button><button id="s-tab-craft" role="tab" aria-selected="false">Prepare</button></div><div id="s-pack-content"></div><button id="s-pocketbook" class="s-pocketbook"><span aria-hidden="true">▤</span><strong id="s-pocketbook-label">The priest’s notebook</strong><small id="s-pocketbook-note">In this body’s keeping</small></button><div id="s-item-detail" class="s-item-detail">Select an item to examine it.</div></section>
  <footer class="s-side-footer"><span id="s-distance">0 paces traveled</span><button id="s-help">Controls</button></footer></aside>
  <footer class="s-actionbar"><div class="s-equipment"><button data-equip="staff" title="Equip staff">${itemIcon('staff')}</button><button data-equip="sword" title="Equip sword">${itemIcon('sword')}</button><button data-equip="bow" title="Equip bow">${itemIcon('bow')}</button><button id="s-inspect-gear" title="Inspect equipment (K)">Gear</button></div><div class="s-hotkeys"><button data-action="attack" title="Attack (F / 1)"><kbd>1</kbd>${itemIcon('sword')}<span>Strike</span></button><button data-action="ward" title="Botanical ward (Q / 2)"><kbd>2</kbd>${itemIcon('ward')}<span>Ward</span><i id="s-ward-cooldown"></i></button><button data-use="cequin" title="Breathe cequin (3)"><kbd>3</kbd>${itemIcon('cequin')}<b data-count="cequin"></b><span>Breathe</span></button><button data-use="salve" title="Apply salve (4)"><kbd>4</kbd>${itemIcon('salve')}<b data-count="salve"></b><span>Heal</span></button><button data-use="tonic" title="Use warming tonic (5)"><kbd>5</kbd>${itemIcon('tonic')}<b data-count="tonic"></b><span>Warm</span></button><button data-use="rations" title="Eat (6)"><kbd>6</kbd>${itemIcon('rations')}<b data-count="rations"></b><span>Eat</span></button><button data-action="interact" title="Interact (E)"><kbd>E</kbd>${itemIcon('hand')}<span>Interact</span></button></div><button id="s-mobile-pack">Satchel</button><button id="v-mobile-more">More</button><span class="s-walk-help">WASD / click to walk<br>Shift to run</span></footer>
- <div class="s-mobile-move"><button data-move="w">↑</button><button data-move="a">←</button><button data-move="s">↓</button><button data-move="d">→</button></div>
+ <div class="s-mobile-move"><button data-move="w" aria-label="Move north">↑</button><button data-move="a" aria-label="Move west">←</button><button data-move="s" aria-label="Move south">↓</button><button data-move="d" aria-label="Move east">→</button><button data-move="shift" aria-label="Hold to run while moving">Run</button></div>
  <div id="s-dialogue" class="s-dialogue" hidden></div><div id="s-modal" class="s-modal" hidden></div><div id="s-transfer" class="s-transfer" role="dialog" aria-modal="true" aria-labelledby="s-transfer-line" hidden><div class="s-transfer-ring"></div><span id="s-transfer-time"></span><h2 id="s-transfer-line"></h2><p id="s-transfer-sub"></p><div id="s-intro-controls" class="s-intro-controls" hidden><button id="s-intro-prev">← Back</button><span id="s-intro-page" aria-live="polite"></span><button id="s-intro-next">Continue →</button></div><button id="s-skip">Continue</button></div></main>`;
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -82,7 +86,7 @@ document
   .querySelector('.s-shell')!
   .insertAdjacentHTML(
     'beforeend',
-    `<section class="v-chat" aria-label="Traveler communication"><nav><button data-chat-channel="say" aria-pressed="true">Local</button><button data-chat-channel="world" aria-pressed="false">Room</button><button id="v-chat-settings" title="Assign phrases to shortcuts">Shortcuts</button><button id="v-chat-toggle" aria-label="Collapse chat">−</button><span id="v-chat-status">Traveling alone</span></nav><div id="v-chat-log" role="log" aria-live="polite"></div><form id="v-chat-form"><input id="v-chat-input" maxlength="280" placeholder="Enter to talk · /help for commands" aria-label="Chat message" autocomplete="off"><button type="submit">Send</button></form></section>`,
+    `<section class="v-chat" aria-label="Traveler communication"><div class="v-comms-dock"><div id="v-voice-mount"></div><button id="v-quick-words" aria-label="Quick phrases without typing">Words</button><button id="v-compose-toggle" aria-label="Open chat" aria-expanded="false">Chat</button></div><nav><button data-chat-channel="say" aria-pressed="true">Local</button><button data-chat-channel="world" aria-pressed="false">Room</button><button id="v-chat-settings" title="Assign phrases to shortcuts">Shortcuts</button><button id="v-chat-toggle" aria-label="Collapse chat">−</button><span id="v-chat-status">Traveling alone</span></nav><div id="v-chat-log" role="log" aria-live="polite"></div><form id="v-chat-form"><input id="v-chat-input" maxlength="280" enterkeyhint="send" placeholder="Enter to talk · /help for commands" aria-label="Chat message" autocomplete="off"><button type="submit">Send</button><button id="v-chat-done" type="button" aria-label="Close keyboard and return to game">Done</button></form></section>`,
   );
 document
   .querySelector('.s-person-minor')!
@@ -135,7 +139,6 @@ try {
 } catch {}
 let started = false,
   paused = true,
-  muted = false,
   modal = '',
   packView: 'pack' | 'craft' = 'pack';
 let selectedItem: ItemId | null = null;
@@ -219,7 +222,35 @@ let fps = 60,
   frames = 0,
   frameSeconds = 0;
 
+const experience = createWorldExperience(() => game, multiplayer, audio);
+const voiceUi = mountVoiceUi({
+  voice: experience.voice,
+  container: el('v-voice-mount'),
+  peers: () => multiplayer.peers,
+  canTalk: () => started && !paused && !modal && !game.dialogue && !transferStarted,
+  openSettings: (html, mount) => {
+    openModal('voice', html);
+    mount(el('s-modal'));
+  },
+});
+// Keep the directional pad anchored to the actual world viewport, including keyboard changes.
+document.querySelector('.s-world-wrap')!.append(document.querySelector('.s-mobile-move')!);
+function applyAppMode() {
+  const mode = appMode();
+  root.dataset.displayMode = mode.displayMode;
+  root.classList.toggle('installed-window', mode.installedWindow);
+}
+addEventListener('verso-app-mode-change', applyAppMode);
+applyAppMode();
+const mobileViewport = mountMobileViewport(root, () => resize());
+
 function resize() {
+  if (innerWidth >= 900 && root.classList.contains('satchel-open')) {
+    root.classList.remove('satchel-open');
+    const sidebar = document.querySelector<HTMLElement>('.s-sidebar');
+    sidebar?.removeAttribute('role');
+    sidebar?.removeAttribute('aria-label');
+  }
   const bounds = canvas.parentElement!.getBoundingClientRect();
   renderer.resize(bounds.width, bounds.height, Math.min(devicePixelRatio || 1, 2));
   if (chartControl) {
@@ -272,6 +303,8 @@ function save() {
   }
 }
 function activate(next: Stichos) {
+  voiceUi.release();
+  game.clearLivingWorldAuthority();
   multiplayer.disconnect();
   peerEmotes.clear();
   el('v-chat-log').replaceChildren();
@@ -297,6 +330,7 @@ function activate(next: Stichos) {
   mapWaypoint = null;
   dialogueSignature = '';
   audio.setWorld(0, game.world.seed);
+  voiceUi.release();
   renderer.draw(game);
   updateUI();
   drawMap();
@@ -308,6 +342,8 @@ function setInert(value: boolean) {
 }
 let modalInvoker: HTMLElement | null = null;
 function openModal(kind: string, html: string) {
+  voiceUi.release();
+  if (isTextEntry(document.activeElement)) (document.activeElement as HTMLElement).blur();
   if (!modal) modalInvoker = document.activeElement as HTMLElement;
   disposeSpecial?.();
   disposeSpecial = null;
@@ -384,7 +420,12 @@ function openModal(kind: string, html: string) {
     heading.id = 's-modal-heading';
     container.querySelector('section')!.setAttribute('aria-labelledby', heading.id);
   }
-  container.querySelector<HTMLElement>('input,button')?.focus({ preventScroll: true });
+  // Opening a phone dialog must not summon the keyboard before the player asks to type.
+  container
+    .querySelector<HTMLElement>(
+      matchMedia('(pointer: coarse)').matches || innerWidth < 900 ? 'button' : 'input,button',
+    )
+    ?.focus({ preventScroll: true });
   container.scrollTop = 0;
 }
 function closeModal() {
@@ -399,7 +440,7 @@ function closeModal() {
   setInert(false);
   paused = false;
   audio.pause(false);
-  if (modalInvoker?.isConnected && !modalInvoker.closest('#s-modal'))
+  if (modalInvoker?.isConnected && !modalInvoker.closest('#s-modal') && !isTextEntry(modalInvoker))
     modalInvoker.focus({ preventScroll: true });
   else canvas.focus({ preventScroll: true });
 }
@@ -721,6 +762,7 @@ const recovering = [
   ],
 ];
 function transfer(kind: 'opening' | 'arrival' | 'return' | 'clinic', after?: () => void) {
+  voiceUi.release();
   closeModal();
   paused = true;
   keys.clear();
@@ -830,12 +872,97 @@ function updateTransfer(now: number) {
   if (p >= 1 && transferKind !== 'opening') endTransfer();
 }
 
+function soundSettings() {
+  const settings = audio.getSettings();
+  const mode = appMode();
+  const labels = {
+    master: 'Master game sound',
+    ambience: 'Natural ambience',
+    music: 'Music',
+    effects: 'Effects',
+  };
+  openModal(
+    'sound',
+    `<h2>Sound & app settings</h2><p>Your sound choices stay in this browser. Nearby voices have their own volume and microphone controls.</p><div class="v-audio-controls">${Object.entries(
+      labels,
+    )
+      .map(
+        ([key, label]) =>
+          `<label>${label}<output data-audio-value="${key}">${Math.round(settings[key as keyof typeof labels] * 100)}%</output><input data-audio-bus="${key}" aria-label="${label}" type="range" min="0" max="1" step="0.05" value="${settings[key as keyof typeof labels]}"></label>`,
+      )
+      .join(
+        '',
+      )}</div><div class="s-menu-buttons"><button id="v-audio-enable">${settings.muted ? 'Unmute game sound' : audio.needsGesture ? 'Enable game sound' : 'Mute game sound'}</button><button id="v-audio-preview">Listen to this place</button><button id="v-audio-voice">Nearby voices & microphone</button><button id="v-audio-return" class="s-primary">Return to the world</button></div><details class="v-app-diagnostics"><summary>App & audio diagnostics</summary><p>${esc(mode.label)}<br>${esc(mode.source)}<br>Launch handling: ${mode.launchQueueSupported ? 'supported' : 'unavailable'}${mode.launchObserved ? ' · launch observed' : ''}<br>Viewport: ${mobileViewport.diagnostics.height}px · ${mobileViewport.diagnostics.visualViewport ? 'visual viewport tracked' : 'window size fallback'}<br>Soundscape: ${esc(audio.getDiagnostics().zone)} · ${esc(game.worldTime.label)}</p><p>Browsers cannot reliably tell whether another installation exists. Bluetooth routing and interruptions are controlled by your device.</p><button id="v-settings-install">Install Verso</button></details>`,
+  );
+  const revision = modalRevision;
+  const toggle = el('v-audio-enable');
+  el('s-modal')
+    .querySelectorAll<HTMLInputElement>('[data-audio-bus]')
+    .forEach((input) => {
+      input.oninput = () => {
+        audio.setSettings({ [input.dataset.audioBus!]: Number(input.value) });
+        el('s-modal').querySelector<HTMLOutputElement>(
+          `[data-audio-value="${input.dataset.audioBus}"]`,
+        )!.value = `${Math.round(Number(input.value) * 100)}%`;
+      };
+    });
+  toggle.onclick = () => {
+    const muted = audio.getSettings().muted;
+    audio.setMuted(muted ? false : !audio.needsGesture);
+    void audio.start(game.world.seed);
+    toggle.textContent = audio.getSettings().muted ? 'Unmute game sound' : 'Mute game sound';
+  };
+  el('v-audio-preview').onclick = () => {
+    void audio.start(game.world.seed).then(() => {
+      if (modal !== 'sound' || modalRevision !== revision) return;
+      audio.pause(false);
+      toast(
+        audio.getSettings().muted
+          ? 'Game sound is muted. Unmute it to listen.'
+          : 'Listening to your current surroundings.',
+      );
+    });
+  };
+  el('v-audio-voice').onclick = voiceUi.showSettings;
+  el('v-audio-return').onclick = closeModal;
+  el('v-settings-install').onclick = () => void requestInstall().then(toast);
+}
+function quickWords() {
+  openModal(
+    'words',
+    `<h2>Words at your fingertips</h2><p id="v-words-channel">${chatChannel === 'world' ? 'Room: everyone here' : 'Local: nearby travelers and residents'}</p><div class="v-quick-phrases">${phraseShortcuts.map((phrase, index) => `<button data-quick-phrase="${index}">${esc(phrase || 'Empty shortcut')}</button>`).join('')}<button data-quick-text="Help, please!">Help, please!</button><button data-quick-text="Thanks!">Thanks!</button><button data-quick-text="trade">Trade</button><button data-quick-text="work">Ask about work</button></div><div class="s-menu-buttons"><button id="v-words-channel-toggle">Switch to ${chatChannel === 'world' ? 'Local' : 'Room'}</button><button id="v-words-write">Write a message</button><button id="v-words-edit">Edit saved phrases</button></div>`,
+  );
+  const send = (text: string) => {
+    closeModal();
+    void say(text);
+  };
+  el('s-modal')
+    .querySelectorAll<HTMLButtonElement>('[data-quick-phrase]')
+    .forEach((button) => {
+      button.onclick = () => send(phraseShortcuts[Number(button.dataset.quickPhrase)]);
+    });
+  el('s-modal')
+    .querySelectorAll<HTMLButtonElement>('[data-quick-text]')
+    .forEach((button) => {
+      button.onclick = () => send(button.dataset.quickText!);
+    });
+  el('v-words-channel-toggle').onclick = () => {
+    setChatChannel(chatChannel === 'world' ? 'say' : 'world');
+    quickWords();
+  };
+  el('v-words-write').onclick = () => {
+    closeModal();
+    setChatCollapsed(false);
+    el('v-chat-input').focus();
+  };
+  el('v-words-edit').onclick = shortcutsMenu;
+}
 function pauseMenu() {
   if (sharedActionPending) return;
   save();
   openModal(
     'pause',
-    `<div class="v-window-heading"><h2>A continuing life</h2><button id="s-resume" aria-label="Resume">×</button></div><p>${esc(game.player.name)} · ${esc(currentPlanet.name)}<br>${Math.floor(game.distanceTraveled)} paces traveled · kept in this browser</p><div class="s-menu-buttons"><button id="v-pause-resume" class="s-primary">Return to the world</button><button id="s-new">Galaxy & other worlds</button><button id="s-pause-life">Home, profession & clothing</button><button id="s-pause-together">Room & friends</button><button id="v-install">Install Verso</button><button id="v-ai">AI companion</button><button id="v-retire">Leave this body</button><button id="s-pause-help">Controls & shortcuts</button></div><p class="v-muted">Leaving a body keeps its belongings and work on this planet. Clearing this browser’s storage loses its local identity and private progress.</p>`,
+    `<div class="v-window-heading"><h2>A continuing life</h2><button id="s-resume" aria-label="Resume">×</button></div><p>${esc(game.player.name)} · ${esc(currentPlanet.name)}<br>${Math.floor(game.distanceTraveled)} paces traveled · kept in this browser</p><div class="s-menu-buttons"><button id="v-pause-resume" class="s-primary">Return to the world</button><button id="s-new">Galaxy & other worlds</button><button id="s-pause-life">Home, profession & clothing</button><button id="s-pause-together">Room & friends</button><button id="v-sound-settings">Sound, voice & app settings</button><button id="v-install">Install Verso</button><button id="v-ai">AI companion</button><button id="v-retire">Leave this body</button><button id="s-pause-help">Controls & shortcuts</button></div><p class="v-muted">Leaving a body keeps its belongings and work on this planet. Clearing this browser’s storage loses its local identity and private progress.</p>`,
   );
   el('s-resume').onclick = closeModal;
   el('v-pause-resume').onclick = closeModal;
@@ -843,6 +970,7 @@ function pauseMenu() {
   el('s-pause-help').onclick = controls;
   el('s-pause-life').onclick = () => lifeMenu();
   el('s-pause-together').onclick = togetherMenu;
+  el('v-sound-settings').onclick = soundSettings;
   el('v-install').onclick = () => void requestInstall().then(toast);
   el('v-ai').onclick = aiMenu;
   el('v-retire').onclick = () => {
@@ -920,20 +1048,33 @@ function controls() {
   const touch = matchMedia('(pointer: coarse)').matches || innerWidth < 900;
   openModal(
     'help',
-    `<span class="s-chapter">Living on ${esc(currentPlanet.name)}</span><h2>Explore at your own pace.</h2>${touch ? '<article><h3>Touch controls</h3><p>Tap the ground to walk. Hold an arrow to move. Tap a person, plant or object to approach, then tap the action shown above the hotbar.</p><p>Satchel opens your belongings and preparation recipes. More opens equipment, supplies, journal and saved phrases. Pinch is not required: use the chart buttons to zoom.</p></article>' : ''}<details ${touch ? '' : 'open'}><summary>Keyboard and mouse</summary><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click ground / person</b><span>Approach the selected place or person</span></p><p><b>E</b><span>Talk, work with a tool, gather, read or open</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor with held equipment</span></p><p><b>Q / 2</b><span>Release a ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Breath supply · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare / equipment</span></p><p><b>J / M / L / G</b><span>Notebook / world atlas / Life / galaxy</span></p><p><b>Enter / F7–F9</b><span>Chat / send saved phrases</span></p><p><b>Escape</b><span>Close a window, cancel construction or pause</span></p><p><b>Mouse wheel</b><span>Zoom the world or chart under the cursor</span></p></div></details><p>Use actual tools to harvest resources. Learn local needs, earn wages, hire people you trust and build a home. Roads connect settlements; wilderness contains supplies and danger.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
+    `<span class="s-chapter">Living on ${esc(currentPlanet.name)}</span><h2>Explore at your own pace.</h2>${touch ? '<article><h3>Touch controls</h3><p>Tap the ground to walk. Hold an arrow to move; hold Run with a direction to move faster. Tap a person, plant or object to approach, then tap the action shown above the hotbar.</p><p>Satchel opens your belongings and preparation recipes. More opens equipment, supplies, journal and saved phrases. Pinch is not required: use the chart buttons to zoom.</p></article>' : ''}<details ${touch ? '' : 'open'}><summary>Keyboard and mouse</summary><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click ground / person</b><span>Approach the selected place or person</span></p><p><b>E</b><span>Talk, work with a tool, gather, read or open</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor with held equipment</span></p><p><b>Q / 2</b><span>Release a ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Breath supply · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare / equipment</span></p><p><b>J / M / L / G</b><span>Notebook / world atlas / Life / galaxy</span></p><p><b>Enter / F7–F9</b><span>Chat / send saved phrases</span></p><p><b>Escape</b><span>Close a window, cancel construction or pause</span></p><p><b>Mouse wheel</b><span>Zoom the world or chart under the cursor</span></p></div></details><p>Use actual tools to harvest resources. Learn local needs, earn wages, hire people you trust and build a home. Roads connect settlements; wilderness contains supplies and danger.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
   );
   el('s-help-return').onclick = closeModal;
 }
 function moreActions() {
   openModal(
     'actions',
-    `<h2>Actions</h2><div class="s-menu-buttons"><button id="v-more-gear">Equipment</button><button id="v-more-journal">Notebook</button><button id="v-more-life">Life, home and work</button><button id="v-more-warm">Use warming tonic · ${game.inventory.tonic ?? 0}</button><button id="v-more-eat">Eat food · ${game.inventory.rations ?? 0}</button><button id="v-more-phrases">Words and shortcuts</button><button id="v-more-atlas">World atlas</button></div>`,
+    `<h2>Actions</h2><div class="s-menu-buttons"><button id="v-more-gear">Equipment</button><button id="v-more-ward">Release a ward</button><button id="v-more-journal">Notebook</button><button id="v-more-life">Life, home and work</button><button id="v-more-warm">Use warming tonic · ${game.inventory.tonic ?? 0}</button><button id="v-more-eat">Eat food · ${game.inventory.rations ?? 0}</button><button id="v-more-phrases">Words and shortcuts</button><button id="v-more-atlas">World atlas</button><button id="v-more-galaxy">Galaxy</button><button id="v-more-work">Construct & automate</button><button id="v-more-observe">Observe wildlife</button><button id="v-more-sound">Sound, voice & app settings</button></div>`,
   );
   el('v-more-gear').onclick = equipmentMenu;
+  el('v-more-ward').onclick = () => {
+    closeModal();
+    act('ward');
+  };
   el('v-more-journal').onclick = () => journal();
   el('v-more-life').onclick = () => lifeMenu();
   el('v-more-phrases').onclick = shortcutsMenu;
   el('v-more-atlas').onclick = mapModal;
+  el('v-more-galaxy').onclick = galaxyMenu;
+  el('v-more-work').onclick = workMenu;
+  el('v-more-sound').onclick = soundSettings;
+  el('v-more-observe').onclick = () => {
+    closeModal();
+    game.observeWildlife();
+    updateUI();
+    save();
+  };
   el('v-more-warm').onclick = () => {
     closeModal();
     game.use('tonic');
@@ -1190,13 +1331,29 @@ function lost() {
       lastPhase = game.phase;
     });
 }
-el('v-pack-close').onclick = () => root.classList.remove('satchel-open');
+el('v-pack-close').onclick = () => setSatchel(false);
+function setSatchel(open: boolean) {
+  keys.clear();
+  walk = [];
+  voiceUi.release();
+  root.classList.toggle('satchel-open', open);
+  const sidebar = document.querySelector<HTMLElement>('.s-sidebar')!;
+  if (open && innerWidth < 900) {
+    sidebar.setAttribute('role', 'dialog');
+    sidebar.setAttribute('aria-label', 'Your satchel');
+    el('v-pack-close').focus({ preventScroll: true });
+  } else {
+    sidebar.removeAttribute('role');
+    sidebar.removeAttribute('aria-label');
+    canvas.focus({ preventScroll: true });
+  }
+}
 function inventory(view: 'pack' | 'craft' = packView) {
   packView = view;
   packSignature = '';
   el('s-tab-pack').setAttribute('aria-selected', String(view === 'pack'));
   el('s-tab-craft').setAttribute('aria-selected', String(view === 'craft'));
-  root.classList.add('satchel-open');
+  if (innerWidth < 900 && !root.classList.contains('satchel-open')) setSatchel(true);
   updatePack();
 }
 function updatePack() {
@@ -1339,6 +1496,7 @@ function updateDialogue() {
         updateUI();
       };
   }
+  el('s-dialogue-close').focus({ preventScroll: true });
   el('s-dialogue-close').onclick = () => {
     game.dialogue = null;
     updateDialogue();
@@ -1346,6 +1504,12 @@ function updateDialogue() {
   };
 }
 function updateUI() {
+  const soundMuted = audio.getSettings().muted;
+  el('s-sound').textContent = soundMuted ? '♩' : '♫';
+  el('s-sound').setAttribute(
+    'aria-label',
+    `Sound and app settings. Game sound ${soundMuted ? 'muted' : 'enabled'}.`,
+  );
   el('s-pocketbook-label').textContent = game.universeLife
     ? 'My field notebook'
     : game.hasNotebook
@@ -1411,7 +1575,7 @@ function updateUI() {
     `${Math.round(p.x)}, ${Math.round(p.y)} · ${currentPlanet.name}${game.universeLife ? '' : ', 3886'}`;
   const romer = (tile.temperature * 21) / 40 + 7.5;
   el('s-weather').textContent =
-    `${game.universeLife ? '' : romer.toFixed(1) + '° Rø · '}${tile.temperature.toFixed(0)}° C · ${game.universeLife ? game.exposure.label : p.cequinTime > 0 ? 'Breath sustained' : 'Freezing air'}`;
+    `${game.worldTime.label} · ${game.universeLife ? '' : romer.toFixed(1) + '° Rø · '}${tile.temperature.toFixed(0)}° C · ${game.universeLife ? game.exposure.label : p.cequinTime > 0 ? 'Breath sustained' : 'Freezing air'}`;
   el('s-weather').title = game.universeLife
     ? game.exposure.detail
     : 'Cequin protects breathing in the cold.';
@@ -1468,7 +1632,9 @@ function updateUI() {
           ? 'Empty hands · equip a weapon to attack'
           : game.weaponProfile(kind).name;
     if (attackButton) {
-      attackButton.disabled = !artifact && kind === 'none';
+      attackButton.disabled = false;
+      const label = attackButton.querySelector('span');
+      if (label) label.textContent = !artifact && kind === 'none' ? 'Equip' : 'Strike';
       attackButton.setAttribute('aria-label', attackButton.title);
     }
   }
@@ -1895,18 +2061,34 @@ function shortcutsMenu() {
     toast('F7, F8 and F9 are ready.');
   };
 }
+let chatComposing = false;
+el('v-chat-input').addEventListener('compositionstart', () => {
+  chatComposing = true;
+});
+el('v-chat-input').addEventListener('compositionend', () => {
+  chatComposing = false;
+});
 el<HTMLFormElement>('v-chat-form').onsubmit = (e) => {
   e.preventDefault();
   const input = el<HTMLInputElement>('v-chat-input');
+  if (chatComposing) return;
   const text = input.value;
   input.value = '';
+  input.blur();
+  setChatCollapsed(innerWidth < 900);
+  canvas.focus({ preventScroll: true });
   void say(text);
 };
 el('v-chat-input').onfocus = () => {
+  voiceUi.release();
   keys.clear();
   walk = [];
 };
 el('v-chat-input').onkeydown = (e) => {
+  if (e.isComposing) {
+    e.stopPropagation();
+    return;
+  }
   if (e.key === 'Escape') {
     e.preventDefault();
     e.stopPropagation();
@@ -1914,6 +2096,16 @@ el('v-chat-input').onkeydown = (e) => {
   }
 };
 el('v-chat-settings').onclick = shortcutsMenu;
+el('v-quick-words').onclick = quickWords;
+el('v-compose-toggle').onclick = () => {
+  const collapsed = document.querySelector('.s-shell')!.classList.contains('chat-collapsed');
+  setChatCollapsed(!collapsed);
+};
+el('v-chat-done').onclick = () => {
+  el('v-chat-input').blur();
+  setChatCollapsed(true);
+  canvas.focus({ preventScroll: true });
+};
 function setChatChannel(channel: 'say' | 'world') {
   chatChannel = channel;
   document
@@ -1921,6 +2113,9 @@ function setChatChannel(channel: 'say' | 'world') {
     .forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.chatChannel === channel)));
 }
 function setChatCollapsed(collapsed: boolean) {
+  if (collapsed && document.activeElement === el('v-chat-input')) el('v-chat-input').blur();
+  el('v-compose-toggle').setAttribute('aria-expanded', String(!collapsed));
+  el('v-compose-toggle').setAttribute('aria-label', collapsed ? 'Open chat' : 'Close chat');
   document.querySelector('.s-shell')!.classList.toggle('chat-collapsed', collapsed);
   el('v-chat-toggle').textContent = collapsed ? '+' : '−';
   el('v-chat-toggle').setAttribute('aria-label', collapsed ? 'Expand chat' : 'Collapse chat');
@@ -2197,7 +2392,10 @@ el('v-map-more').onclick = () => renderer.setZoom(renderer.zoom + 0.15);
 document
   .querySelectorAll<HTMLElement>('[data-phrase-send]')
   .forEach((n) => (n.onclick = () => void say(phraseShortcuts[Number(n.dataset.phraseSend)])));
+multiplayer.onLiving = (frame) => game.applyLivingWorldFrame(frame);
 multiplayer.onChange = () => {
+  if (multiplayer.status !== 'online') game.clearLivingWorldAuthority();
+  voiceUi.update();
   if (multiplayer.status === 'online') roomError = '';
   if (multiplayer.status !== 'online') registeredProduction.clear();
   game.setSharedWorld(multiplayer.status !== 'offline');
@@ -2453,6 +2651,10 @@ function act(command: string) {
     game.phase !== 'playing'
   )
     return;
+  if (command === 'attack' && !game.activeArtifact && game.player.appearance.weapon === 'none') {
+    equipmentMenu();
+    return;
+  }
   if (command === 'attack' || command === 'ward') void combatShared(command);
   if (command === 'interact') void interactShared();
   updateUI();
@@ -2528,7 +2730,14 @@ canvas.addEventListener('pointerleave', () => {
   el('s-hover').hidden = true;
 });
 canvas.addEventListener('pointerdown', (event) => {
-  if (paused || sharedActionPending || game.dialogue || !started) return;
+  if (
+    paused ||
+    sharedActionPending ||
+    game.dialogue ||
+    !started ||
+    root.classList.contains('satchel-open')
+  )
+    return;
   void audio.start(game.world.seed);
   canvas.focus();
   const bounds = canvas.getBoundingClientRect();
@@ -2654,22 +2863,14 @@ el('s-inspect-gear').onclick = equipmentMenu;
 el('s-tab-pack').onclick = () => inventory('pack');
 el('s-tab-craft').onclick = () => inventory('craft');
 el('v-mobile-more').onclick = moreActions;
-el('s-mobile-pack').onclick = () => root.classList.toggle('satchel-open');
-el('s-sound').onclick = () => {
-  if (audio.needsGesture) {
-    void audio.start(game.world.seed);
-    muted = false;
-  } else {
-    muted = !muted;
-    void audio.start(game.world.seed);
-  }
-  audio.setMuted(muted);
-  el('s-sound').textContent = muted ? '♩' : '♫';
-  el('s-sound').setAttribute('aria-label', muted ? 'Enable sound' : 'Mute sound');
-};
+el('s-mobile-pack').onclick = () => setSatchel(!root.classList.contains('satchel-open'));
+el('s-sound').onclick = soundSettings;
 document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((button) => {
   button.onpointerdown = (e) => {
     e.preventDefault();
+    if (paused || game.dialogue || transferStarted || root.classList.contains('satchel-open'))
+      return;
+    if (isTextEntry(document.activeElement)) (document.activeElement as HTMLElement).blur();
     button.setPointerCapture(e.pointerId);
     keys.add(button.dataset.move!);
     walk = [];
@@ -2680,14 +2881,19 @@ document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((button) => 
   button.onlostpointercapture = release;
 });
 addEventListener('keydown', (e) => {
+  if (e.defaultPrevented) return;
   if (sharedActionPending) {
     e.preventDefault();
     return;
   }
-  if (e.key === 'Tab' && (modal || transferStarted || game.dialogue)) {
+  if (
+    e.key === 'Tab' &&
+    (modal || transferStarted || game.dialogue || root.classList.contains('satchel-open'))
+  ) {
     const focus = [
-      ...el(
-        transferStarted ? 's-transfer' : modal ? 's-modal' : 's-dialogue',
+      ...(root.classList.contains('satchel-open') && !modal
+        ? document.querySelector<HTMLElement>('.s-sidebar')!
+        : el(transferStarted ? 's-transfer' : modal ? 's-modal' : 's-dialogue')
       ).querySelectorAll<HTMLElement>(
         'button:not(:disabled),input:not(:disabled):not([hidden]),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]',
       ),
@@ -2703,7 +2909,11 @@ addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (e.key !== 'Escape' && (e.target as HTMLElement).matches('input,textarea,select')) return;
+  if (
+    e.isComposing ||
+    (e.key !== 'Escape' && (isTextEntry(e.target) || (e.target as HTMLElement).closest('select')))
+  )
+    return;
   const k = e.key.toLowerCase();
   if (transferStarted) {
     if (k === 'enter' && (e.target as HTMLElement).closest('button')) return;
@@ -2712,6 +2922,11 @@ addEventListener('keydown', (e) => {
       if (k === 'escape' || transferKind !== 'opening') endTransfer();
       else turnIntro(k === 'arrowleft' ? -1 : 1);
     }
+    return;
+  }
+  if (k === 'escape' && root.classList.contains('satchel-open') && !modal) {
+    e.preventDefault();
+    setSatchel(false);
     return;
   }
   if (k === 'escape' && placingProduction) {
@@ -2735,8 +2950,9 @@ addEventListener('keydown', (e) => {
     foldNotebook(true);
     return;
   }
-  if (modal || !started) return;
+  if (modal || !started || root.classList.contains('satchel-open')) return;
   if (k === 'enter') {
+    if ((e.target as HTMLElement).closest('button,a,summary')) return;
     e.preventDefault();
     setChatCollapsed(false);
     el('v-chat-input').focus();
@@ -2803,12 +3019,16 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 addEventListener('blur', () => {
+  voiceUi.release();
+  experience.suspend();
   keys.clear();
   walk = [];
   if (started && !paused && !transferStarted) pauseMenu();
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
+    voiceUi.release();
+    experience.suspend();
     keys.clear();
     walk = [];
     save();
@@ -2829,6 +3049,10 @@ function frame(now: number) {
     frameSeconds = 0;
   }
   updateTransfer(now);
+  if (transferStarted || game.dialogue) voiceUi.release();
+  const sharedTime = multiplayer.worldElapsedSeconds;
+  if (sharedTime !== null) game.applyWorldClock(sharedTime);
+  experience.update(now);
   if (started && !paused && !sharedActionPending && !game.dialogue && !transferStarted) {
     let x =
         Number(keys.has('d') || keys.has('arrowright')) -
@@ -2921,6 +3145,12 @@ function frame(now: number) {
   void syncProduction(now);
   renderer.draw(game, {
     peers: multiplayer.peers,
+    voice: {
+      speakers: new Set(experience.voice.snapshot.speakers),
+      localSpeaking: experience.voice.snapshot.transmitting,
+      range: experience.voice.snapshot.ranges[experience.voice.settings.mode],
+      showRange: experience.voice.snapshot.transmitting,
+    },
     machines: multiplayer.machines,
     placement:
       placingProduction && pointer
@@ -2978,6 +3208,14 @@ Object.defineProperty(window, 'stichos', {
         player: game.player,
         phase: game.phase,
         time: game.time,
+        worldTime: game.worldTime,
+        fauna: game.fauna,
+        fieldObservations: game.fieldObservations,
+        residentActivities: [...game.residentActivities],
+        appMode: appMode(),
+        viewport: mobileViewport.diagnostics,
+        audio: audio.getDiagnostics(),
+        voice: experience.voice.snapshot,
         paused,
         modal,
         transfer: !!transferStarted,
@@ -3092,6 +3330,8 @@ async function enterBrowserLife() {
 }
 void enterBrowserLife();
 addEventListener('pagehide', () => {
+  experience.suspend();
+  voiceUi.release();
   save();
   ownsLifeTab = false;
   releaseLifeTab();

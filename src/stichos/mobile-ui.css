@@ -1,0 +1,616 @@
+/* The communication dock belongs to the game HUD; its geometry never sets voice range. */
+#app {
+  height: var(--v-viewport-height, 100dvh);
+  position: relative;
+  top: var(--v-viewport-top, 0px);
+}
+html,
+body {
+  overscroll-behavior: none;
+}
+button,
+a,
+select,
+summary {
+  touch-action: manipulation;
+}
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid #e1c282;
+  outline-offset: 2px;
+}
+.v-comms-dock {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+#v-voice-mount {
+  flex: 1;
+  min-width: 0;
+}
+.v-comms-dock .v-voice {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.v-comms-dock > button {
+  min-height: 40px;
+  min-width: 44px;
+  padding: 4px 8px;
+}
+.s-shell {
+  grid-template-rows: 42px minmax(0, 1fr) 178px 62px;
+}
+.s-shell.chat-collapsed {
+  grid-template-rows: 42px minmax(0, 1fr) 54px 62px;
+}
+.v-chat {
+  grid-template-rows: 44px 28px minmax(0, 1fr) 36px;
+  min-height: 0;
+}
+.chat-collapsed .v-chat {
+  grid-template-rows: 44px;
+}
+.chat-collapsed .v-chat > nav {
+  display: none;
+}
+#v-chat-form {
+  min-width: 0;
+}
+#v-chat-form input {
+  min-width: 0;
+}
+#v-chat-done {
+  display: none;
+}
+.v-quick-phrases {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.v-quick-phrases button {
+  min-height: 48px;
+  overflow-wrap: anywhere;
+}
+.v-audio-controls output {
+  font-size: 14px;
+  color: #eddbab;
+}
+.v-app-diagnostics {
+  margin-top: 18px;
+  font-size: 13px;
+}
+.v-app-diagnostics summary {
+  min-height: 44px;
+  padding-top: 12px;
+  cursor: pointer;
+}
+.v-audio-controls input[type='range'] {
+  padding: 0;
+  accent-color: #d9bb77;
+}
+.s-weather {
+  max-width: calc(100% - 50px);
+}
+.s-weather span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 899px) {
+  #app {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  .s-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 48px minmax(0, 1fr) 214px 58px;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: max(3px, env(safe-area-inset-bottom));
+  }
+  .s-shell.chat-collapsed {
+    grid-template-rows: 48px minmax(0, 1fr) 54px 58px;
+  }
+  .s-header {
+    gap: 8px;
+  }
+  .s-header #v-galaxy,
+  .s-header #v-work {
+    display: none;
+  }
+  .s-header nav {
+    margin-left: auto;
+  }
+  .s-header #s-sound {
+    display: block;
+    min-width: 44px;
+  }
+  .s-header #s-pause {
+    min-width: 44px;
+  }
+  .s-header #s-life {
+    display: none;
+  }
+  .s-header .s-brand {
+    font-size: 15px;
+  }
+  .v-chat {
+    padding: 3px;
+    grid-template-rows: 46px 44px minmax(0, 1fr) 44px;
+  }
+  .chat-collapsed .v-chat {
+    grid-template-rows: 46px;
+  }
+  .v-comms-dock {
+    gap: 3px;
+  }
+  .v-comms-dock .v-voice {
+    gap: 3px;
+    padding: 0;
+  }
+  .v-comms-dock button,
+  .v-comms-dock select {
+    min-height: 44px;
+    font-size: 12px;
+    padding: 4px 5px;
+  }
+  .v-comms-dock #v-voice-settings {
+    min-width: 44px;
+  }
+  .v-comms-dock .v-voice-mode {
+    flex: 1;
+    min-width: 0;
+  }
+  .v-comms-dock #v-voice-mode {
+    width: 100%;
+    min-width: 65px;
+  }
+  .v-comms-dock #v-ptt {
+    min-width: 92px;
+  }
+  .v-comms-dock #v-voice-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .v-comms-dock #v-voice-speakers {
+    display: none;
+  }
+  .v-chat nav {
+    padding-bottom: 0;
+  }
+  .v-chat nav button {
+    min-width: 44px;
+    height: 44px;
+  }
+  #v-chat-form {
+    gap: 4px;
+  }
+  #v-chat-form input,
+  .s-window input:not([type='range']):not([type='checkbox']):not([type='color']),
+  .s-window select {
+    font-size: 16px;
+  }
+  #v-chat-form button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 4px 8px;
+  }
+  #v-chat-done {
+    display: block;
+  }
+  #v-chat-log {
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 2px 5px;
+  }
+  .s-shell .s-mobile-move,
+  .s-shell.chat-collapsed .s-mobile-move,
+  .s-shell:not(.chat-collapsed) .s-mobile-move {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    grid-template-columns: repeat(3, 46px);
+    grid-template-rows: repeat(2, 46px);
+    gap: 3px;
+  }
+  .s-mobile-move button {
+    width: 46px;
+    height: 46px;
+    min-height: 46px;
+    font-size: 24px;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+  .s-world-wrap {
+    min-height: 0;
+  }
+  .s-context {
+    max-width: calc(100% - 170px);
+    font-size: 12px;
+    min-height: 44px;
+    right: 8px;
+    bottom: 10px;
+    white-space: normal;
+  }
+  .s-actionbar {
+    padding: 3px;
+    gap: 3px;
+  }
+  .s-hotkeys {
+    gap: 3px;
+  }
+  .s-hotkeys button {
+    width: 44px;
+    height: 48px;
+    min-width: 44px;
+  }
+  .s-hotkeys button span {
+    font-size: 9px;
+  }
+  #s-mobile-pack,
+  #v-mobile-more {
+    min-width: 44px;
+    min-height: 48px;
+    padding: 4px 5px;
+  }
+  .s-mobile-status {
+    left: 10px;
+    max-width: calc(100% - 55px);
+  }
+  .s-weather {
+    font-size: 11px;
+  }
+  .s-toast {
+    font-size: 12px;
+    line-height: 1.5;
+    bottom: 120px;
+  }
+  .s-modal:not(.is-title):not(.is-notebook):not(.is-atlas) {
+    padding: 6px;
+  }
+  .s-window.s-bounded-window,
+  .s-window[data-screen='life'],
+  .is-atlas .s-window {
+    max-height: calc(
+      var(--v-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) -
+        12px
+    );
+  }
+  .s-window-content {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .s-window p {
+    line-height: 1.6;
+  }
+  .s-dialogue {
+    bottom: 64px;
+  }
+  .s-dialogue > section {
+    max-height: calc(var(--v-viewport-height, 100dvh) - 125px);
+  }
+  .s-dialogue-choices {
+    overscroll-behavior: contain;
+  }
+  .satchel-open .s-sidebar {
+    inset: calc(env(safe-area-inset-top) + 54px) 6px calc(env(safe-area-inset-bottom) + 62px);
+  }
+  .satchel-open .s-mobile-move {
+    visibility: hidden;
+  }
+  .satchel-open .s-sidebar > .s-pack {
+    padding: 6px;
+  }
+  .satchel-open #s-item-detail {
+    max-height: 30%;
+  }
+  .v-shortcut-row {
+    grid-template-columns: 26px minmax(0, 1fr) 48px;
+    gap: 5px;
+  }
+  .v-shortcut-row input {
+    min-width: 0;
+  }
+  .v-audio-controls label,
+  .v-voice-people label {
+    font-size: 14px;
+    letter-spacing: normal;
+  }
+  .v-voice-consent {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  /* When the keyboard appears, all remaining height serves the world + compact composer. */
+  .chat-editing .s-shell,
+  .chat-editing .s-shell.chat-collapsed {
+    grid-template-rows: 0 minmax(0, 1fr) 78px 54px;
+  }
+  .chat-editing .s-header,
+  .chat-editing .v-comms-dock,
+  .chat-editing .v-chat nav {
+    display: none;
+  }
+  .chat-editing .v-chat {
+    grid-template-rows: minmax(0, 1fr) 44px;
+  }
+  .chat-editing #v-chat-log {
+    display: block;
+  }
+  .chat-editing .s-mobile-status {
+    top: 5px;
+  }
+  .chat-editing .s-weather,
+  .chat-editing .s-compass,
+  .chat-editing .s-toast {
+    display: none;
+  }
+  .chat-editing .s-shell .s-mobile-move {
+    opacity: 0.8;
+    grid-template-columns: repeat(3, 44px);
+    grid-template-rows: repeat(2, 44px);
+    bottom: 5px;
+  }
+  .chat-editing .s-mobile-move button {
+    width: 44px;
+    height: 44px;
+  }
+  .chat-editing .s-context {
+    bottom: 5px;
+  }
+  .text-editing .s-modal.is-title {
+    padding: 8px;
+  }
+}
+@media (max-width: 359px) {
+  .s-hotkeys [data-action='ward'] {
+    display: none;
+  }
+  .v-comms-dock #v-ptt {
+    min-width: 84px;
+  }
+  .v-comms-dock #v-voice-mode {
+    min-width: 61px;
+  }
+  .v-comms-dock > button {
+    font-size: 11px;
+    padding: 4px;
+  }
+  .s-dialog-heading h2 {
+    font-size: 19px;
+  }
+  .s-trade-workspace {
+    grid-template-columns: minmax(90px, 0.9fr) minmax(120px, 1fr);
+  }
+}
+@media (max-height: 500px) and (min-width: 600px) {
+  .s-shell,
+  .s-shell.chat-collapsed {
+    grid-template-rows: 44px minmax(0, 1fr) 48px 54px;
+  }
+  .s-shell:not(.chat-collapsed) {
+    grid-template-rows: 44px minmax(0, 1fr) 146px 54px;
+  }
+  .s-world-caption,
+  .s-compass,
+  .s-mobile-status {
+    display: none;
+  }
+  .s-weather {
+    top: 6px;
+  }
+  .s-shell .s-mobile-move {
+    transform: scale(0.9);
+    transform-origin: bottom left;
+  }
+  .s-dialog-heading {
+    padding: 3px 8px;
+  }
+  .s-dialog-heading h2 {
+    margin: 4px 0;
+  }
+  .s-window-content {
+    padding-top: 4px;
+  }
+  .s-window p {
+    margin: 8px 0;
+  }
+  .v-audio-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0s !important;
+  }
+}
+@media (max-width: 899px) {
+  .v-comms-dock .v-voice button,
+  .v-comms-dock .v-voice select {
+    font-size: 12px;
+    min-height: 44px;
+  }
+  .s-modal.is-title button,
+  .s-modal.is-title input {
+    min-height: 44px;
+  }
+  .v-facing button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .v-create-pages button {
+    min-height: 44px;
+  }
+}
+@media (max-width: 899px) {
+  .s-mobile-move button[data-move='shift'] {
+    grid-column: 3;
+    grid-row: 1;
+    font-size: 12px;
+  }
+}
+@media (max-width: 359px) {
+  .v-comms-dock .v-voice-mode {
+    flex: none;
+    width: 78px;
+  }
+  .v-comms-dock #v-ptt {
+    min-width: 65px;
+    flex: 1;
+  }
+}
+@media (max-width: 899px) {
+  .s-window[data-screen='sound'] .v-audio-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .s-window[data-screen='sound'] .v-audio-controls label {
+    gap: 4px;
+  }
+  .s-window[data-screen='sound'] .v-audio-controls input {
+    margin: 0;
+  }
+  .s-window[data-screen='sound'] .s-menu-buttons {
+    max-width: none;
+  }
+}
+@media (pointer: coarse) and (min-width: 900px) {
+  .s-shell,
+  .s-shell.chat-collapsed {
+    grid-template-rows: 48px minmax(0, 1fr) 58px 64px;
+  }
+  .s-shell:not(.chat-collapsed) {
+    grid-template-rows: 48px minmax(0, 1fr) 210px 64px;
+  }
+  .s-header nav button,
+  .v-comms-dock .v-voice button,
+  .v-comms-dock .v-voice select,
+  .v-comms-dock > button,
+  .s-hotkeys button,
+  .s-equipment button,
+  .s-tabs button,
+  .s-pack button,
+  .s-sidebar button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .v-chat {
+    grid-template-rows: 46px 44px minmax(0, 1fr) 44px;
+  }
+  .chat-collapsed .v-chat {
+    grid-template-rows: 46px;
+  }
+  .v-chat nav button,
+  #v-chat-form button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  #v-chat-input {
+    font-size: 16px;
+  }
+  #v-voice-status {
+    max-width: 90px;
+  }
+  .s-equipment {
+    display: none;
+  }
+  .s-hotkeys button {
+    width: 44px;
+  }
+  .s-walk-help {
+    display: none;
+  }
+  .s-shell .s-mobile-move {
+    display: grid;
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    grid-template-columns: repeat(3, 46px);
+    grid-template-rows: repeat(2, 46px);
+    gap: 3px;
+    z-index: 9;
+  }
+  .s-mobile-move button {
+    padding: 0;
+    min-height: 46px;
+    min-width: 46px;
+    touch-action: none;
+  }
+  .s-mobile-move button:nth-child(1) {
+    grid-column: 2;
+  }
+  .s-mobile-move button:nth-child(2) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .s-mobile-move button:nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .s-mobile-move button:nth-child(4) {
+    grid-column: 3;
+    grid-row: 2;
+  }
+  .s-mobile-move button[data-move='shift'] {
+    grid-column: 3;
+    grid-row: 1;
+    font-size: 12px;
+  }
+}
+
+@media (pointer: coarse) and (min-width: 900px) {
+  .chat-editing .s-shell,
+  .chat-editing .s-shell.chat-collapsed {
+    grid-template-rows: 0 minmax(0, 1fr) 78px 54px;
+  }
+  .chat-editing .s-header,
+  .chat-editing .v-comms-dock,
+  .chat-editing .v-chat nav,
+  .chat-editing .s-weather {
+    display: none;
+  }
+  .chat-editing .v-chat {
+    grid-template-rows: minmax(0, 1fr) 44px;
+  }
+  .chat-editing #v-chat-done {
+    display: block;
+  }
+}
+/* Choices must retain their content height when a long conversation scrolls. */
+.s-dialogue-choices > button {
+  flex: none;
+  height: auto;
+}
+@media (max-width: 899px) {
+  .s-dialogue-choices > button {
+    font-size: 13px;
+  }
+  .s-dialogue-choices > button small {
+    font-size: 12px;
+    color: #aec3c6;
+  }
+  .s-window[data-screen='voice'] .v-audio-controls input,
+  .s-window[data-screen='voice'] .v-audio-controls select {
+    min-height: 44px;
+  }
+}
+@media (pointer: coarse) and (min-width: 900px) {
+  .s-mobile-move button {
+    font:
+      24px system-ui,
+      sans-serif;
+  }
+  .s-mobile-move button[data-move='shift'] {
+    font-size: 12px;
+  }
+}

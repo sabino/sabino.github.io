@@ -1,3 +1,4 @@
+import { detectAppMode } from './app-mode.ts';
 interface InstallPrompt extends Event {
   prompt(): Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
@@ -7,12 +8,43 @@ addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
   deferred = event as InstallPrompt;
 });
-export function installed() {
-  return (
-    matchMedia('(display-mode: standalone)').matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
-  );
+let installObserved = false;
+let launchObserved = false;
+const launchQueue = (
+  window as Window & { launchQueue?: { setConsumer: (callback: () => void) => void } }
+).launchQueue;
+export function appMode() {
+  return detectAppMode({
+    matches: (query) => matchMedia(query).matches,
+    iosStandalone: (navigator as Navigator & { standalone?: boolean }).standalone,
+    launchQueueSupported: !!launchQueue,
+    launchObserved,
+    installObserved,
+  });
 }
+export function installed() {
+  return appMode().installedWindow;
+}
+function changed() {
+  dispatchEvent(new Event('verso-app-mode-change'));
+}
+addEventListener('appinstalled', () => {
+  installObserved = true;
+  changed();
+});
+for (const mode of ['standalone', 'minimal-ui', 'window-controls-overlay', 'fullscreen']) {
+  const query = matchMedia(`(display-mode: ${mode})`);
+  if (query.addEventListener) query.addEventListener('change', changed);
+  else query.addListener?.(changed);
+}
+// Merely having LaunchQueue does not mean this window was installed. Never act on
+// untrusted launch URLs/files here; normal room invitation parsing owns navigation.
+try {
+  launchQueue?.setConsumer(() => {
+    launchObserved = true;
+    changed();
+  });
+} catch {}
 export async function requestInstall(): Promise<string> {
   if (installed()) return 'Verso is already running as an installed app.';
   if (deferred) {
