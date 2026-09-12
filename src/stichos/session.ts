@@ -1,4 +1,5 @@
 import { findWalkingPath } from './pathfinding.ts';
+import { footstepMaterial, physicalSound, resourceMaterial } from './foley-events.ts';
 import { worldTimeAt, type WorldTimeSignal } from './world-time.ts';
 import {
   LivingWorld,
@@ -1482,6 +1483,7 @@ export class Stichos {
     if (pack.equipped !== kind || this.activeArtifact) this.currentWork = null;
     pack.equipped = kind;
     this.clearArtifact();
+    this.event('foley', undefined, { kind: 'equip', material: 'metal', intensity: 0.5 });
     return { ok: true, message: `Equipped ${kind} for work.` };
   }
   buyTool(kind: ToolKind) {
@@ -1973,6 +1975,20 @@ export class Stichos {
             j.strokes++;
             j.nextStrokeAt = this.time + Math.max(profile.cooldown, j.strokeInterval);
             if (distance(worker, this.player) < 22) {
+              this.event(
+                'foley',
+                undefined,
+                physicalSound(
+                  'tool-impact',
+                  resourceMaterial(prop.kind),
+                  worker,
+                  this.player,
+                  worker.id,
+                  prop.seed + j.strokes,
+                  0.65,
+                  0.17,
+                ),
+              );
               const effect = this.effect(
                 'harvest',
                 worker,
@@ -2326,6 +2342,12 @@ export class Stichos {
         if (target) {
           const e = this.effect('hurt', target, hit.color, 0.4);
           e.actorId = hit.target === 'peer' ? this.bodyId : hit.targetId;
+          if (hit.target === 'npc')
+            this.event(
+              'foley',
+              undefined,
+              physicalSound('hit', 'flesh', target, this.player, hit.targetId, hit.id, 0.8),
+            );
         }
       }
       if (
@@ -2610,7 +2632,11 @@ export class Stichos {
         genome,
       };
     pack.equipped = genome.design;
-    this.event('dialogue', `Equipped ${genome.name}.`);
+    this.event('dialogue', `Equipped ${genome.name}.`, {
+      kind: 'equip',
+      material: 'metal',
+      intensity: 0.5,
+    });
     return { ok: true, message: `Equipped ${genome.name}.`, genome };
   }
   useArtifact(design: string) {
@@ -2768,7 +2794,11 @@ export class Stichos {
     this.player.appearance.weapon = item.kind;
     this.player.appearance.weaponSeed = item.seed;
     this.clearArtifact();
-    this.event('dialogue', `Equipped ${item.profile.name}.`);
+    this.event('dialogue', `Equipped ${item.profile.name}.`, {
+      kind: 'equip',
+      material: ['staff', 'bow'].includes(item.kind) ? 'wood' : 'metal',
+      intensity: 0.5,
+    });
     return { ok: true, message: `Equipped ${item.profile.name}.` };
   }
   private storeOrdinary(record: OrdinaryWeapon, bodyId = this.bodyId) {
@@ -3101,9 +3131,16 @@ export class Stichos {
       this.distanceTraveled += moved;
       p.phase += moved * 2.5;
       this.stepClock += moved;
-      if (this.stepClock > 0.85) {
-        this.stepClock = 0;
-        this.event('step');
+      if (this.stepClock >= 0.85) {
+        this.stepClock -= 0.85;
+        this.event('step', undefined, {
+          kind: 'footstep',
+          material: footstepMaterial(this.world.tile(p.x, p.y)),
+          intensity: running ? 0.9 : 0.56,
+          speed: running ? 1 : 0,
+          actorId: this.bodyId,
+          variantSeed: Math.floor(this.distanceTraveled / 0.85) + this.world.seed,
+        });
       }
     }
     p.stamina = clamp(p.stamina + (running ? -15 : 18) * dt);
@@ -3368,10 +3405,36 @@ export class Stichos {
                 damage: intent.damage,
                 enchantment: 'stagger',
               });
-              this.event('attack');
+              this.event(
+                'attack',
+                undefined,
+                physicalSound(
+                  'swing',
+                  'wood',
+                  npc,
+                  this.player,
+                  npc.id,
+                  npc.appearance.seed,
+                  0.65,
+                  0,
+                  'release',
+                ),
+              );
             }
           } else {
-            this.event('attack');
+            this.event(
+              'attack',
+              undefined,
+              physicalSound(
+                'swing',
+                npc.appearance.weapon === 'staff' ? 'wood' : 'metal',
+                npc,
+                this.player,
+                npc.id,
+                npc.appearance.seed,
+                0.75,
+              ),
+            );
             this.effect('slash', npc, intent.color, 0.22, intent.heading);
             const facing =
               ((this.player.x - npc.x) * Math.cos(intent.heading) +
@@ -4153,7 +4216,21 @@ export class Stichos {
         this.removed.add(prop.id);
         this.opened.add(prop.id);
       }
-      this.event('dialogue', this.opened.has(prop.id) ? 'Door opened.' : 'Door closed.');
+      this.event(
+        'dialogue',
+        this.opened.has(prop.id) ? 'Door opened.' : 'Door closed.',
+        physicalSound(
+          'door',
+          this.world.tile(prop.x, prop.y).architecture?.wallMaterial === 'metal' ? 'metal' : 'wood',
+          prop,
+          this.player,
+          prop.id,
+          prop.seed,
+          0.7,
+          0,
+          this.opened.has(prop.id) ? 'open' : 'close',
+        ),
+      );
       return;
     }
     if (prop.kind === 'radio') {
@@ -4320,9 +4397,23 @@ export class Stichos {
     this.effect('harvest', prop, '#dfc69b', 0.65);
     const effect = this.effects.at(-1);
     if (effect) effect.tool = { kind: toolKind, seed: stroke.tool.seed };
+    this.event(
+      'foley',
+      undefined,
+      physicalSound(
+        'tool-impact',
+        resourceMaterial(prop.kind),
+        prop,
+        this.player,
+        this.bodyId,
+        prop.seed + stroke.work.strokes,
+        0.85,
+        0.17,
+      ),
+    );
     if (!stroke.complete) {
       this.event(
-        'harvest',
+        'foley',
         `${toolKind}: ${stroke.work.strokes}/${this.currentWork.requiredStrokes} strokes.`,
       );
       return;
@@ -4355,6 +4446,14 @@ export class Stichos {
     this.event(
       'harvest',
       `Gathered ${amount} ${ITEMS[item].name.toLowerCase()}${botanical ? ` from ${botanical.name.toLowerCase()}` : ''}.`,
+      {
+        kind: 'pickup',
+        material: resourceMaterial(prop.kind),
+        actorId: this.bodyId,
+        variantSeed: prop.seed,
+        intensity: 0.55,
+        delay: 0.28,
+      },
     );
   }
 
@@ -5460,6 +5559,11 @@ export class Stichos {
     if (enchantment === 'breath') this.player.breath = clamp(this.player.breath + 2);
     if (enchantment === 'warmth') this.player.warmth = clamp(this.player.warmth + 3);
     this.effect('hurt', npc, '#ec8277', 0.45);
+    this.event(
+      'foley',
+      undefined,
+      physicalSound('hit', 'flesh', npc, this.player, npc.id, npc.appearance.seed, 0.8),
+    );
     if (wasFriendly) {
       this.changeReputation(npc.clan, -12);
       this.event(
@@ -5586,7 +5690,11 @@ export class Stichos {
       amount,
     });
     this.effect('harvest', this.player, '#d5dca4');
-    this.event('harvest', `Prepared ${amount} ${recipe.name.toLowerCase()}.`);
+    this.event('harvest', `Prepared ${amount} ${recipe.name.toLowerCase()}.`, {
+      kind: 'craft',
+      material: recipe.id === 'lens' ? 'metal' : 'plant',
+      intensity: 0.65,
+    });
   }
 
   equip(weapon: Weapon) {
@@ -5996,8 +6104,20 @@ export class Stichos {
     this.effects.push(effect);
     return effect;
   }
-  private event(kind: GameEvent['kind'], text?: string) {
-    this.events.push({ kind, text });
+  private event(kind: GameEvent['kind'], text?: string, foley?: GameEvent['foley']) {
+    if (!foley && kind === 'attack')
+      foley = {
+        kind: 'swing',
+        material: ['staff', 'bow'].includes(this.player.appearance.weapon) ? 'wood' : 'metal',
+        action:
+          this.player.appearance.weapon === 'bow' && !this.activeArtifact ? 'release' : undefined,
+        actorId: this.bodyId,
+        intensity: 0.85,
+      };
+    if (!foley && kind === 'hurt') foley = { kind: 'hit', material: 'flesh', intensity: 0.8 };
+    if (!foley && kind === 'harvest') foley = { kind: 'pickup', material: 'cloth', intensity: 0.5 };
+    if (!foley && kind === 'trade') foley = { kind: 'equip', material: 'metal', intensity: 0.45 };
+    this.events.push({ kind, text, ...(foley ? { foley } : {}) });
     if (this.events.length > 100) this.events.shift();
   }
   drainEvents() {

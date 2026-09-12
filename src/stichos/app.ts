@@ -228,6 +228,8 @@ const voiceUi = mountVoiceUi({
   container: el('v-voice-mount'),
   peers: () => multiplayer.peers,
   canTalk: () => started && !paused && !modal && !game.dialogue && !transferStarted,
+  openRoomSetup: () => togetherMenu(),
+  closeSettings: () => closeModal(),
   openSettings: (html, mount) => {
     openModal('voice', html);
     mount(el('s-modal'));
@@ -1764,7 +1766,7 @@ function togetherMenu() {
     'together',
     `<div class="v-window-heading"><div><small>${esc(currentPlanet.name)} · ${active ? 'Connected' : 'Find your people'}</small><h2>${active ? esc(roomTitle(multiplayer.room)) : 'Play together'}</h2></div><button id="s-room-return" aria-label="Return to the world">×</button></div><p id="v-room-failure" class="v-room-error" role="alert" ${failure ? '' : 'hidden'}>${esc(failure)}</p>${
       active
-        ? `<div class="v-room-layout"><div><small>${completeCode ? 'Room + planet code' : 'Custom node · share the full invitation'}</small><div class="v-room-code" id="v-room-code" data-room="${esc(multiplayer.room)}">${esc(completeCode ? roomAddress(invite) : multiplayer.room)}</div><p>${multiplayer.peers.length + 1} of 8 travelers<br>Share the code, link, or QR.</p><div class="s-menu-buttons"><button id="v-copy-code">${completeCode ? 'Copy code' : 'Copy invitation'}</button><button id="v-share-room">Share link</button></div></div><div id="v-room-qr" class="v-room-qr" aria-label="QR code to join this room"></div></div><details class="v-room-link"><summary>Full invitation link</summary><input id="s-room-invitation" readonly aria-label="Room join URL" value="${esc(link)}"><button id="s-room-copy">Copy link</button></details><div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}${p.id === multiplayer.peerId ? ' · you' : ''}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}</span>${p.id !== multiplayer.peerId ? `<button data-meet-peer="${esc(p.id)}">Track</button>` : ''}</p>`).join('')}</div><p class="v-muted">${browserRoom ? 'The host keeps this room open. Signed checkpoints preserve shared changes for the same host to resume later.' : 'This shared world stays on the world node when everyone closes the game. Your browser keeps your personal life.'} Press Enter to talk; Local reaches nearby people, Room reaches this whole room.</p><div class="v-room-emotes"><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thanks</button><button data-room-emote="help">Over here</button><button id="s-room-leave">Leave room</button></div>`
+        ? `<div class="v-room-layout"><div><small>${completeCode ? 'Room + planet code' : 'Custom node · share the full invitation'}</small><div class="v-room-code" id="v-room-code" data-room="${esc(multiplayer.room)}">${esc(completeCode ? roomAddress(invite) : multiplayer.room)}</div><p>${multiplayer.peers.length + 1} of 8 travelers<br>Share the code, link, or QR.</p><div class="s-menu-buttons"><button id="v-copy-code">${completeCode ? 'Copy code' : 'Copy invitation'}</button><button id="v-share-room">Share link</button></div></div><div id="v-room-qr" class="v-room-qr" aria-label="QR code to join this room"></div></div><details class="v-room-link"><summary>Full invitation link</summary><input id="s-room-invitation" readonly aria-label="Room join URL" value="${esc(link)}"><button id="s-room-copy">Copy link</button></details><div class="s-room-people">${[{ id: multiplayer.peerId, name: roomName, x: game.player.x, y: game.player.y }, ...multiplayer.peers].map((p) => `<p><b>${esc(p.name)}${p.id === multiplayer.peerId ? ' · you' : ''}</b><span>${Math.round(p.x)}, ${Math.round(p.y)}</span>${p.id !== multiplayer.peerId ? `<button data-meet-peer="${esc(p.id)}">Track</button>` : ''}</p>`).join('')}</div><p class="v-muted">${browserRoom ? 'The host keeps this room open. Signed checkpoints preserve shared changes for the same host to resume later.' : 'This shared world stays on the world node when everyone closes the game. Your browser keeps your personal life.'} Press Enter to talk; Local reaches nearby people, Room reaches this whole room.</p><div class="v-room-emotes"><button data-room-emote="wave">Wave</button><button data-room-emote="thanks">Thanks</button><button data-room-emote="help">Over here</button><button id="v-room-voice">Nearby voice · microphone & PTT</button><button id="s-room-leave">Leave room</button></div>`
         : `<form id="s-room-form"><label>Your traveler name<input id="s-room-name" value="${esc(roomName)}" maxlength="32" required></label><label>Room code or invitation link<input id="s-room-code" value="${esc(roomDraft || multiplayer.room)}" placeholder="Leave empty to create a new room" maxlength="600" autocapitalize="characters"></label><div class="s-menu-buttons"><button class="s-primary" type="submit">${multiplayer.status === 'connecting' ? 'Connecting…' : 'Join or create room'}</button>${multiplayer.reconnectable ? '<button id="s-room-reconnect" type="button">Reconnect</button>' : ''}</div><details class="v-room-mode"><summary>Connection options</summary><label>Connection<select id="s-room-mode"><option value="peer" ${browserRoom ? 'selected' : ''}>Browser room · host must stay online</option><option value="server" ${!browserRoom ? 'selected' : ''}>Persistent world node</option></select></label><label id="s-room-server-label" ${browserRoom ? 'hidden' : ''}>World node<input id="s-room-server" value="${esc(browserRoom ? worldNodeEndpoint() : roomServer)}" placeholder="wss://your-world-node.example/ws" maxlength="240"></label></details></form>${
             owned.length
               ? `<h3>Resume a world you host</h3><div class="s-menu-buttons">${owned
@@ -1824,6 +1826,7 @@ function togetherMenu() {
         }
       else void copy(link);
     };
+    el('v-room-voice').onclick = () => voiceUi.showSettings();
     el('s-room-leave').onclick = () => {
       multiplayer.disconnect();
       roomDraft = '';
@@ -3112,7 +3115,7 @@ function frame(now: number) {
           ? 0.4
           : 0.05,
     );
-    if (now - breathLast > 4200) {
+    if (game.player.breath < 25 && now - breathLast > 6500) {
       audio.play('breath');
       breathLast = now;
     }
@@ -3123,8 +3126,9 @@ function frame(now: number) {
       continue;
     }
     if (event.text) toast(event.text, event.kind === 'quest' ? 7000 : 4200);
-    audio.play(
-      (
+    if (event.foley) audio.playFoley(event.foley);
+    else {
+      const cue = (
         {
           step: 'step',
           attack: 'blade',
@@ -3137,8 +3141,9 @@ function frame(now: number) {
           trade: 'relay',
           ward: 'pulse',
         } as Record<string, string>
-      )[event.kind],
-    );
+      )[event.kind];
+      if (cue) audio.play(cue);
+    }
     if (event.kind === 'transfer' && !transferStarted) transfer('return');
   }
   sendCombatPose();

@@ -2,9 +2,11 @@
 
 Play at **https://sabino.pro/games/verso/**.
 
-The static client is deployed from `sabino/sabino.github.io`, branch `master`, directory `games/verso`. The hosted-node client release is Pages commit `9bef625eebdec009686fcf690dbeb1b9653f6c09`, tracked by [deployment 34688475932](https://github.com/sabino/sabino.github.io/actions/runs/34688475932). Publication replaces only `games/verso/`; unrelated applications remain in the Pages repository.
+The static client is deployed from `sabino/sabino.github.io`, branch `master`, directory `games/verso`. The exact current source revision and production endpoints are published in [release.json](https://sabino.pro/games/verso/release.json). Publication overlays only `games/verso/` in an isolated Pages checkout and retains earlier hashed JavaScript/CSS assets for already-open clients; unrelated applications remain unchanged.
 
-Client source `ce11692` supplies the persistent-node default. Its build contains `assets/app-BldzGDqJ.js`, interface `assets/app-BgQZTSn6.css`, optional browser transport `assets/peer-transport-zz0eqdWz.js`, and entry `assets/index-D1kWnZjM.js`. Service-worker version `14c4a3ebf01828f2bf2a` caches 31 assets. Full built SHA-256 identities are recorded in `.dream-loop/hosted-world-release-build.json`. These build identities are separate from public-browser verification.
+The mobile microphone repair makes **Voice setup** actionable when a traveler opens the game alone. Choose a shared planet or room, then explicitly select **Listen only** or **Enable my microphone**. Return to the game and **Hold to talk**. Denial, interruptions and unsupported capture show specific recovery guidance. Enabling a microphone never starts transmission by itself. [Voice behavior and privacy](../VOICE.md).
+
+Physical sounds now follow actual terrain and accepted tool/combat interactions using recorded CC0 Foley, with natural field recordings and physical instrument models. [Audio controls, provenance and limits](../AUDIO.md). The service-worker version includes all sound-bank bytes; content-hashed audio URLs prevent a prior cache from substituting an old sample. An existing installed session can finish normally; close its game windows and reopen to activate a waiting worker. Do not clear browser storage to update: local lives reside there.
 
 Shared rooms now run on the CapRover service at **`wss://verso-world.host.sabino.pro/ws`**, with [public health status](https://verso-world.host.sabino.pro/health). GitHub Pages remains the browser client host. The one world-node process uses a private persistent volume and has capacity for 64 retained rooms, each with eight simultaneous players. [Deployment and recovery](CAPROVER.md).
 

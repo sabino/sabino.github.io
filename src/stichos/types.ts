@@ -1,3 +1,5 @@
+import type { FoleyEvent } from '../foley.ts';
+
 /** A tile is one world unit. x/east, y/south; height is visual elevation only. */
 export interface Point {
   x: number;
@@ -277,6 +279,7 @@ export interface Recipe {
 }
 export interface GameEvent {
   kind:
+    | 'foley'
     | 'step'
     | 'attack'
     | 'hurt'
@@ -289,6 +292,8 @@ export interface GameEvent {
     | 'trade'
     | 'ward';
   text?: string;
+  /** Ephemeral playback intent, never included in saves or shared checkpoints. */
+  foley?: FoleyEvent;
 }
 export interface Input {
   x: number;
