@@ -15,7 +15,9 @@ const server = createCoopServer({
   }),
 });
 await server.listen(port, host);
-console.log(`Verso world node listening on port ${port}; WebSocket path /ws.`);
+console.log(
+  `Verso world node listening on port ${port}; WebSocket gameplay /ws and ephemeral voice /voice.`,
+);
 console.log(
   'Shared combat, resources, doors and chat; durable worlds in the configured private storage directory. Inventories remain personal.',
 );

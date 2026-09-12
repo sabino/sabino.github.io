@@ -41,6 +41,27 @@ export function worldNodeConfig(env = process.env) {
     maxConnections: integer(env, 'VERSO_MAX_CONNECTIONS', 512, 8, 4096),
     maxConnectionsPerIp: integer(env, 'VERSO_MAX_CONNECTIONS_PER_IP', 32, 1, 512),
     maxRooms: integer(env, 'VERSO_MAX_ROOMS', 64, 1, 1024),
+    voice:
+      env.VERSO_VOICE_ENABLED === '0'
+        ? false
+        : {
+            limits: {
+              connections: integer(env, 'VERSO_VOICE_MAX_CONNECTIONS', 128, 1, 512),
+              perIp: integer(env, 'VERSO_VOICE_MAX_PER_IP', 12, 1, 64),
+              globalBytesPerSecond: integer(
+                env,
+                'VERSO_VOICE_GLOBAL_BYTES',
+                1500000,
+                16000,
+                4000000,
+              ),
+            },
+            ranges: {
+              whisper: integer(env, 'VERSO_VOICE_WHISPER_RANGE', 3, 1, 16),
+              normal: integer(env, 'VERSO_VOICE_NORMAL_RANGE', 14, 4, 64),
+              shout: integer(env, 'VERSO_VOICE_SHOUT_RANGE', 42, 8, 128),
+            },
+          },
   };
 }
 

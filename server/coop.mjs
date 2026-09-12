@@ -4,6 +4,7 @@ import { CoopRooms, MAX_MESSAGE_BYTES } from '../src/stichos/room-authority.mjs'
 import { MULTIPLAYER_PROTOCOL } from '../src/stichos/multiplayer-protocol.ts';
 import { attachRoomDisk } from './room-disk.mjs';
 import { connectionAddress } from './config.mjs';
+import { VoiceRelay } from './voice.mjs';
 export { CoopRooms };
 
 function originAllowed(req, allowedOrigins) {
@@ -37,12 +38,14 @@ export function createCoopServer({
   trustedProxyHops = 0,
   maxConnections = 512,
   maxConnectionsPerIp = 32,
+  voice = {},
   ...roomOptions
 } = {}) {
   const hub = new CoopRooms({
     ...roomOptions,
     durable: !!persistenceDirectory || roomOptions.durable,
   });
+  const voiceRelay = voice === false ? null : new VoiceRelay(hub, voice);
   let disk;
   let persistenceTimer;
   let persistenceError = null;
@@ -60,6 +63,14 @@ export function createCoopServer({
   const http = createServer(async (req, res) => {
     try {
       if (await storeHandler(req, res)) return;
+      if (req.method === 'GET' && req.url === '/voice/health') {
+        res.writeHead(closing ? 503 : 200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(voiceRelay?.diagnostics() ?? { enabled: false }));
+        return;
+      }
       if (req.method === 'GET' && req.url === '/health') {
         const healthy = !persistenceError && !closing;
         res.writeHead(healthy ? 200 : 503, {
@@ -78,6 +89,7 @@ export function createCoopServer({
             ),
             durable: !!disk,
             storageHealthy: !persistenceError,
+            voice: voiceRelay?.diagnostics() ?? { enabled: false },
           }),
         );
         return;
@@ -104,12 +116,18 @@ export function createCoopServer({
     const ip = connectionAddress(req, trustedProxyHops);
     if (
       closing ||
-      req.url !== '/ws' ||
+      !['/ws', '/voice'].includes(req.url) ||
       !originAllowed(req, origins) ||
-      (ipConnections.get(ip) ?? 0) >= maxConnectionsPerIp ||
-      hub.connections.size >= maxConnections
+      (req.url === '/ws' &&
+        ((ipConnections.get(ip) ?? 0) >= maxConnectionsPerIp ||
+          hub.connections.size >= maxConnections))
     ) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      return;
+    }
+    if (req.url === '/voice') {
+      if (voiceRelay) voiceRelay.upgrade(req, socket, head, ip);
+      else socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
       return;
     }
     websocket.handleUpgrade(req, socket, head, (ws) => {
@@ -122,13 +140,17 @@ export function createCoopServer({
       hub.attach(ws);
     });
   });
-  const timer = setInterval(() => hub.heartbeat(), 15000);
+  const timer = setInterval(() => {
+    hub.heartbeat();
+    voiceRelay?.heartbeat();
+  }, 15000);
   timer.unref();
   const combatTimer = setInterval(() => hub.tick(0.05), 50);
   combatTimer.unref();
   return {
     http,
     websocket,
+    voice: voiceRelay,
     hub,
     async listen(port = 4175, host = '0.0.0.0') {
       if (persistenceDirectory && !disk) {
@@ -156,6 +178,7 @@ export function createCoopServer({
           try {
             await flushDisk(true);
           } finally {
+            await voiceRelay?.close();
             for (const client of websocket.clients) client.terminate();
             await new Promise((resolve) => websocket.close(resolve));
             if (http.listening) await new Promise((resolve) => http.close(resolve));

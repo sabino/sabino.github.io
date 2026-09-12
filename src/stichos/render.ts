@@ -1,3 +1,4 @@
+import { drawFauna } from './fauna-art.ts';
 import { makeRegionalBuilding } from './architecture.ts';
 import { regionalGroundColor, blendColor } from './biome-art.ts';
 import type { Peer } from './multiplayer-protocol';
@@ -68,6 +69,7 @@ export class StichosRenderer {
   private worldGeneration = -1;
   private lastTime = -1;
   private npcPrevious = new Map<string, Point>();
+  private faunaPrevious = new Map<string, Point>();
   private npcWalking = new Map<string, boolean>();
   private footsteps: { x: number; y: number; age: number; side: number; heading: number }[] = [];
   private previousPlayer: Point | null = null;
@@ -123,6 +125,12 @@ export class StichosRenderer {
       placement?: { kind: ProductionKind; point: Point; valid: boolean };
       playerAppearance?: Stichos['player']['appearance'];
       emotes?: ReadonlyMap<string, { text: string; until: number }>;
+      voice?: {
+        speakers: ReadonlySet<string>;
+        localSpeaking: boolean;
+        range: number;
+        showRange?: boolean;
+      };
     } = {},
   ) {
     const ctx = this.ctx,
@@ -147,6 +155,7 @@ export class StichosRenderer {
       this.footsteps = [];
       this.previousPlayer = null;
       this.npcPrevious.clear();
+      this.faunaPrevious.clear();
       this.npcWalking.clear();
       this.effectActors.clear();
     }
@@ -430,6 +439,38 @@ export class StichosRenderer {
       }
     }
     const playerScreen = this.worldToScreen(game.player);
+    if (options.voice?.showRange && options.voice.localSpeaking) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(
+        playerScreen.x,
+        playerScreen.y,
+        Math.max(0, options.voice.range) * unit,
+        0,
+        Math.PI * 2,
+      );
+      ctx.strokeStyle = 'rgba(176,219,195,.35)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+      ctx.stroke();
+      ctx.restore();
+    }
+    for (const animal of game.fauna) {
+      if (Math.hypot(animal.x - game.player.x, animal.y - game.player.y) > radius) continue;
+      const previous = this.faunaPrevious.get(animal.id) ?? { x: animal.x, y: animal.y };
+      const blend =
+        this.reducedMotion || Math.hypot(animal.x - previous.x, animal.y - previous.y) > 8
+          ? 1
+          : 1 - Math.exp(-dt * 10);
+      previous.x += (animal.x - previous.x) * blend;
+      previous.y += (animal.y - previous.y) * blend;
+      this.faunaPrevious.set(animal.id, previous);
+      const p = this.worldToScreen(previous);
+      drawables.push({
+        depth: previous.y,
+        draw: () => drawFauna(ctx, animal, p.x, p.y, unit, this.reducedMotion),
+      });
+    }
     for (const npc of game.npcs) {
       if (npc.id === game.occupiedNpcId) continue;
       if (
@@ -442,6 +483,11 @@ export class StichosRenderer {
         this.npcWalking.set(npc.id, Math.hypot(npc.x - prior.x, npc.y - prior.y) > 0.002);
       this.npcPrevious.set(npc.id, { x: npc.x, y: npc.y });
       drawables.push({ depth: npc.y, draw: () => this.person(game, npc, false) });
+    }
+    if (this.faunaPrevious.size > 72) {
+      const active = new Set(game.fauna.map((a) => a.id));
+      for (const id of this.faunaPrevious.keys())
+        if (!active.has(id)) this.faunaPrevious.delete(id);
     }
     drawables.push({
       depth: game.player.y,
@@ -462,6 +508,55 @@ export class StichosRenderer {
       });
     }
     drawables.sort((a, b) => a.depth - b.depth).forEach((item) => item.draw());
+    const time = game.worldTime;
+    const interior = game.world.tile(game.player.x, game.player.y).terrain === 'floor';
+    if (time.nightness > 0) {
+      ctx.save();
+      ctx.fillStyle = `rgba(17,29,57,${time.nightness * (interior ? 0.13 : 0.32)})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+      ctx.restore();
+    }
+    if (time.phase === 'dawn' || time.phase === 'dusk') {
+      ctx.save();
+      ctx.fillStyle = `rgba(209,146,92,${Math.sin(time.daylight * Math.PI) * 0.06})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+      ctx.restore();
+    }
+    for (const npc of game.npcs) {
+      const activity = game.residentActivities.get(npc.id)?.activity;
+      if (
+        !activity ||
+        activity === 'work' ||
+        Math.hypot(npc.x - game.player.x, npc.y - game.player.y) > 5
+      )
+        continue;
+      const p = this.worldToScreen(npc);
+      ctx.save();
+      ctx.font = `${Math.max(9, Math.round(9 * scale))}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#b4c8c8';
+      ctx.fillText(activity, Math.round(p.x), Math.round(p.y - 51 * scale));
+      ctx.restore();
+    }
+    if (options.voice) {
+      const speaking = [
+        ...(options.voice.localSpeaking ? [game.player] : []),
+        ...(options.peers ?? []).filter((p) => options.voice!.speakers.has(p.id)),
+      ];
+      for (const speaker of speaking) {
+        const p = this.worldToScreen(speaker);
+        ctx.save();
+        ctx.fillStyle = '#b9e3bd';
+        for (let i = 0; i < 3; i++)
+          ctx.fillRect(
+            Math.round(p.x + (i - 1) * 4 * scale),
+            Math.round(p.y - (60 + (i === 1 ? 3 : 0)) * scale),
+            2 * scale,
+            (i === 1 ? 7 : 4) * scale,
+          );
+        ctx.restore();
+      }
+    }
     for (const prop of props) {
       const p = this.worldToScreen(prop);
       if (prop.kind === 'lamp') this.glow(p.x, p.y - 51 * scale, 18 * scale, '#ffcf8b', 0.25);

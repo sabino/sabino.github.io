@@ -1,3 +1,5 @@
+import { LivingWorld, faunaContacts } from './living-world.ts';
+import { worldTimeAt, roomWorldSeconds } from './world-time.ts';
 import { InfiniteWorld } from './world.ts';
 import { generateArtifact, normalizeArtifactDesign } from './artifacts.ts';
 import { artifactToolKind, requiredToolFor } from './labor.ts';
@@ -111,6 +113,7 @@ const publicWorldCode = (seed, generation) =>
  * Inventory, personal health and bounded progression declarations remain client-owned.
  */
 export class CoopRooms {
+  livingCursor = 0;
   constructor({
     now = Date.now,
     maxRooms = 64,
@@ -135,6 +138,7 @@ export class CoopRooms {
     this.messageBurst = messageBurst;
     this.rooms = new Map();
     this.connections = new Set();
+    this.voiceAuthority = null;
   }
   signingIdentity(id) {
     let identity = this.signingIdentities.get(id);
@@ -223,6 +227,7 @@ export class CoopRooms {
   }
   detach(connection) {
     this.connections.delete(connection);
+    this.voiceAuthority?.revoke(connection);
     const { room, member } = connection;
     if (!room || !member || member.connection !== connection) return;
     member.connection = null;
@@ -303,6 +308,7 @@ export class CoopRooms {
   }
   tick(dt = 0.05) {
     if (!finite(dt, 0, 0.25) || dt === 0) return;
+    const active = [];
     for (const room of this.rooms.values()) {
       const members = [...room.members.values()].filter((m) => m.connection);
       if (!members.length) continue;
@@ -312,7 +318,85 @@ export class CoopRooms {
         room.opened,
       );
       this.publishCombat(room, frame);
+      active.push({ room, members });
     }
+    // Rotate service order so occupied rooms cannot starve at the global budget.
+    let livingBudget = 2;
+    const start = this.livingCursor % Math.max(1, active.length);
+    for (let offset = 0; offset < active.length && livingBudget > 0; offset++) {
+      const index = (start + offset) % active.length;
+      if (this.tickLiving(active[index].room, active[index].members)) {
+        livingBudget--;
+        this.livingCursor = (index + 1) % active.length;
+      }
+    }
+  }
+  livingObservers(room, members) {
+    return members
+      .filter((m) => m.livingWorld)
+      .map((m) => ({
+        id: m.id,
+        x: m.x,
+        y: m.y,
+        heading: m.heading,
+        ward: room.combat.wardActive(m.id),
+      }));
+  }
+  livingFrameFor(room, member) {
+    room.livingElapsed = Math.max(
+      room.livingElapsed,
+      roomWorldSeconds(room.calendarEpochMs, this.now()),
+    );
+    if (!room.livingFrame)
+      room.livingFrame = room.living.sample(
+        room.world,
+        worldTimeAt(room.livingElapsed),
+        this.livingObservers(
+          room,
+          [...room.members.values()].filter((m) => m.connection),
+        ),
+        new Set([...room.removed, ...room.opened]),
+      );
+    return {
+      version: 1,
+      elapsedSeconds: room.livingElapsed,
+      actors: room.livingFrame.actors.filter((a) => distance(a, member) <= 25),
+    };
+  }
+  tickLiving(room, members) {
+    const active = members.filter((m) => m.livingWorld);
+    if (!active.length || this.now() < room.livingNext) return;
+    room.livingNext = this.now() + 500;
+    room.livingElapsed = Math.max(
+      room.livingElapsed,
+      roomWorldSeconds(room.calendarEpochMs, this.now()),
+    );
+    const observers = this.livingObservers(room, active);
+    room.livingFrame = room.living.sample(
+      room.world,
+      worldTimeAt(room.livingElapsed),
+      observers,
+      new Set([...room.removed, ...room.opened]),
+    );
+    const contacts = [];
+    for (const contact of faunaContacts(room.livingFrame, observers)) {
+      const key = `${contact.strikeId}:${contact.targetId}`;
+      const member = room.members.get(contact.targetId);
+      if (!member || room.faunaStrikes.has(key)) continue;
+      const peer = this.combatPeer(member);
+      if (!peer.combatActive) continue;
+      room.faunaStrikes.add(key);
+      contacts.push({ actorId: contact.actorId, peer, damage: contact.damage });
+    }
+    while (room.faunaStrikes.size > 256)
+      room.faunaStrikes.delete(room.faunaStrikes.values().next().value);
+    if (contacts.length) this.publishCombat(room, room.combat.environmentalContacts(contacts));
+    for (const member of active)
+      this.send(member.connection, {
+        type: 'living_frame',
+        frame: this.livingFrameFor(room, member),
+      });
+    return true;
   }
   handle(connection, message) {
     if (!object(message) || !text(message.type, 1, 24))
@@ -367,6 +451,11 @@ export class CoopRooms {
     const room = connection.room,
       member = connection.member;
     if (member.connection !== connection) return;
+    if (message.type === 'voice_ticket') {
+      if (this.voiceAuthority) this.voiceAuthority.issue(connection, message.requestId);
+      else this.error(connection, 'voice_unavailable', 'This host does not support voice.');
+      return;
+    }
     if (message.type === 'pose') {
       if (
         !point(message) ||
@@ -436,6 +525,7 @@ export class CoopRooms {
       !point(message.position) ||
       (message.combatActive !== undefined && typeof message.combatActive !== 'boolean') ||
       (message.publicWorld !== undefined && typeof message.publicWorld !== 'boolean') ||
+      (message.livingWorld !== undefined && message.livingWorld !== 1) ||
       (message.bodyId !== undefined && !bodyIdValid(message.bodyId)) ||
       (message.progression !== undefined && !validSharedCombatProgression(message.progression)) ||
       (message.room !== undefined &&
@@ -490,6 +580,11 @@ export class CoopRooms {
         removed: new Set(),
         opened: new Set(),
         lastActivity: this.now(),
+        calendarEpochMs: this.now(),
+        livingElapsed: 0,
+        livingNext: 0,
+        living: new LivingWorld({ maxNewCells: 2 }),
+        faunaStrikes: new Set(),
         combatEvent: 0,
         chat: [],
         chatSerial: 0,
@@ -558,6 +653,7 @@ export class CoopRooms {
       appearance: copyAppearance(message.appearance),
       connection,
       disconnectedAt: null,
+      livingWorld: message.livingWorld === 1,
       combatActive: message.combatActive === true,
       bodyId: message.bodyId,
       progression: message.progression
@@ -577,6 +673,7 @@ export class CoopRooms {
         protocol: MULTIPLAYER_PROTOCOL,
         room: room.id,
         peerId: member.id,
+        ...(this.voiceAuthority ? { voice: this.voiceAuthority.capability } : {}),
         resumeToken: member.token,
         seed: room.seed,
         generation: room.generation,
@@ -584,6 +681,7 @@ export class CoopRooms {
         removed: [...room.removed],
         opened: [...room.opened],
         combat: this.combatFrame(room, member),
+        ...(member.livingWorld ? { living: this.livingFrameFor(room, member) } : {}),
         chat: room.chat.filter((c) => c.channel === 'world' || distance(c, member) <= 12),
         machines: [...room.machines.values()],
         ...(proof ? { proof } : {}),
@@ -652,7 +750,15 @@ export class CoopRooms {
       combatHits: [...m.combatHits.values()],
       combatDeaths: [...m.combatDeaths.values()],
     }));
-    return structuredClone({ state, privateState: { members, chat: room.chat } });
+    return structuredClone({
+      state,
+      privateState: {
+        members,
+        chat: room.chat,
+        faunaStrikes: [...room.faunaStrikes],
+        calendarEpochMs: room.calendarEpochMs,
+      },
+    });
   }
   restoreRoom(state, privateState = { members: [], chat: [] }) {
     if (
@@ -666,9 +772,18 @@ export class CoopRooms {
       !Array.isArray(privateState.members) ||
       privateState.members.length > 32 ||
       !Array.isArray(privateState.chat) ||
-      privateState.chat.length > 200
+      privateState.chat.length > 200 ||
+      (privateState.calendarEpochMs !== undefined &&
+        !finite(privateState.calendarEpochMs, 0, 8640000000000000))
     )
       throw Error('Invalid private room backup.');
+    if (
+      privateState.faunaStrikes !== undefined &&
+      (!Array.isArray(privateState.faunaStrikes) ||
+        privateState.faunaStrikes.length > 256 ||
+        !privateState.faunaStrikes.every((s) => typeof s === 'string' && s.length < 256))
+    )
+      throw Error('Invalid wildlife receipt backup.');
     const world = new InfiniteWorld(state.seed, state.generation),
       removed = new Set(state.removed);
     const room = {
@@ -686,6 +801,11 @@ export class CoopRooms {
         state.productionReceipts.map((r) => [r.sourceId, structuredClone(r)]),
       ),
       combatEvent: state.combatEvent,
+      calendarEpochMs: privateState.calendarEpochMs ?? this.now(),
+      livingElapsed: 0,
+      livingNext: 0,
+      living: new LivingWorld({ maxNewCells: 2 }),
+      faunaStrikes: new Set(privateState.faunaStrikes ?? []),
       lastActivity: this.now(),
     };
     room.combat = new SharedCombat(world, removed, { now: this.now });

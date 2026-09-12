@@ -1,3 +1,5 @@
+import type { FaunaFrame } from './living-world.ts';
+import type { VoiceCapability, VoiceTicket } from './voice-protocol.ts';
 import type { Appearance, Point } from './types.ts';
 import type { WorldGeneration } from './world.ts';
 import type { SharedCombatFrame, SharedCombatProgression } from './shared-combat.ts';
@@ -40,6 +42,7 @@ export interface MultiplayerPeer extends Point {
 }
 
 export type MultiplayerClientMessage =
+  | { type: 'voice_ticket'; requestId: string }
   | { type: 'hello'; room: string; protocol: typeof MULTIPLAYER_PROTOCOL; challenge?: string }
   | { type: 'chat'; requestId: string; channel: ChatChannel; text: string }
   | { type: 'machine'; requestId: string; machine: Omit<ProductionMachine, 'ownerId'> }
@@ -57,6 +60,7 @@ export type MultiplayerClientMessage =
       protocol: typeof MULTIPLAYER_PROTOCOL;
       room?: string;
       publicWorld?: boolean;
+      livingWorld?: 1;
       seed: number;
       generation: WorldGeneration;
       name: string;
@@ -97,6 +101,7 @@ export type MultiplayerClientMessage =
   | { type: 'emote'; gesture: MultiplayerGesture };
 
 export type MultiplayerServerMessage =
+  | ({ type: 'voice_ticket'; requestId: string } & VoiceTicket)
   | { type: 'room_info'; info: RoomInfo; proof?: RoomHelloProof }
   | { type: 'chat'; message: RoomChat }
   | { type: 'chat_result'; requestId: string; ok: boolean; reason?: string }
@@ -104,6 +109,8 @@ export type MultiplayerServerMessage =
   | { type: 'checkpoint'; checkpoint: SignedRoomCheckpoint }
   | {
       type: 'welcome';
+      voice?: VoiceCapability;
+      living?: FaunaFrame;
       protocol: typeof MULTIPLAYER_PROTOCOL;
       room: string;
       peerId: string;
@@ -132,6 +139,7 @@ export type MultiplayerServerMessage =
       frame: SharedCombatFrame;
     }
   | { type: 'combat_frame'; frame: SharedCombatFrame }
+  | { type: 'living_frame'; frame: FaunaFrame }
   | {
       type: 'world';
       /** The actor receives its acknowledgement first and handles its own local inventory. */

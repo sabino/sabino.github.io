@@ -1413,6 +1413,25 @@ export class InfiniteWorld {
       cy = Math.floor(y / CHUNK_SIZE);
     return this.chunk(cx, cy).tiles[(y - cy * CHUNK_SIZE) * CHUNK_SIZE + x - cx * CHUNK_SIZE];
   }
+  /** Cached geometry for real-time audio; never generates terrain or changes recency. */
+  peekTile(x: number, y: number): Tile | undefined {
+    x = integer(x);
+    y = integer(y);
+    const cx = Math.floor(x / CHUNK_SIZE),
+      cy = Math.floor(y / CHUNK_SIZE);
+    return this.cache.get(key(cx, cy))?.tiles[
+      (y - cy * CHUNK_SIZE) * CHUNK_SIZE + x - cx * CHUNK_SIZE
+    ];
+  }
+  peekPropsAt(x: number, y: number): readonly Prop[] {
+    x = integer(x);
+    y = integer(y);
+    return (
+      this.cache
+        .get(key(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE)))
+        ?.props.filter((prop) => prop.x === x && prop.y === y) ?? []
+    );
+  }
   private around<T extends Point>(
     x: number,
     y: number,

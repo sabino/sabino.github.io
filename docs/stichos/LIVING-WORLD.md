@@ -1,0 +1,55 @@
+# Time, wildlife and resident society
+
+This implementation adds a bounded living layer above existing generation 1–4. It does not change the terrain, building, resource or resident seeds. The world save remains version 1 and accepts old saves without the optional new fields.
+
+## Calendar and authority
+
+`world-time.ts` defines `WORLD_DAY_SECONDS = 1440`: one complete local day takes 24 real minutes, with the initial epoch at 08:00. Dawn is 05:00–07:00, daylight 07:00–18:00, dusk 18:00–20:00, and night 20:00–05:00. Smoothstep ramps produce continuous light levels. The overlay preserves readable ground and characters: maximum darkness is 32% outdoors and 13% indoors; lamps remain luminous after the overlay. The app exposes the calendar label and phase to HUD/ambience consumers.
+
+Solo play saves `worldElapsed`. It advances with lived game time, including rest, and pauses while the session is paused. Closing the browser does not consume survival resources or silently complete local jobs. Old saves start at their existing `time`, preserving elapsed play rather than resetting the calendar.
+
+Joined rooms instead use an operator authority epoch, `calendarEpochMs`, stored in the operator's private room backup alongside membership recovery data. The public signed checkpoint schema stays unchanged so older pinned clients can reconnect and verify it. The room calendar continues while empty or while the server is offline. Rejoining evaluates elapsed time from that epoch, without simulating every missed frame. A pre-upgrade backup without an epoch acquires one on its first upgraded restore. The server clamps backwards clock corrections during its process lifetime; operators should keep their host clock synchronized. Restoring only a public Pear replica preserves world changes but starts a fresh calendar epoch; full operator backups preserve both.
+
+Clients negotiate `livingWorld: 1` in the existing join packet. Only capable clients receive optional `welcome.living` / `living_frame` messages and participate in wildlife encounters. Older clients keep the existing `/ws` gameplay flow, including pinned checkpoint verification, and are never attacked by animals they cannot see. Updated clients validate frames before applying them. A rotating global budget services at most two rooms per tick without starving later rooms; at 64 simultaneously occupied rooms, living updates become less frequent while combat retains its regular tick.
+
+`MultiplayerConnection.onLiving` supplies frames; `worldElapsedSeconds` extrapolates the latest server sample with the browser's monotonic clock. `Stichos.applyLivingWorldFrame`, `applyWorldClock`, and `clearLivingWorldAuthority` are the app integration points. A room frame never applies client-side wildlife damage. Damage arrives exclusively through the established combat receipt ledger.
+
+## Shared location contract
+
+`worldLocationAt(world, point, removed)` returns biome, terrain, interior/building identity and kind, ecology, architecture, temperature, settlement presence and distances to water, trees and pre-electric flame lamps. It makes a bounded 7×7 set of tile probes and one local prop query; consumers should cache it and update at most twice a second. Feature distances are in world tiles; infinity means no feature was found in the bounded region. There is no dynamic weather simulation in the existing world, so weather is honestly `clear`. Do not infer storms from a random audio cue.
+
+## Wildlife slice
+
+`LivingWorld` derives sparse ecological groups in 12-tile cells, with stable IDs independent of generated NPC IDs or resource claims. Birds occupy suitable woodland, meadow, marsh and cold habitats; grazers occupy meadow/woodland/slopes; boars inhabit wetland and woodland; wolves occupy woodland, cold uplands and badlands. Buildings, floors, roads, bridges, vaults and unsuitable volcanic habitat are excluded. Birds roost at night. Wolves rest by day and become dangerous at dusk/night; boars defend close personal space.
+
+Group members share a continuous anchor orbit with individual spacing and body variation. Foraging includes real idle intervals. Behavior priority is shelter/obstacles, close-threat avoidance, predator approach/lunge, then flock/foraging or curiosity. Passive animals flee close approaches; quiet distant players can elicit grazer curiosity. Predators display an approach cue before a smoothly changing lunge. Terrain rays stop movement at buildings, closed doors and impassable terrain. Wards repel nearby predators and suppress their damage for the established ward cooldown. Players can retreat into settlement shelter instead of fighting.
+
+The first slice is an ecology/avoidance/observation encounter, not a livestock or meat economy. `Observe wildlife` (also the Interact fallback when no nearby person/object exists) writes one finite journal note per kind/biome. It grants no repeatable loot or currency. Animal killing, breeding and ownership are intentionally not implied by this release; the existing combat tool/weapon system remains for humanoid enemies.
+
+The authority samples at most 36 animals across eight observers, at most twice per second. A room sends each member only actors within 25 world tiles. Runtime streaming introduces at most two cold ecological cells per refresh and limits the server to two living-room refreshes per authority tick. The ecological cache caps at 256 cells; personal rendering and society caches are also bounded. Animals outside the active area are culled and reconstructed from seed/time, without replaying every prior frame. Absolute time plus the same observer inputs yields identical generated positions; bounded cold-cell streaming can make first appearance gradual, and server frames are definitive in rooms. Renderer interpolation smooths half-second snapshots.
+
+Wildlife contacts call the trusted `SharedCombat.environmentalContacts` helper, which allocates IDs from the existing combat serial, observes active/fresh membership, respects ward protection, carries body identity and retains the normal acknowledgement/reconnect behavior. There is no client command to invent an environmental hit. Each animal/target can strike once per five-second lunge cycle; up to 256 recent strike keys survive in the private room backup to prevent immediate replay across restarts. Generated animal positions, animation phases and calls are not checkpointed or replicated. Combat consequences remain in the established ledger until acknowledged.
+
+## Resident individuality and observed behavior
+
+`NpcSociety` derives stable temperament, courage, sociability, generosity, diligence and communication style from each resident's identity, role and clan. Role-specific interests combine with independent personal likes/dislikes and goals, so two botanists do not have identical priorities. These profiles are derived instead of bloating every world chunk.
+
+Schedules include work, rest, evening company, morning observance, guard patrols and shelter after warnings. Role and personal early/late shifts change schedules. Residents seek nearby semantically appropriate entrances (houses/inns for rest, churches for observance, inns/halls for company); ordinary jobs keep their working post. Existing hired-worker journeys retain priority. Up to 16 nearby residents receive schedules, and only two bounded 160-node, 14-tile A\* searches run per half second. Closed doors can prevent entry; residents wait near accessible approaches rather than walking through walls. Activity labels make these choices observable near the player.
+
+Conversation offers an individual account of work, tastes, ambitions and remembered behavior. A ration shared once per local day builds personal trust and modest clan reputation. Trust can make an unassigned worker a more dependable partner; explicitly selected household trust settings continue to take precedence. Violence is remembered and witnessed by nearby clan members. A player can warn residents about actual nearby hostile people/animals. Residents tell nearby clan neighbors; listeners switch to shelter or patrol, and speech bubbles expose the information transfer. Warnings retain their original expiry rather than amplifying indefinitely in a rumor loop.
+
+Individual memories (trust, conversation count, last gift/day, last event, warning expiry and source) are personal-life consequences, bounded at 256 remembered residents. They are validated and saved locally. Shared room time synchronizes routine selection; friendship/warning memories and friendly resident motion remain personal context, consistent with the existing personal-life NPC interactions. No new shared resource or quest outcome depends on those personal resident positions. Shared hostile combat remains authoritative.
+
+## Assets and research provenance
+
+All new wildlife pixels are authored procedurally in `fauna-art.ts`; no external images, animal recordings or copyrighted music are included. Audio event hints expose bird/grazer/predator/flee behavior for the separately authored ambience system.
+
+The design uses ideas described in Craig Reynolds' original [Boids overview](https://www.red3d.com/cwr/boids/index.html) and [steering behavior research](https://www.red3d.com/cwr/steer/): local avoidance and coherent groups. This implementation deliberately uses bounded shared-anchor trajectories, not an unbounded all-pairs boids simulation. Resident priorities and thresholds draw on [Choosing Effective Utility-Based Considerations, Game AI Pro 3](https://www.gameaipro.com/GameAIPro3/GameAIPro3_Chapter13_Choosing_Effective_Utility-Based_Considerations.pdf). The implemented system is deterministic role/schedule/state logic, with no model downloads, external agents, or LLM dependency.
+
+## Verification and concrete next increments
+
+Run `node --experimental-strip-types --test tests/stichos-living*.test.ts` for day boundaries, habitat selection, deterministic replay, fleeing/predator telegraphs, obstruction, individual variation, warning propagation/expiry, bounded memory, save migration, capability negotiation, calendar restoration, combat receipts and generation invariance. Existing world hashes and multiplayer/persistence suites must also remain green.
+
+Browser evidence should cover a daytime inhabited street, a night street with readable lighting, wilderness fauna/field notes, and a resident's routine/personality dialog on narrow and desktop viewports. Emulated screens cannot establish real-phone heat/battery behavior. Remaining real-device checks include long sessions with eight room peers, voice plus fauna/combat during movement, background/resume, and device-specific canvas/audio scheduling.
+
+Next increments are concrete: authoritative friendly-resident schedules when shared NPC trading/jobs move server-side; richer habitat-specific animal families and persistent outcomes through the existing claim ledger; actual weather signals before adding weather-dependent spawns/audio; and a bounded food/prey model if hunting becomes an economic activity. None of these replace the working slice above.

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WORLD_ACOUSTICS, worldOcclusion } from '../src/stichos/world-acoustics.ts';
 import type { Prop, Tile } from '../src/stichos/types.ts';
+import { InfiniteWorld } from '../src/stichos/world.ts';
 
 function fixture(walls: number[] = [], doors: number[] = []) {
   let calls = 0;
@@ -9,7 +10,7 @@ function fixture(walls: number[] = [], doors: number[] = []) {
     get calls() {
       return calls;
     },
-    tile(x: number, y: number) {
+    peekTile(x: number, y: number) {
       calls++;
       x = Math.round(x);
       y = Math.round(y);
@@ -19,7 +20,7 @@ function fixture(walls: number[] = [], doors: number[] = []) {
         terrain: walls.includes(x) ? 'wall' : doors.includes(x) ? 'floor' : 'grass',
       } as Tile;
     },
-    propsAround(x: number, y: number) {
+    peekPropsAt(x: number, y: number) {
       return doors.includes(x) ? [{ id: `door:${x}`, kind: 'door', x, y } as Prop] : [];
     },
   };
@@ -32,6 +33,15 @@ test('acoustics distinguish open ground, wall faces and closed/open doors', () =
   assert.equal(worldOcclusion(fixture([], [3]), from, to, new Set()), WORLD_ACOUSTICS.closedDoor);
   assert.equal(worldOcclusion(fixture([], [3]), from, to, new Set(['door:3'])), 0);
   assert.equal(worldOcclusion(fixture([2, 4]), from, to, new Set()), 2 * WORLD_ACOUSTICS.wall);
+});
+test('shout acoustics read cached geometry without generating unseen terrain', () => {
+  const world = new InfiniteWorld(8, 4);
+  world.tile(0, 5);
+  const before = world.cacheSize;
+  worldOcclusion(world, { x: 0, y: 5 }, { x: 41, y: 5 }, new Set());
+  assert.equal(world.cacheSize, before);
+  assert.equal(world.peekTile(10000, 10000), undefined);
+  assert.equal(world.cacheSize, before);
 });
 test('geometry work and occlusion remain bounded and never mute through walls', () => {
   const world = fixture(Array.from({ length: 40 }, (_, i) => i * 2));

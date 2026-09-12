@@ -427,6 +427,37 @@ export class SharedCombat {
     return frame;
   }
 
+  /** Trusted environment simulation only; deliberately has no client wire command. */
+  environmentalContacts(
+    contacts: readonly { actorId: string; peer: SharedCombatPeer; damage: number }[],
+  ): SharedCombatFrame {
+    for (const contact of contacts.slice(0, 36)) {
+      const { peer, actorId, damage } = contact;
+      if (
+        !peer.combatActive ||
+        !/^fauna:1:-?\d+:-?\d+:\d+$/.test(actorId) ||
+        !finite(damage, 0, 8) ||
+        this.wardActive(peer.id)
+      )
+        continue;
+      this.hits.push({
+        id: ++this.serial,
+        actorId,
+        targetId: peer.id,
+        target: 'peer',
+        damage,
+        kind: 'slash',
+        color: '#d0b39a',
+        actorBodyId: actorId,
+        ...(peer.bodyId ? { targetBodyId: peer.bodyId } : {}),
+      });
+    }
+    return this.frame(contacts.length > 0);
+  }
+  wardActive(peerId: string): boolean {
+    return (this.cooldowns.get(peerId)?.ward ?? 0) > this.now();
+  }
+
   private result(ok: boolean, reason?: string): SharedCombatResult {
     return { ok, ...(reason ? { reason } : {}), ...this.frame(ok) };
   }

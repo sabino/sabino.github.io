@@ -1,3 +1,5 @@
+import { validFaunaFrame, type FaunaFrame } from './living-world.ts';
+import type { VoiceCapability, VoiceTicket } from './voice-protocol.ts';
 import type { RoomTransport } from './peer-transport';
 import { PEER_CONNECT_TIMEOUT, peerFailure, type PeerNetworkDiagnostic } from './peer-network.ts';
 import type { SharedCombatFrame } from './shared-combat';
@@ -42,6 +44,47 @@ export interface RoomIdentity {
 }
 export class MultiplayerConnection {
   private socket: RoomTransport | WebSocket | null = null;
+  voiceCapability: VoiceCapability | null = null;
+  onVoiceSessionChange: () => void = () => {};
+  private voiceRequests = new Map<
+    string,
+    {
+      resolve: (ticket: VoiceTicket) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+  get voiceEndpoint(): string {
+    if (!this.voiceCapability || this.endpoint === 'peer:') return '';
+    const url = new URL(this.endpoint);
+    url.pathname = '/voice';
+    url.search = '';
+    url.hash = '';
+    return url.href;
+  }
+  requestVoiceTicket(): Promise<VoiceTicket> {
+    if (this.status !== 'online' || !this.voiceEndpoint)
+      return Promise.reject(Error('Join a voice-enabled world node first.'));
+    const requestId = `v${++this.serial}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.voiceRequests.delete(requestId);
+        reject(Error('Voice credential request timed out.'));
+      }, 4000);
+      this.voiceRequests.set(requestId, { resolve, reject, timer });
+      this.send({ type: 'voice_ticket', requestId });
+    });
+  }
+  private clearVoiceSession() {
+    this.voiceCapability = null;
+    this.livingClock = null;
+    for (const r of this.voiceRequests.values()) {
+      clearTimeout(r.timer);
+      r.reject(Error('Game membership ended.'));
+    }
+    this.voiceRequests.clear();
+    this.onVoiceSessionChange();
+  }
   onNetworkChange: () => void = () => {};
   networkDiagnostic: Readonly<PeerNetworkDiagnostic> | null = null;
   lastError = '';
@@ -87,6 +130,19 @@ export class MultiplayerConnection {
     change: Extract<ServerMessage, { type: 'world' }> | Extract<ServerMessage, { type: 'welcome' }>,
   ) => void = () => {};
   onCombat: (frame: SharedCombatFrame) => void = () => {};
+  onLiving: (frame: FaunaFrame) => void = () => {};
+  private livingClock: { seconds: number; sampledAt: number } | null = null;
+  get worldElapsedSeconds(): number | null {
+    return this.status === 'online' && this.livingClock
+      ? this.livingClock.seconds +
+          Math.max(0, performance.now() - this.livingClock.sampledAt) / 1000
+      : null;
+  }
+  private receiveLiving(frame: unknown) {
+    if (!validFaunaFrame(frame)) return;
+    this.livingClock = { seconds: frame.elapsedSeconds, sampledAt: performance.now() };
+    this.onLiving(frame);
+  }
   onMessage: (text: string) => void = () => {};
   onEmote: (peerId: string, gesture: MultiplayerGesture) => void = () => {};
   get peers(): readonly Peer[] {
@@ -175,6 +231,7 @@ export class MultiplayerConnection {
         joined = true;
         this.send({
           type: 'join',
+          livingWorld: 1,
           protocol: MULTIPLAYER_PROTOCOL,
           ...identity,
           room: forceHost && !hostedRestore ? undefined : room || undefined,
@@ -218,6 +275,10 @@ export class MultiplayerConnection {
           welcomed = true;
           clearTimeout(timeout);
           this.status = 'online';
+          this.voiceCapability =
+            message.voice?.version === 1 && Array.isArray(message.voice.codecs)
+              ? message.voice
+              : null;
           this.room = message.room;
           this.peerId = message.peerId;
           this.resumeToken = message.resumeToken;
@@ -236,7 +297,20 @@ export class MultiplayerConnection {
           this.onWorld(message);
           this.onChange();
           this.onCombat(message.combat);
+          if (message.living) this.receiveLiving(message.living);
+          this.onVoiceSessionChange();
           resolve();
+        } else if (message.type === 'voice_ticket') {
+          const pending = this.voiceRequests.get(message.requestId);
+          if (
+            pending &&
+            /^[A-Za-z0-9_-]{43}$/.test(message.ticket) &&
+            Number.isFinite(message.expiresAt)
+          ) {
+            clearTimeout(pending.timer);
+            this.voiceRequests.delete(message.requestId);
+            pending.resolve({ ticket: message.ticket, expiresAt: message.expiresAt });
+          }
         } else if (message.type === 'peerJoined' || message.type === 'pose') {
           this.peerRecords.set(message.peer.id, message.peer);
           this.onChange();
@@ -270,6 +344,8 @@ export class MultiplayerConnection {
             void saveRoomReplica(message.checkpoint).then((ok) => {
               if (ok && epoch === this.epoch) this.onCheckpoint(message.checkpoint);
             });
+        } else if (message.type === 'living_frame') {
+          this.receiveLiving(message.frame);
         } else if (message.type === 'combat_frame') {
           this.onCombat(message.frame);
         } else if (
@@ -428,6 +504,7 @@ export class MultiplayerConnection {
         if (epoch !== this.epoch) return;
         this.socket = null;
         this.status = welcomed ? 'disconnected' : 'offline';
+        this.clearVoiceSession();
         this.peerRecords.clear();
         this.cancelClaims();
         this.onChange();
@@ -497,6 +574,7 @@ export class MultiplayerConnection {
     this.cancelClaims();
     this.peerRecords.clear();
     this.status = 'offline';
+    this.clearVoiceSession();
     if (forget) {
       this.lastError = '';
       this.room = '';

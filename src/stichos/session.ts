@@ -1,3 +1,14 @@
+import { findWalkingPath } from './pathfinding.ts';
+import { worldTimeAt, type WorldTimeSignal } from './world-time.ts';
+import {
+  LivingWorld,
+  faunaContacts,
+  validFaunaFrame,
+  type FaunaActor,
+  type FaunaFrame,
+  type LivingObserver,
+} from './living-world.ts';
+import { NpcSociety, validSocietySave, type NpcRoutine } from './npc-society.ts';
 import {
   buildCompact,
   createCompact,
@@ -382,6 +393,65 @@ export class Stichos {
   dialogue: Dialogue | null = null;
   events: GameEvent[] = [];
   time = 0;
+  private calendarSeconds = 0;
+  private livingWorld = new LivingWorld({ maxNewCells: 2 });
+  private livingFrame: FaunaFrame = { version: 1, elapsedSeconds: 0, actors: [] };
+  private livingAuthority = false;
+  private livingObservers: LivingObserver[] = [];
+  private faunaStrikes = new Set<string>();
+  private wildlifeWardUntil = 0;
+  private livingRefresh = 0;
+  private society = new NpcSociety();
+  private residentRoutines = new Map<string, NpcRoutine>();
+  private residentPaths = new Map<string, { key: string; points: Point[]; retryAt: number }>();
+  private residentNavCursor = 0;
+  private wildlifeNotes = new Set<string>();
+  /** A saved solo clock pauses with the game. Joined rooms replace it with their authority clock. */
+  get worldTime(): WorldTimeSignal {
+    return worldTimeAt(this.calendarSeconds, this.seed);
+  }
+  get fauna(): readonly FaunaActor[] {
+    return this.livingFrame.actors;
+  }
+  get fieldObservations(): readonly string[] {
+    return [...this.wildlifeNotes];
+  }
+  get residentActivities(): ReadonlyMap<string, NpcRoutine> {
+    return this.residentRoutines;
+  }
+  applyWorldClock(elapsedSeconds: number) {
+    if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) return false;
+    this.calendarSeconds = elapsedSeconds;
+    return true;
+  }
+  setLivingObservers(observers: readonly LivingObserver[]) {
+    this.livingObservers = observers
+      .filter((p) => typeof p.id === 'string' && Number.isFinite(p.x) && Number.isFinite(p.y))
+      .slice(0, 8)
+      .map((p) => ({ ...p }));
+  }
+  applyLivingWorldFrame(frame: unknown) {
+    if (!validFaunaFrame(frame)) return false;
+    this.livingAuthority = true;
+    this.livingFrame = structuredClone(frame);
+    this.applyWorldClock(frame.elapsedSeconds);
+    return true;
+  }
+  clearLivingWorldAuthority() {
+    this.livingAuthority = false;
+    this.livingObservers = [];
+    this.livingRefresh = 0;
+  }
+  residentPersonality(id: string) {
+    const npc = this.npcs.find((n) => n.id === id);
+    return npc
+      ? {
+          ...this.society.personality(npc),
+          memory: { ...this.society.memory(id) },
+          routine: this.residentRoutines.get(id),
+        }
+      : null;
+  }
   distanceTraveled = 0;
   readonly visited = new Set<string>();
   private fogChunks = new Map<string, number>();
@@ -1494,6 +1564,9 @@ export class Stichos {
   }
   private workerTrusted(workerId: string) {
     if (this.estateTrust[workerId] !== undefined) return this.estateTrust[workerId];
+    const rememberedTrust = this.society.memory(workerId).trust;
+    if (rememberedTrust >= 4) return true;
+    if (rememberedTrust < 0) return false;
     return this.universeLife
       ? this.personalContext()?.plan.relationships.find((r) => r.npcId === workerId)?.stance ===
           'ally'
@@ -2961,6 +3034,7 @@ export class Stichos {
     this.player.breath = clamp(this.player.breath + 50);
     this.player.stamina = 100;
     this.time += 30;
+    this.calendarSeconds += 30;
     this.restAnchor = { x: this.player.x, y: this.player.y };
     this.event('heal', 'Rested in your home.');
     return true;
@@ -3008,6 +3082,7 @@ export class Stichos {
   private tick(dt: number, input: Input) {
     const p = this.player;
     this.time += dt;
+    this.calendarSeconds += dt;
     p.attackCooldown = Math.max(0, p.attackCooldown - dt);
     p.wardCooldown = Math.max(0, p.wardCooldown - dt);
     p.cequinTime = Math.max(0, p.cequinTime - dt);
@@ -3049,6 +3124,7 @@ export class Stichos {
       this.refreshNpcs();
       this.visit();
     }
+    this.updateLivingWorld(dt, length > 0);
     this.updateNpcs(dt);
     this.updateLabor(dt);
     this.updateProduction(dt);
@@ -3056,6 +3132,100 @@ export class Stichos {
     this.updateSharedProjectiles(dt);
     for (const effect of this.effects) effect.age += dt;
     this.effects = this.effects.filter((e) => e.age < e.duration);
+  }
+
+  private updateLivingWorld(dt: number, moving: boolean) {
+    this.livingRefresh -= dt;
+    if (this.livingRefresh > 0) return;
+    this.livingRefresh = 0.5;
+    const time = this.worldTime;
+    const observers = this.livingObservers.length
+      ? this.livingObservers
+      : [
+          {
+            id: '$player',
+            ...this.player,
+            moving,
+            ward: time.elapsedSeconds < this.wildlifeWardUntil,
+          },
+        ];
+    if (!this.livingAuthority)
+      this.livingFrame = this.livingWorld.sample(this.world, time, observers, this.removed);
+    // Joined rooms own combat; no unsanctioned client damage or rewards from wildlife.
+    if (
+      !this.sharedWorld &&
+      !this.livingAuthority &&
+      time.elapsedSeconds >= this.wildlifeWardUntil
+    ) {
+      for (const contact of faunaContacts(this.livingFrame, observers)) {
+        if (contact.targetId !== '$player' || this.faunaStrikes.has(contact.strikeId)) continue;
+        this.faunaStrikes.add(contact.strikeId);
+        this.hurt(contact.damage);
+        this.event('dialogue', 'A wild animal lunges. Retreat toward shelter or use your ward.');
+      }
+      while (this.faunaStrikes.size > 64)
+        this.faunaStrikes.delete(this.faunaStrikes.values().next().value!);
+    }
+    const residents = this.npcs.filter((n) => !n.hostile && n.hp > 0).slice(0, 16);
+    this.residentRoutines.clear();
+    for (const npc of residents)
+      this.residentRoutines.set(npc.id, this.society.routine(npc, time, this.world, residents));
+    // At most two small A* searches per half-second; blocked paths wait before retrying.
+    for (let i = 0; i < Math.min(2, residents.length); i++) {
+      const npc = residents[this.residentNavCursor++ % residents.length],
+        routine = this.residentRoutines.get(npc.id)!;
+      const target = this.clear(routine.target) ? routine.target : npc.home;
+      const key = `${Math.round(target.x)},${Math.round(target.y)}:${this.removed.size}`;
+      const previous = this.residentPaths.get(npc.id);
+      if (
+        previous?.key === key &&
+        (previous.points.length || previous.retryAt > time.elapsedSeconds)
+      )
+        continue;
+      const points =
+        distance(npc, target) > 0.6
+          ? findWalkingPath(npc, [target], (x, y) => !this.clear({ x, y }), {
+              radius: 14,
+              maxVisited: 160,
+            })
+          : [];
+      this.residentPaths.set(npc.id, { key, points, retryAt: time.elapsedSeconds + 10 });
+    }
+    while (this.residentPaths.size > 64)
+      this.residentPaths.delete(this.residentPaths.keys().next().value!);
+    for (const event of this.society.communicate(residents, time)) {
+      const speaker = residents.find((n) => n.id === event.speakerId)!;
+      const e = this.effect('speech', speaker, '#b8d4bf', 3);
+      e.text = event.text;
+    }
+  }
+
+  /** Quiet observation is a finite field-journal discovery; it never creates farmable loot. */
+  observeWildlife() {
+    if (this.phase !== 'playing' || this.dialogue) return false;
+    const animal = this.fauna
+      .filter((a) => distance(a, this.player) <= 7)
+      .sort((a, b) => distance(a, this.player) - distance(b, this.player))[0];
+    if (!animal) {
+      this.event(
+        'dialogue',
+        'Look for wildlife outside the settlement, then observe from a safe distance.',
+      );
+      return false;
+    }
+    const key = `${animal.kind}:${this.world.tile(animal.home.x, animal.home.y).biome}`;
+    if (!this.wildlifeNotes.has(key)) {
+      this.wildlifeNotes.add(key);
+      this.entry(
+        `Field note: ${animal.name}`,
+        `${this.worldTime.label}. ${animal.name} in ${this.world.tile(animal.home.x, animal.home.y).biome}: ${animal.activity}. ${animal.dangerous ? 'Its display precedes a lunge; distance, shelter and wards are safer than crowding it.' : 'Stay quiet. Close approaches scatter the group; movement follows a shared flock or herd range.'}`,
+      );
+    }
+    this.event(
+      'dialogue',
+      `${animal.name} · ${animal.activity}. Observation recorded in your journal.`,
+    );
+    return true;
   }
 
   private clear(point: Point) {
@@ -3157,7 +3327,12 @@ export class Stichos {
       npc.cooldown = Math.max(0, npc.cooldown - dt);
       if (npc.role === 'guard' && this.reputation[npc.clan] < -24) npc.hostile = true;
       const range = distance(npc, this.player);
-      const target = npc.hostile && range < 8 ? this.player : npc.home;
+      const routine = !npc.hostile ? this.residentRoutines.get(npc.id) : undefined;
+      const route = !npc.hostile ? this.residentPaths.get(npc.id) : undefined;
+      while (route?.points.length && distance(npc, route.points[0]) < 0.15) route.points.shift();
+      const routineTarget =
+        route?.points[0] ?? (routine && this.clear(routine.target) ? routine.target : npc.home);
+      const target = npc.hostile && range < 8 ? this.player : routineTarget;
       const targetDistance = distance(npc, target);
       const intent = this.enemyIntents.get(npc.id);
       if (intent) {
@@ -3236,12 +3411,16 @@ export class Stichos {
           color: profile!.color,
           warning,
         });
-      } else if (!canAim && targetDistance > (npc.hostile && range < 8 ? 0.85 : 0.5)) {
+      } else if (
+        !canAim &&
+        targetDistance > (npc.hostile && range < 8 ? 0.85 : route?.points.length ? 0.1 : 0.5)
+      ) {
         const dx = target.x - npc.x,
           dy = target.y - npc.y;
         const speed = Math.min(2.4, npc.speed || 1.5);
         const before = { x: npc.x, y: npc.y };
-        this.move(npc, (dx / targetDistance) * speed * dt, (dy / targetDistance) * speed * dt);
+        const step = Math.min(speed * dt, targetDistance);
+        this.move(npc, (dx / targetDistance) * step, (dy / targetDistance) * step);
         npc.heading = Math.atan2(dy, dx);
         npc.phase += distance(npc, before) * 2.5;
       }
@@ -3899,6 +4078,10 @@ export class Stichos {
         )
       : this.nearby();
     if (!found || distance(found, this.player) > 1.8) {
+      if (!id && this.fauna.some((a) => distance(a, this.player) < 7)) {
+        this.observeWildlife();
+        return;
+      }
       this.event('dialogue', 'Move closer to interact.');
       return;
     }
@@ -4347,6 +4530,30 @@ export class Stichos {
   }
 
   private talk(npc: Npc) {
+    this.talkBase(npc);
+    if (!this.dialogue || this.dialogue.npcId !== npc.id) return;
+    this.society.converse(npc);
+    this.dialogue.choices.push(
+      { id: 'resident:life', label: 'Ask about their life and routine' },
+      {
+        id: 'resident:gift',
+        label: 'Share a ration',
+        detail: 'One gift per local day. Kindness changes how this person remembers you.',
+        disabled:
+          !(this.inventory.rations ?? 0) ||
+          this.society.memory(npc.id).lastGiftDay === this.worldTime.day,
+      },
+      {
+        id: 'resident:warn',
+        label: 'Warn them about nearby danger',
+        disabled:
+          !this.nearbyThreat() &&
+          !this.fauna.some((a) => a.dangerous && distance(a, this.player) < 8),
+      },
+    );
+  }
+
+  private talkBase(npc: Npc) {
     const job = this.orders.find(
       (o) => o.workerId === npc.id && o.status === 'working' && o.journey?.phase !== 'ready',
     );
@@ -4463,6 +4670,36 @@ export class Stichos {
     if (!npc && !prop) {
       this.dialogue = null;
       this.event('dialogue', 'Move closer to continue.');
+      return;
+    }
+    if (choiceId.startsWith('resident:') && npc) {
+      if (choiceId === 'resident:life') {
+        this.reply(
+          this.society.describe(
+            npc,
+            this.worldTime,
+            this.world.civilization?.roleNames[npc.role] ?? npc.role,
+          ),
+        );
+      } else if (
+        choiceId === 'resident:gift' &&
+        this.society.memory(npc.id).lastGiftDay !== this.worldTime.day &&
+        this.spend({ rations: 1 })
+      ) {
+        this.society.remember(npc, 'gift', this.worldTime);
+        this.changeReputation(npc.clan, 1);
+        this.reply('A meal shared is remembered. I will speak well of you when our neighbors ask.');
+      } else if (
+        choiceId === 'resident:warn' &&
+        (this.nearbyThreat() || this.fauna.some((a) => a.dangerous && distance(a, this.player) < 8))
+      ) {
+        this.society.remember(npc, 'warning', this.worldTime);
+        this.reply(
+          npc.role === 'guard'
+            ? 'I will watch the approach and tell the others.'
+            : 'I will stay near shelter and pass the warning to my neighbors.',
+        );
+      }
       return;
     }
     if (choiceId.startsWith('personal:') && this.universeLife) {
@@ -5149,6 +5386,7 @@ export class Stichos {
     p.wardCooldown = 8;
     this.effect('ward', p, '#9abde9', 0.75);
     this.event('ward', 'The ward steadies your breath and repels attackers.');
+    this.wildlifeWardUntil = this.worldTime.elapsedSeconds + 8;
     p.breath = clamp(p.breath + 5);
     for (const npc of this.npcs.filter(
       (n) => n.hostile && n.hp > 0 && distance(n, p) < 2.7 && this.lineOfSight(p, n),
@@ -5208,6 +5446,13 @@ export class Stichos {
       this.enemyIntents.delete(npc.id);
     }
     const wasFriendly = !npc.hostile && npc.role !== 'raider';
+    if (wasFriendly) {
+      this.society.remember(npc, 'threat', this.worldTime);
+      for (const witness of this.npcs
+        .filter((n) => n.id !== npc.id && !n.hostile && n.clan === npc.clan && distance(n, npc) < 5)
+        .slice(0, 4))
+        this.society.remember(witness, 'warning', this.worldTime, npc.id);
+    }
     if (!wasFriendly && npc.hp > 0) grantPractice(this.progression, 'combat', 2);
     npc.hp = Math.max(0, npc.hp - amount);
     npc.hostile = true;
@@ -5379,6 +5624,7 @@ export class Stichos {
     this.player.warmth = 100;
     this.player.breath = 100;
     this.time += 30;
+    this.calendarSeconds += 30;
     this.effect('heal', this.player, '#c4e7df', 1);
     this.event('heal', 'Rested. This place will anchor a return.');
   }
@@ -5822,6 +6068,9 @@ export class Stichos {
       quests: this.quests,
       journal: this.journal,
       time: this.time,
+      worldElapsed: this.calendarSeconds,
+      society: this.society.save(),
+      wildlifeNotes: [...this.wildlifeNotes],
       distanceTraveled: this.distanceTraveled,
       visited: [...this.visited],
       exploration: this.explorationSave(),
@@ -5933,6 +6182,9 @@ export class Stichos {
     game.quests = clone(data.quests);
     game.journal = clone(data.journal);
     game.time = data.time;
+    game.calendarSeconds = data.worldElapsed ?? data.time;
+    game.society = new NpcSociety(data.society);
+    game.wildlifeNotes = new Set(data.wildlifeNotes ?? []);
     game.distanceTraveled = data.distanceTraveled;
     game.visited.clear();
     for (const id of data.visited) game.visited.add(id);
@@ -6293,6 +6545,22 @@ function validateSave(value: unknown): SaveData {
     !Array.isArray(value.reputation) ||
     value.reputation.length !== 6 ||
     !value.reputation.every((r) => number(r, -100, 100))
+  )
+    return fail();
+  if (value.worldElapsed !== undefined && !number(value.worldElapsed, 0, Number.MAX_SAFE_INTEGER))
+    return fail();
+  if (value.society !== undefined && !validSocietySave(value.society)) return fail();
+  if (
+    value.wildlifeNotes !== undefined &&
+    (!Array.isArray(value.wildlifeNotes) ||
+      value.wildlifeNotes.length > 48 ||
+      !value.wildlifeNotes.every(
+        (n) =>
+          typeof n === 'string' &&
+          /^(bird|grazer|boar|wolf):(frostwood|tundra|marsh|highlands|woodland|meadow|wetland|dunes|badlands|volcanic|alpine|settlement)$/.test(
+            n,
+          ),
+      ))
   )
     return fail();
   const npc = (n: unknown) =>
