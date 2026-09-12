@@ -36,17 +36,19 @@ Your personal case names actual inhabitants and a real local terminal. A worksho
 
 ## Meet other players
 
-Open **Room**, leave its code blank to host a **Browser room**, and share the code, link or QR. A full invitation selects the correct planet and geography; code-only discovery can also find an online host’s world before life creation. PeerJS provides signalling and WebRTC carries the room traffic. The host must keep the game open. **Galaxy → Open public frequency** uses a deterministic rendezvous code for that planet, joining an available host or attempting to host it. A planet on the chart is not evidence of online players or an always-on service.
+Open **Together**, leave its code blank, and choose **Join or create room**. New rooms use the persistent node at `wss://verso-world.host.sabino.pro/ws`; the creator can close the browser while the shared room remains available. Share the complete `N` code, link or QR: each includes the planet and geography, which decode without a network lookup. **Galaxy → Open public frequency** atomically joins or creates the planet's deterministic `P` room on that node. The single node currently retains up to 64 rooms with eight simultaneous travelers per room. A planet on the chart is not evidence of online players. [Room connectivity](docs/stichos/ROOM-CONNECTIVITY.md), [node operations](docs/stichos/CAPROVER.md).
+
+**Together → Connection options → Browser room** remains available. Explicit legacy `V` invitations still use PeerJS/WebRTC and require their browser host to stay online; some networks need an independently configured TURN relay. Existing browser worlds and their signing authorities are not silently moved to the hosted node.
 
 Rooms share presence, gestures, Local/Room chat, hostile combat, doors, finite resource claims and registered production platforms. Personal health, inventory, tool condition, progression and story remain local. No PvP, global population simulation, authoritative MMO economy or automatic host migration is implemented.
 
-For an optional dedicated WebSocket room server:
+To run an additional WebSocket world node locally:
 
 ```sh
 npm run server
 ```
 
-Select **Room → Connection options → Dedicated world node** and use `ws://localhost:4175/ws` locally. Remote hosting needs suitable HTTPS/WSS and origin configuration. Signed checkpoints retain shared changes; restoring authority requires its private owner storage. [Multiplayer](docs/stichos/MULTIPLAYER.md) and [world persistence](docs/stichos/WORLD-PERSISTENCE.md) describe the boundaries.
+Select **Together → Connection options → Persistent world node** and use `ws://localhost:4175/ws` locally. Custom-node invitations must include the full URL so they identify that operator's endpoint. Remote hosting needs suitable HTTPS/WSS and origin configuration. Signed checkpoints retain shared changes; restoring authority requires its private owner storage. [Multiplayer](docs/stichos/MULTIPLAYER.md) and [world persistence](docs/stichos/WORLD-PERSISTENCE.md) describe the boundaries.
 
 The optional [native Pear node](pear-node/README.md) uses actual Corestore/Hypercore and Hyperswarm to replicate signed **public** checkpoints. It runs separately in Node; it is neither browser WebAssembly nor a packaged Pear desktop app. Someone must operate and retain it. A public replica contains no owner private key or reconnect credentials and cannot replace that private backup.
 
