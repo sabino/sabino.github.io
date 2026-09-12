@@ -6,6 +6,26 @@ const OWNER_DESCRIPTION = 'Verso always-on multiplayer world authority';
 const DEFAULT_NODE = 'vmb4ky49reg899ibcp5ce74yj';
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export function safeTransportCode(error) {
+  const code = error?.cause?.code || error?.code;
+  if (
+    new Set([
+      'UND_ERR_SOCKET',
+      'UND_ERR_CONNECT_TIMEOUT',
+      'UND_ERR_HEADERS_TIMEOUT',
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'EAI_AGAIN',
+      'ETIMEDOUT',
+      'CERT_HAS_EXPIRED',
+      'ERR_TLS_CERT_ALTNAME_INVALID',
+    ]).has(code)
+  )
+    return code;
+  return error?.name === 'TimeoutError' ? 'TIMEOUT' : 'NETWORK_ERROR';
+}
+
 export function deploymentPlan(options = {}) {
   const captain = new URL(options.captainUrl || 'https://captain.host.sabino.pro');
   if (
@@ -237,14 +257,17 @@ async function main() {
         headers: {
           'Content-Type': 'application/json',
           'x-namespace': 'captain',
+          // CapRover reloads nginx after configuration mutations. Do not reuse a
+          // pooled socket that the reload may have closed between API operations.
+          Connection: 'close',
           ...(token ? { 'X-Captain-Auth': token } : {}),
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
         redirect: 'error',
         signal: AbortSignal.timeout(180_000),
       });
-    } catch {
-      throw Error(`CapRover request failed: ${method} ${path}.`);
+    } catch (error) {
+      throw Error(`CapRover request failed: ${method} ${path} (${safeTransportCode(error)}).`);
     }
     let result;
     try {

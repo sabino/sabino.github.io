@@ -5,6 +5,7 @@ import {
   appUpdate,
   deployWorldNode,
   summarizeApp,
+  safeTransportCode,
 } from '../scripts/deploy-world-node.mjs';
 
 const plan = deploymentPlan({ image: 'verso-world:aa36cee' });
@@ -17,6 +18,16 @@ const existing = () => ({
   ports: [],
   isAppBuilding: false,
   instanceCount: 1,
+});
+
+test('transport diagnostics expose only recognized error codes and never arbitrary error values', () => {
+  assert.equal(safeTransportCode({ cause: { code: 'UND_ERR_SOCKET' } }), 'UND_ERR_SOCKET');
+  assert.equal(safeTransportCode({ cause: { code: 'ECONNRESET' } }), 'ECONNRESET');
+  assert.equal(safeTransportCode({ name: 'TimeoutError' }), 'TIMEOUT');
+  assert.equal(
+    safeTransportCode({ cause: { code: 'private-secret' }, message: 'private-secret' }),
+    'NETWORK_ERROR',
+  );
 });
 
 test('deployment plan wraps a loaded image without requesting a registry pull and bounds memory', () => {
