@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "sourceRepository": "https://github.com/sabino/sabino.github.io",
+  "sourceBranch": "feat/voice-mobile-living-world",
+  "sourceCommit": "408b1b0501238a80ed258819749d1ad9f3ca284d",
+  "prerequisiteCommits": [
+    "e4ebc07fe8e3e26ee8ee608995f58f15f141c44d",
+    "1c95310778e699f4568dfb1e36705766878505b6",
+    "9c7ade0884a1d6037cab40f3893eefe19247f815"
+  ],
+  "frontendUrl": "https://sabino.pro/games/verso/",
+  "base": "/games/verso/",
+  "worldEndpoint": "wss://verso-world.host.sabino.pro/ws",
+  "voiceEndpoint": "wss://verso-world.host.sabino.pro/voice",
+  "codec": "ima-adpcm-16k-v1"
+}
