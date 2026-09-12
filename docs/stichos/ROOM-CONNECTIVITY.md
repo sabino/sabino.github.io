@@ -65,7 +65,9 @@ Same-machine browser contexts verify the real RTC protocol and invitation flow b
 
 The integrated client/server build passed **413/413 tests**, TypeScript, production build and formatting. Public WSS verification connected two identities, resolved the room, and enforced a single shared harvest. A forced CapRover service restart retained the room, reconnect identity and consumed resource. These are real remote-protocol and restart checks; they are not a claim that the user's two physical computers have been tested.
 
-Client source `ce11692` adds the default node and complete `N` codes. Pages commit `9bef625eebdec009686fcf690dbeb1b9653f6c09` is tracked by [deployment 34688475932](https://github.com/sabino/sabino.github.io/actions/runs/34688475932). The build manifest is `.dream-loop/hosted-world-release-build.json`; native public-browser verification for this release is recorded separately when completed.
+Client source `ce11692` adds the default node and complete `N` codes. Pages commit `9bef625eebdec009686fcf690dbeb1b9653f6c09` passed [deployment 34688475932](https://github.com/sabino/sabino.github.io/actions/runs/34688475932). Every one of 31 non-HTML public files matched the validated build's SHA-256 identity. The build manifest is `.dream-loop/hosted-world-release-build.json`; public file evidence is `.dream-loop/hosted-public-assets.json`.
+
+Native-input public-site QA passed with three distinct generation-four lives, invitation URL and mobile code-only joins, QR display, and offline planet decoding. A new traveler joined after the creator left. Two travelers independently joined the same `P40000008` public frequency and exchanged Room chat through Enter and the Send button. The corrected native-input run recorded zero runtime or console errors; evidence is `.dream-loop/g4-native-coop-node-public/results.json`. The first run's unsent chat was a harness Enter event missing its carriage return, corrected without changing application behavior. The browser contexts ran on one computer through the public WSS service; they do not constitute operation of the user's two physical computers.
 
 ## Earlier browser-room verification — 2026-09-11
 

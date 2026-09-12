@@ -124,6 +124,7 @@ async function traveler(name, targetUrl = url, mobile = false) {
       key,
       code,
       windowsVirtualKeyCode: vk,
+      ...(key === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}),
       modifiers,
     });
     if (hold) await delay(hold);
@@ -364,9 +365,20 @@ try {
     await friend.click('[data-chat-channel=world]');
     await friend.fill('#v-chat-input', 'A shared signal from the always-on world.');
     await friend.key('Enter', 'Enter', 13);
+    await friend.wait(
+      "document.querySelector('#v-chat-input').value === ''",
+      'Enter submits the chat form',
+    );
     await absent.wait(
       "document.querySelector('#v-chat-log').textContent.includes('A shared signal from the always-on world.')",
       'public world delivers room chat',
+    );
+    await absent.click('[data-chat-channel=world]');
+    await absent.fill('#v-chat-input', 'The return signal arrived.');
+    await absent.click('#v-chat-form button[type=submit]');
+    await friend.wait(
+      "document.querySelector('#v-chat-log').textContent.includes('The return signal arrived.')",
+      'Send button delivers the reply',
     );
     await absent.shot('public-world-chat');
     pass(
