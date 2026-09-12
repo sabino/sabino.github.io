@@ -1,3 +1,31 @@
+import {
+  AUDIO_LIMITS,
+  ambientEvents,
+  atmosphereRandom,
+  selectSoundscape,
+  voiceDuckLevels,
+} from './atmosphere.ts';
+import type { SoundscapeFrame, WorldSoundEvent } from './atmosphere.ts';
+import { readAudioSettings, writeAudioSettings, normalizeAudioSettings } from './audio-settings.ts';
+import type { AudioSettings, AudioSettingsStorage } from './audio-settings.ts';
+import type { WorldLocationSignal } from './stichos/world-signals.ts';
+import type { WorldTimeSignal } from './stichos/world-time.ts';
+export type { AudioSettings } from './audio-settings.ts';
+export interface AudioDiagnostics {
+  state: string;
+  started: boolean;
+  paused: boolean;
+  voiceDucked: boolean;
+  zone: string;
+  culture: string;
+  phase: string;
+  transientVoices: number;
+  ambienceVoices: number;
+  permanentSources: number;
+  schedulerRunning: boolean;
+  settings: AudioSettings;
+}
+
 /**
  * Verso's small, entirely procedural sound world.
  *
@@ -9,6 +37,139 @@ export class AudioDirector {
   private master: GainNode | null = null;
   private music: GainNode | null = null;
   private effects: GainNode | null = null;
+  private ambience: GainNode | null = null;
+  private ambienceLayers = new Map<string, { level: GainNode; filter: BiquadFilterNode }>();
+  private musicSlots: GainNode[] = [];
+  private activeMusicSlot = 0;
+  private ambientVoices = new Set<AudioScheduledSourceNode>();
+  private soundscape: SoundscapeFrame | null = null;
+  private environment: { location: WorldLocationSignal; time: WorldTimeSignal } | null = null;
+  private lastAmbientSlice = -1;
+  private voiceActive = false;
+  private lifecycleHidden = false;
+  private lifecycleInstalled = false;
+  private settings: AudioSettings;
+  private storage: AudioSettingsStorage | undefined;
+  private echoDelay: DelayNode | null = null;
+  private echoWet: GainNode | null = null;
+  private echoDamp: BiquadFilterNode | null = null;
+  private visibilityHandler = () => {
+    this.lifecycleHidden = typeof document !== 'undefined' && document.hidden;
+    this.applyPause();
+  };
+
+  constructor(storage?: AudioSettingsStorage) {
+    this.storage = storage;
+    this.settings = readAudioSettings(storage);
+    this.muted = this.settings.muted;
+  }
+
+  getSettings(): AudioSettings {
+    return { ...this.settings };
+  }
+
+  setSettings(update: Partial<AudioSettings>): void {
+    this.settings = normalizeAudioSettings(update, this.settings);
+    this.muted = this.settings.muted;
+    writeAudioSettings(this.settings, this.storage);
+    this.updateLevels();
+  }
+
+  /** Speech has its own AudioContext. Only ambience/music are smoothly ducked here. */
+  setVoiceActivity(active: boolean): void {
+    if (this.voiceActive === active) return;
+    this.voiceActive = active;
+    this.updateLevels();
+  }
+
+  /** Call at most twice per second using canonical world time and sampled geometry. */
+  setEnvironment(location: WorldLocationSignal, time: WorldTimeSignal): void {
+    this.environment = { location, time };
+    this.refreshSoundscape();
+  }
+
+  getDiagnostics(): AudioDiagnostics {
+    return {
+      state: this.context?.state ?? 'unstarted',
+      started: this.started,
+      paused: this.paused || this.lifecycleHidden,
+      voiceDucked: this.voiceActive,
+      zone: this.soundscape?.zone ?? 'legacy',
+      culture: this.soundscape?.culture ?? 'procedural',
+      phase: this.soundscape?.phase ?? 'day',
+      transientVoices: this.voices.size,
+      ambienceVoices: this.ambientVoices.size,
+      permanentSources: this.permanentSources.length,
+      schedulerRunning: this.timer !== null,
+      settings: this.getSettings(),
+    };
+  }
+
+  /** Call only for visible simulation events. Distance is measured in world tiles. */
+  playWorldEvent(event: WorldSoundEvent): void {
+    const context = this.context;
+    if (
+      !context ||
+      !this.ambience ||
+      context.state !== 'running' ||
+      this.paused ||
+      this.lifecycleHidden ||
+      this.muted ||
+      this.disposed ||
+      this.settings.ambience <= 0 ||
+      this.settings.master <= 0
+    )
+      return;
+    if (
+      !Number.isFinite(event.distance) ||
+      event.distance < 0 ||
+      event.distance >= AUDIO_LIMITS.worldSoundRadius
+    )
+      return;
+    const key = `world:${event.kind}:${(event.id ?? '').slice(0, 64)}`;
+    if (!this.allowEvent(key, context.currentTime, event.kind === 'bird' ? 4 : 2.5)) return;
+    const strength =
+      (1 - event.distance / AUDIO_LIMITS.worldSoundRadius) ** 2 *
+      (this.environment?.location.interior ? 0.28 : 1);
+    const pan = Number.isFinite(event.pan) ? Math.max(-1, Math.min(1, event.pan!)) : 0;
+    this.environmentSound(event.kind, context.currentTime, strength, pan);
+  }
+
+  private refreshSoundscape(): void {
+    if (!this.environment) return;
+    const previous = this.soundscape;
+    this.soundscape = selectSoundscape(
+      this.environment.location,
+      this.environment.time,
+      this.intensity,
+      this.seed,
+    );
+    if (
+      !previous ||
+      previous.zone !== this.soundscape.zone ||
+      previous.culture !== this.soundscape.culture
+    ) {
+      // Two reusable buses let old note tails fade while the new location begins.
+      this.phraseStep = 0;
+      if (this.context && this.musicSlots.length === 2) {
+        const now = this.context.currentTime;
+        this.musicSlots[this.activeMusicSlot].gain.setTargetAtTime(0, now, 0.7);
+        this.activeMusicSlot = 1 - this.activeMusicSlot;
+        this.musicSlots[this.activeMusicSlot].gain.setTargetAtTime(1, now, 0.9);
+        this.nextNote = now + 0.1;
+      }
+    }
+    this.updateLevels();
+  }
+
+  private allowEvent(key: string, now: number, cooldown: number): boolean {
+    if (now - (this.lastEvents.get(key) ?? -100) < cooldown) return false;
+    this.lastEvents.delete(key);
+    this.lastEvents.set(key, now);
+    while (this.lastEvents.size > AUDIO_LIMITS.eventHistory)
+      this.lastEvents.delete(this.lastEvents.keys().next().value!);
+    return true;
+  }
   private droneLevel: GainNode | null = null;
   private droneFilter: BiquadFilterNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
@@ -38,7 +199,14 @@ export class AudioDirector {
 
   /** A controller can start play without granting the browser audio activation. */
   get needsGesture(): boolean {
-    return !!this.context && this.context.state === 'suspended' && !this.muted && !this.paused;
+    return (
+      !!this.context &&
+      this.context.state !== 'running' &&
+      this.context.state !== 'closed' &&
+      !this.muted &&
+      !this.paused &&
+      !this.lifecycleHidden
+    );
   }
 
   /** Create/resume audio only in response to a click, tap, or key gesture. */
@@ -65,22 +233,31 @@ export class AudioDirector {
 
     this.started = true;
     this.paused = false;
+    if (!this.lifecycleInstalled && typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.visibilityHandler);
+      this.lifecycleInstalled = true;
+      this.lifecycleHidden = document.hidden;
+    }
     this.clearSuspendTimer();
     try {
-      if (this.context.state === 'suspended') await this.context.resume();
+      if (
+        this.context.state !== 'running' &&
+        this.context.state !== 'closed' &&
+        !this.lifecycleHidden
+      )
+        await this.context.resume();
     } catch {
       // Another user gesture may successfully resume the context later.
     }
     if (this.disposed || !this.context) return;
     this.nextNote = this.context.currentTime + 0.12;
     this.updateLevels();
-    if (!this.timer) this.timer = setInterval(() => this.schedule(), 100);
+    this.ensureScheduler();
   }
 
   setMuted(muted: boolean): void {
     if (this.muted === muted) return;
-    this.muted = muted;
-    this.updateLevels();
+    this.setSettings({ muted });
   }
 
   /** Expected range is 0 (exploring) to 1 (immediate danger). */
@@ -88,7 +265,8 @@ export class AudioDirector {
     const intensity = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
     if (intensity === this.intensity) return;
     this.intensity = intensity;
-    this.updateLevels();
+    if (this.environment) this.refreshSoundscape();
+    else this.updateLevels();
   }
 
   /** A seed determines the world's motif, tempo, root, and texture. */
@@ -104,6 +282,8 @@ export class AudioDirector {
     const turn = Math.floor(this.musicRandom() * 5);
     this.motif = [0, 2, 4, 2, 1, 3, 2, 0].map((degree) => (degree + turn) % 5);
     this.phraseStep = 0;
+    this.lastAmbientSlice = -1;
+    if (this.environment) this.refreshSoundscape();
     if (this.context) {
       this.nextNote = this.context.currentTime + 0.2;
       const multipliers = [0.5, 0.75, 1];
@@ -127,6 +307,7 @@ export class AudioDirector {
       !bus ||
       context.state !== 'running' ||
       this.paused ||
+      this.lifecycleHidden ||
       this.muted ||
       this.disposed
     )
@@ -147,8 +328,7 @@ export class AudioDirector {
       'mind-transfer': 3,
       radio: 0.7,
     };
-    if (now - (this.lastEvents.get(event) ?? -100) < (limits[event] ?? 0.08)) return;
-    this.lastEvents.set(event, now);
+    if (!this.allowEvent(event, now, limits[event] ?? 0.08)) return;
     const jitter = 0.94 + this.effectRandom() * 0.12;
     const pan = (this.effectRandom() - 0.5) * 0.35;
 
@@ -271,32 +451,59 @@ export class AudioDirector {
     }
   }
 
-  /** Pause freezes musical time and releases the device while the game is idle. */
+  /** Pause releases only the game's device graph; the independent voice graph is untouched. */
   pause(paused: boolean): void {
     this.paused = paused;
+    this.applyPause();
+  }
+
+  private ensureScheduler(): void {
+    if (this.context && !this.disposed && !this.paused && !this.lifecycleHidden && !this.timer)
+      this.timer = setInterval(() => this.schedule(), AUDIO_LIMITS.schedulerMs);
+  }
+
+  private applyPause(): void {
     this.clearSuspendTimer();
     const context = this.context;
     if (!context || this.disposed) return;
+    const paused = this.paused || this.lifecycleHidden;
     this.updateLevels();
     if (paused) {
+      if (this.timer) clearInterval(this.timer);
+      this.timer = null;
+      // Scheduled transients are cancelled so a suspended context cannot replay stale events.
+      for (const source of [...this.voices]) {
+        try {
+          source.stop(context.currentTime + 0.15);
+        } catch {
+          /* Already ended. */
+        }
+      }
       this.suspendTimer = setTimeout(() => {
         this.suspendTimer = null;
-        if (this.paused && context.state === 'running') {
+        if ((this.paused || this.lifecycleHidden) && context.state === 'running') {
           void context
             .suspend()
             .then(() => {
-              // An unpause can arrive while suspend() is waiting for the next
-              // audio render quantum; honor the latest state after it settles.
-              if (!this.paused && !this.disposed && this.context === context) {
+              if (
+                !this.paused &&
+                !this.lifecycleHidden &&
+                !this.disposed &&
+                this.context === context
+              )
                 return context.resume();
-              }
             })
             .catch(() => undefined);
         }
       }, 180);
     } else {
       this.nextNote = context.currentTime + 0.12;
-      if (context.state === 'suspended') void context.resume().catch(() => undefined);
+      this.lastAmbientSlice = this.environment
+        ? Math.floor(this.environment.time.elapsedSeconds / 2)
+        : -1;
+      if (context.state !== 'running' && context.state !== 'closed')
+        void context.resume().catch(() => undefined);
+      this.ensureScheduler();
     }
   }
 
@@ -306,6 +513,9 @@ export class AudioDirector {
     this.clearSuspendTimer();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.lifecycleInstalled && typeof document !== 'undefined')
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    this.lifecycleInstalled = false;
     this.disposeGraph();
     this.lastEvents.clear();
   }
@@ -324,6 +534,14 @@ export class AudioDirector {
 
     this.music = context.createGain();
     this.effects = context.createGain();
+    this.ambience = context.createGain();
+    this.ambience.gain.value = 0;
+    this.ambience.connect(this.master);
+    this.musicSlots = [context.createGain(), context.createGain()];
+    this.musicSlots.forEach((slot, index) => {
+      slot.gain.value = index === this.activeMusicSlot ? 1 : 0;
+      slot.connect(this.music!);
+    });
     this.music.gain.value = 0.78;
     this.effects.gain.value = 0.88;
     this.music.connect(this.master);
@@ -331,13 +549,16 @@ export class AudioDirector {
 
     // Short stereo echoes create space without an external impulse response.
     const echo = context.createDelay(1);
+    this.echoDelay = echo;
     echo.delayTime.value = 0.337;
     const feedback = context.createGain();
     feedback.gain.value = 0.18;
     const damp = context.createBiquadFilter();
+    this.echoDamp = damp;
     damp.type = 'lowpass';
     damp.frequency.value = 1750;
     const wet = context.createGain();
+    this.echoWet = wet;
     wet.gain.value = 0.16;
     this.music.connect(echo);
     echo.connect(damp).connect(feedback).connect(echo);
@@ -381,9 +602,26 @@ export class AudioDirector {
     this.windFilter.Q.value = 0.55;
     this.windLevel = context.createGain();
     this.windLevel.gain.value = 0.085;
-    wind.connect(this.windFilter).connect(this.windLevel).connect(this.music);
+    wind.connect(this.windFilter).connect(this.windLevel).connect(this.ambience);
     wind.start();
     this.permanentSources.push(wind);
+    // The reusable noise buffer is pooled. Source nodes are one-shot by Web Audio design;
+    // these three long-lived loops are never recreated on a location transition.
+    for (const [index, name] of ['water', 'leaves', 'room'].entries()) {
+      const source = context.createBufferSource();
+      source.buffer = this.noiseBuffer;
+      source.loop = true;
+      const filter = context.createBiquadFilter();
+      filter.type = name === 'water' ? 'lowpass' : 'bandpass';
+      filter.frequency.value = [1850, 2350, 180][index];
+      filter.Q.value = 0.35;
+      const level = context.createGain();
+      level.gain.value = 0;
+      source.connect(filter).connect(level).connect(this.ambience!);
+      source.start(0, index * 0.77);
+      this.ambienceLayers.set(name, { level, filter });
+      this.permanentSources.push(source);
+    }
 
     const breeze = context.createOscillator();
     breeze.frequency.value = 0.065;
@@ -405,7 +643,21 @@ export class AudioDirector {
   private schedule(): void {
     const context = this.context;
     const bus = this.music;
-    if (!context || !bus || context.state !== 'running' || this.paused || this.disposed) return;
+    if (
+      !context ||
+      !bus ||
+      context.state !== 'running' ||
+      this.paused ||
+      this.lifecycleHidden ||
+      this.disposed ||
+      this.muted
+    )
+      return;
+    this.scheduleAmbience();
+    if (this.soundscape) {
+      this.scheduleLocationMusic(this.soundscape);
+      return;
+    }
     // Never catch up a tab's missed beats in a burst after a long frame.
     if (this.nextNote < context.currentTime) this.nextNote = context.currentTime + 0.05;
     while (this.nextNote < context.currentTime + 0.24) {
@@ -446,21 +698,229 @@ export class AudioDirector {
     }
   }
 
+  private scheduleLocationMusic(frame: SoundscapeFrame): void {
+    const context = this.context!;
+    const bus = this.musicSlots[this.activeMusicSlot] ?? this.music!;
+    if (this.nextNote < context.currentTime) this.nextNote = context.currentTime + 0.05;
+    let scheduled = 0;
+    while (
+      this.nextNote < context.currentTime + AUDIO_LIMITS.lookAheadSeconds &&
+      scheduled++ < AUDIO_LIMITS.maxCatchupNotes
+    ) {
+      const step = this.phraseStep % 64;
+      const random = atmosphereRandom(frame.variationSeed, this.phraseStep, 90);
+      // Every other wilderness phrase breathes: long rests prevent a constant game loop.
+      const rest = frame.zone === 'wilderness' && Math.floor(this.phraseStep / 32) % 3 === 2;
+      if (
+        !rest &&
+        (step % 2 === 0 || frame.zone === 'tavern' || frame.zone === 'danger') &&
+        random < frame.noteDensity
+      ) {
+        const degree =
+          (this.motif[Math.floor(step / 2) % this.motif.length] + Math.floor(step / 16)) %
+          frame.scale.length;
+        const note = this.tonic * ratio(frame.scale[degree]) * (step >= 32 ? 2 : 1);
+        const pan = atmosphereRandom(frame.variationSeed, this.phraseStep, 91) * 1.2 - 0.6;
+        const temple = frame.zone === 'temple',
+          tavern = frame.zone === 'tavern';
+        const shape: OscillatorType =
+          frame.culture === 'electronic' ? 'sine' : temple ? 'sine' : 'triangle';
+        this.tone(
+          note,
+          this.nextNote,
+          temple ? 3.3 : tavern ? 0.48 : 1.4,
+          0.037 * frame.melodyGain,
+          bus,
+          {
+            shape,
+            attack: temple ? 0.4 : tavern ? 0.009 : 0.09,
+            cutoff: temple ? 1100 : tavern ? 2600 : 1450,
+            pan,
+          },
+        );
+        if (temple)
+          this.tone(note * ratio(7), this.nextNote + 0.08, 3.1, 0.014, bus, {
+            attack: 0.5,
+            cutoff: 1400,
+            pan: -pan,
+          });
+        if (tavern && frame.culture === 'acoustic')
+          this.tone(note * 2, this.nextNote, 0.2, 0.01, bus, { shape: 'sine', cutoff: 2400, pan });
+      }
+      if (
+        step % 4 === 0 &&
+        (frame.zone === 'danger' ||
+          ((frame.zone === 'tavern' || frame.zone === 'workshop') && frame.activity > 0.2))
+      ) {
+        this.tone(
+          this.tonic / 2,
+          this.nextNote,
+          0.22,
+          frame.zone === 'danger' ? 0.043 : 0.018,
+          bus,
+          { endHz: this.tonic / 3, cutoff: 330, attack: 0.006 },
+        );
+      }
+      this.phraseStep++;
+      this.nextNote += frame.pulseSeconds;
+    }
+  }
+
+  private scheduleAmbience(): void {
+    if (!this.soundscape || !this.environment || !this.context || this.settings.ambience <= 0)
+      return;
+    const slice = Math.floor(this.environment.time.elapsedSeconds / 2);
+    if (slice === this.lastAmbientSlice) return;
+    this.lastAmbientSlice = slice;
+    for (const event of ambientEvents(this.soundscape, this.environment.time.elapsedSeconds)) {
+      if (
+        !this.allowEvent(
+          `ambient:${event.kind}`,
+          this.context.currentTime,
+          event.kind === 'bird' ? 5.5 : 3,
+        )
+      )
+        continue;
+      this.environmentSound(event.kind, this.context.currentTime + 0.04, event.strength, event.pan);
+    }
+  }
+
+  private environmentSound(kind: string, now: number, strength: number, pan: number): void {
+    const bus = this.ambience;
+    if (!bus || strength <= 0 || this.ambientVoices.size >= AUDIO_LIMITS.ambienceVoices) return;
+    const volume = strength * 0.035;
+    const options = { pan, category: 'ambience' as const };
+    if (kind === 'bird') {
+      const base = 1600 + atmosphereRandom(this.seed, Math.floor(now), 17) * 1500;
+      this.tone(base, now, 0.17, volume * 0.6, bus, {
+        ...options,
+        endHz: base * 1.55,
+        attack: 0.025,
+      });
+      this.tone(base * 1.36, now + 0.2, 0.22, volume * 0.5, bus, {
+        ...options,
+        endHz: base * 0.91,
+        attack: 0.022,
+      });
+      this.tone(base, now + 0.5, 0.12, volume * 0.28, bus, {
+        ...options,
+        endHz: base * 1.25,
+        attack: 0.016,
+      });
+    } else if (kind === 'insect') {
+      for (let index = 0; index < 4; index++)
+        this.tone(3700 + index * 32, now + index * 0.075, 0.043, volume * 0.23, bus, options);
+    } else if (kind === 'fire' || kind === 'flee') {
+      this.noise(
+        now,
+        kind === 'fire' ? 0.18 : 0.42,
+        volume * 1.6,
+        kind === 'fire' ? 1900 : 850,
+        'bandpass',
+        pan,
+        0.013,
+        bus,
+      );
+    } else if (kind === 'work') {
+      this.tone(
+        this.soundscape?.culture === 'electronic' ? 880 : 520,
+        now,
+        0.18,
+        volume * 0.7,
+        bus,
+        { ...options, endHz: 410, shape: 'triangle', cutoff: 1600 },
+      );
+      this.noise(now, 0.07, volume, 1750, 'highpass', pan, 0.004, bus);
+    } else if (kind === 'social') {
+      // Abstract low room murmur: never synthesized intelligible words or recorded speech.
+      [130, 185, 230].forEach((hz, index) =>
+        this.tone(hz, now + index * 0.14, 0.4, volume * 0.16, bus, {
+          ...options,
+          shape: 'triangle',
+          attack: 0.12,
+          endHz: hz * 1.14,
+          cutoff: 650,
+        }),
+      );
+    } else if (kind === 'grazer') {
+      this.tone(340, now, 0.42, volume * 0.65, bus, {
+        ...options,
+        shape: 'triangle',
+        endHz: 220,
+        attack: 0.09,
+        cutoff: 1100,
+      });
+    } else if (kind === 'predator') {
+      this.noise(now, 0.9, volume, 330, 'lowpass', pan, 0.2, bus);
+      this.tone(104, now, 0.8, volume * 0.7, bus, {
+        ...options,
+        shape: 'triangle',
+        endHz: 66,
+        attack: 0.14,
+        cutoff: 400,
+      });
+    }
+  }
+
   private updateLevels(): void {
     const context = this.context;
     if (!context || !this.master || context.state === 'closed') return;
     const now = context.currentTime;
-    const level = this.started && !this.muted && !this.paused ? 0.64 : 0;
+    const level =
+      this.started && !this.muted && !this.paused && !this.lifecycleHidden
+        ? 0.8 * this.settings.master
+        : 0;
+    const duck = voiceDuckLevels(this.voiceActive);
     this.master.gain.setTargetAtTime(level, now, 0.045);
-    this.music?.gain.setTargetAtTime(0.78 - this.intensity * 0.11, now, 0.6);
-    this.droneLevel?.gain.setTargetAtTime(0.11 + this.intensity * 0.028, now, 1.1);
-    this.droneFilter?.frequency.setTargetAtTime(560 + this.intensity * 380, now, 1.3);
+    this.music?.gain.setTargetAtTime(this.settings.music * duck.music, now, duck.timeConstant);
+    this.ambience?.gain.setTargetAtTime(
+      this.settings.ambience * duck.ambience,
+      now,
+      duck.timeConstant,
+    );
+    this.effects?.gain.setTargetAtTime(this.settings.effects, now, 0.08);
+    const frame = this.soundscape;
+    this.droneLevel?.gain.setTargetAtTime(
+      frame?.droneGain ?? 0.08 + this.intensity * 0.028,
+      now,
+      1.1,
+    );
+    this.droneFilter?.frequency.setTargetAtTime(
+      frame?.zone === 'temple' ? 1100 : 560 + this.intensity * 380,
+      now,
+      1.3,
+    );
     this.windFilter?.frequency.setTargetAtTime(
-      480 + (this.mission % 3) * 90 + this.intensity * 330,
+      frame?.windHz ?? 480 + (this.mission % 3) * 90,
       now,
       1.8,
     );
-    this.windLevel?.gain.setTargetAtTime(0.085 + this.intensity * 0.03, now, 1.1);
+    this.windLevel?.gain.setTargetAtTime(frame?.wind ?? 0.065, now, 1.1);
+    for (const [name, layer] of this.ambienceLayers) {
+      const target = frame
+        ? name === 'water'
+          ? frame.water
+          : name === 'leaves'
+            ? frame.leaves
+            : frame.room
+        : 0;
+      layer.level.gain.setTargetAtTime(target, now, 1.2);
+    }
+    this.echoDelay?.delayTime.setTargetAtTime(
+      frame?.zone === 'temple' ? 0.61 : frame?.zone === 'tavern' ? 0.12 : 0.337,
+      now,
+      1,
+    );
+    this.echoWet?.gain.setTargetAtTime(
+      frame?.zone === 'temple' ? 0.24 : frame?.zone === 'tavern' ? 0.05 : 0.12,
+      now,
+      1,
+    );
+    this.echoDamp?.frequency.setTargetAtTime(
+      frame?.culture === 'electronic' ? 2800 : 1400,
+      now,
+      1.2,
+    );
   }
 
   private chime(intervals: number[], time: number, spacing: number, volume: number): void {
@@ -485,7 +945,13 @@ export class AudioDirector {
     options: ToneOptions = {},
   ): void {
     const context = this.context;
-    if (!context || this.voices.size >= 56) return;
+    if (
+      !context ||
+      this.voices.size >= AUDIO_LIMITS.transientVoices ||
+      (bus !== this.effects && this.voices.size >= AUDIO_LIMITS.transientVoices - 12) ||
+      (options.category === 'ambience' && this.ambientVoices.size >= AUDIO_LIMITS.ambienceVoices)
+    )
+      return;
     const oscillator = context.createOscillator();
     oscillator.type = options.shape ?? 'sine';
     oscillator.frequency.setValueAtTime(hz, time);
@@ -503,7 +969,7 @@ export class AudioDirector {
     const panner = context.createStereoPanner();
     panner.pan.value = options.pan ?? 0;
     oscillator.connect(filter).connect(envelope).connect(panner).connect(bus);
-    this.track(oscillator, [filter, envelope, panner]);
+    this.track(oscillator, [filter, envelope, panner], options.category === 'ambience');
     oscillator.start(time);
     oscillator.stop(time + duration + 0.04);
   }
@@ -516,9 +982,19 @@ export class AudioDirector {
     filterType: BiquadFilterType,
     pan: number,
     attack = 0.007,
+    bus = this.effects,
   ): void {
     const context = this.context;
-    if (!context || !this.noiseBuffer || !this.effects || this.voices.size >= 56) return;
+    if (
+      !context ||
+      !this.noiseBuffer ||
+      !bus ||
+      this.voices.size >= AUDIO_LIMITS.transientVoices ||
+      (bus === this.ambience &&
+        (this.ambientVoices.size >= AUDIO_LIMITS.ambienceVoices ||
+          this.voices.size >= AUDIO_LIMITS.transientVoices - 12))
+    )
+      return;
     const source = context.createBufferSource();
     source.buffer = this.noiseBuffer;
     const filter = context.createBiquadFilter();
@@ -532,16 +1008,18 @@ export class AudioDirector {
     envelope.gain.linearRampToValueAtTime(0, time + duration + 0.02);
     const panner = context.createStereoPanner();
     panner.pan.value = pan;
-    source.connect(filter).connect(envelope).connect(panner).connect(this.effects);
-    this.track(source, [filter, envelope, panner]);
+    source.connect(filter).connect(envelope).connect(panner).connect(bus);
+    this.track(source, [filter, envelope, panner], bus === this.ambience);
     source.start(time, this.effectRandom());
     source.stop(time + duration + 0.03);
   }
 
-  private track(source: AudioScheduledSourceNode, nodes: AudioNode[]): void {
+  private track(source: AudioScheduledSourceNode, nodes: AudioNode[], ambient = false): void {
     this.voices.add(source);
+    if (ambient) this.ambientVoices.add(source);
     source.onended = () => {
       this.voices.delete(source);
+      this.ambientVoices.delete(source);
       source.disconnect();
       nodes.forEach((node) => node.disconnect());
     };
@@ -564,12 +1042,19 @@ export class AudioDirector {
     this.permanentSources = [];
     this.droneVoices = [];
     this.voices.clear();
+    this.ambientVoices.clear();
+    this.ambienceLayers.clear();
+    this.musicSlots = [];
     const context = this.context;
     if (context && context.state !== 'closed') void context.close().catch(() => undefined);
     this.context = null;
     this.master = null;
     this.music = null;
     this.effects = null;
+    this.ambience = null;
+    this.echoDelay = null;
+    this.echoWet = null;
+    this.echoDamp = null;
     this.droneLevel = null;
     this.droneFilter = null;
     this.windFilter = null;
@@ -579,6 +1064,7 @@ export class AudioDirector {
 }
 
 interface ToneOptions {
+  category?: 'ambience';
   shape?: OscillatorType;
   endHz?: number;
   attack?: number;
