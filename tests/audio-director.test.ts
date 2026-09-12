@@ -34,6 +34,7 @@ class FakeNode {
   attack = new Param();
   release = new Param();
   delayTime = new Param();
+  playbackRate = new Param();
   buffer: unknown;
   loop = false;
   type = '';
@@ -91,9 +92,15 @@ class FakeContext {
   createStereoPanner() {
     return this.node();
   }
-  createBuffer(_channels: number, length: number) {
+  createBuffer(channels: number, length: number, rate = this.sampleRate) {
     const data = new Float32Array(length);
-    return { getChannelData: () => data };
+    return {
+      getChannelData: () => data,
+      length,
+      sampleRate: rate,
+      numberOfChannels: channels,
+      duration: length / rate,
+    };
   }
   async resume() {
     this.state = 'running';
@@ -292,4 +299,80 @@ test('visibility lifecycle pauses game context without owning or accessing any m
     if (previous) Object.defineProperty(globalThis, 'document', previous);
     else Reflect.deleteProperty(globalThis, 'document');
   }
+});
+
+test('real Foley contacts honor delay, vary takes with changing seeds, and cancel on pause', async () => {
+  await withAudio(async (director, getContext) => {
+    await director.start(5);
+    const context = getContext(),
+      atlas = context.createBuffer(1, 24000 * 40, 24000);
+    const graph = director as unknown as {
+      soundBank: { get: (id: string) => unknown };
+      pendingFoley: Map<string, unknown>;
+    };
+    graph.soundBank.get = () => atlas;
+    const observed = [];
+    for (let i = 0; i < 8; i++) {
+      director.playFoley({ kind: 'footstep', material: 'stone', variantSeed: i, delay: 0.17 });
+      const source = context.nodes.filter((node) => node.buffer === atlas).at(-1)!;
+      assert.equal(source.started, context.currentTime + 0.17);
+      observed.push(director.getDiagnostics().lastFoley);
+      context.advance(0.25);
+    }
+    for (let i = 1; i < observed.length; i++) assert.notEqual(observed[i], observed[i - 1]);
+    director.playFoley({ kind: 'tool-impact', material: 'wood', delay: 0.17 });
+    const contact = context.nodes.filter((node) => node.buffer === atlas).at(-1)!;
+    director.pause(true);
+    assert.ok(contact.stopped! <= context.currentTime + 0.15);
+    assert.equal(graph.pendingFoley.size, 0);
+    const count = director.getDiagnostics().foleyPlayed;
+    director.playFoley({ kind: 'tool-impact', material: 'stone' });
+    assert.equal(director.getDiagnostics().foleyPlayed, count);
+  });
+});
+
+test('field recordings use at most five reusable loops and fade with actual environment', async () => {
+  await withAudio(async (director, getContext) => {
+    await director.start(5);
+    const context = getContext(),
+      recorded = context.createBuffer(1, 24000 * 10, 24000);
+    const graph = director as unknown as {
+      soundBank: { get: (id: string) => unknown };
+      sampledLoops: Map<string, { gain: FakeNode }>;
+    };
+    graph.soundBank.get = () => recorded;
+    director.setEnvironment(location, worldTimeAt(0));
+    assert.ok(director.getDiagnostics().permanentSources <= 5);
+    assert.ok(graph.sampledLoops.get('birds')!.gain.gain.value > 0);
+    director.setEnvironment(
+      { ...location, interior: true, buildingKind: 'church' },
+      worldTimeAt(0),
+    );
+    assert.equal(graph.sampledLoops.get('birds')!.gain.gain.value, 0);
+    const count = director.getDiagnostics().permanentSources;
+    for (let i = 0; i < 20; i++) director.setEnvironment(location, worldTimeAt(i));
+    assert.equal(director.getDiagnostics().permanentSources, count);
+  });
+});
+
+test('bow release remains an effect with music disabled and stalled ambience registers one continuation per bank', async () => {
+  await withAudio(async (director) => {
+    await director.start(5);
+    director.setSettings({ music: 0 });
+    director.playFoley({ kind: 'swing', material: 'wood', action: 'release' });
+    assert.equal(director.getDiagnostics().foleyPlayed, 1);
+    assert.equal(director.getDiagnostics().lastFoley, 'bow-release:physical-string');
+    const graph = director as unknown as {
+      soundBank: { load: (id: string) => Promise<unknown> };
+      sampleLoads: Set<string>;
+    };
+    let calls = 0;
+    graph.soundBank.load = () => {
+      calls++;
+      return new Promise(() => {});
+    };
+    for (let i = 0; i < 100; i++) director.setEnvironment(location, worldTimeAt(i));
+    assert.ok(calls <= 4);
+    assert.ok(graph.sampleLoads.size <= 5);
+  });
 });

@@ -1,0 +1,906 @@
+{
+  "license": "CC0-1.0",
+  "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "retrieved": "2026-09-12",
+  "foleyTransforms": "ffmpeg decode mono24kHz; trim leading/trailing silence at -41dB relative peak retaining2ms onset/25ms tail;2ms onset/10ms tail fades; peak0.82; PCM16 atlas with60ms silent separators; no generated replacements",
+  "provenance": [
+    {
+      "group": "step-grass",
+      "input": "impact/Audio/footstep_grass_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "9d49497777405d78d7cf7f2888e28277f3a23192300cfd1d79d54876b20f479f",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.12833333333333333
+    },
+    {
+      "group": "step-grass",
+      "input": "impact/Audio/footstep_grass_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "fb28781bd22b2eefdc14077f1adf5c94d7fe9c3a130194633b55f3e0d39d9f04",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.15866666666666668
+    },
+    {
+      "group": "step-grass",
+      "input": "impact/Audio/footstep_grass_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "73a520139f5be716a403bfe9c80e0e94d1e61d8e9de04a354b336392164b53dc",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.16279166666666667
+    },
+    {
+      "group": "step-grass",
+      "input": "impact/Audio/footstep_grass_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "0546e1d8ab2def714425701a18bd34c5ee2794b12e858e5b595aabcf38a34137",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.10416666666666667
+    },
+    {
+      "group": "step-snow",
+      "input": "impact/Audio/footstep_snow_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "c05fa4a9dc9a7aabc04996466fb589537e49af76de9998d8f9e6270ec92dcef7",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.18945833333333334
+    },
+    {
+      "group": "step-snow",
+      "input": "impact/Audio/footstep_snow_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "980fb9a1c9227aed7995067b0357f373053337f2416316db8ea0438418542fb4",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.19566666666666666
+    },
+    {
+      "group": "step-snow",
+      "input": "impact/Audio/footstep_snow_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "db52bafdc66304f3b999f2c29227826c65993916e630ac2ffbca17d07b263178",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.19579166666666667
+    },
+    {
+      "group": "step-snow",
+      "input": "impact/Audio/footstep_snow_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "68272e3f1cabcabd02d328fd344454d7c04cb58b5a86972fcdd858f845e3d007",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.18991666666666668
+    },
+    {
+      "group": "step-wood",
+      "input": "impact/Audio/footstep_wood_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "5f1c252942a220d658121bd9417448cd19649ded9fff2ff15f6e50899373ce8e",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.10675
+    },
+    {
+      "group": "step-wood",
+      "input": "impact/Audio/footstep_wood_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "e4f68e1c9fd55b4dc8ca89ed2bbab6f200171bc54bdc18aa96b80d8e7336f462",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.09233333333333334
+    },
+    {
+      "group": "step-wood",
+      "input": "impact/Audio/footstep_wood_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "9ff095b05cee5eec40b081defe3f0eef7232bb16d4865ce03b9f6dbab875cfdd",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.095
+    },
+    {
+      "group": "step-wood",
+      "input": "impact/Audio/footstep_wood_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "2a68a083daa9eda08fed0ea5da5280dfbe0de226196c576be02f95259dd139d9",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.11583333333333333
+    },
+    {
+      "group": "step-cloth",
+      "input": "impact/Audio/footstep_carpet_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "b9524658b52a99a20590f8feefc103088637fd13ea8ec35811aee785e1f2f330",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.09220833333333334
+    },
+    {
+      "group": "step-cloth",
+      "input": "impact/Audio/footstep_carpet_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "9af3c3f76705107339e72036e4053bdca3eaa50ad31c8c929f42ce8d40e5d781",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.10125
+    },
+    {
+      "group": "step-cloth",
+      "input": "impact/Audio/footstep_carpet_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "9af3c3f76705107339e72036e4053bdca3eaa50ad31c8c929f42ce8d40e5d781",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.10125
+    },
+    {
+      "group": "step-cloth",
+      "input": "impact/Audio/footstep_carpet_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "4ae7454338d57c7d102145919ae653c7d010eb542797c4f25a1c7470be3a7e4c",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.08829166666666667
+    },
+    {
+      "group": "step-sand",
+      "input": "Fantozzi-footsteps/flac/Fantozzi-SandL1.flac",
+      "author": "Fantozzi (edited by qubodup)",
+      "source": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "sourceSha256": "93a2630579a82507e3c6ceab9b012f71a50cf8922f4beadb14057dcc0636b099",
+      "trimStartSeconds": 0.000041666666666666665,
+      "durationSeconds": 0.4425
+    },
+    {
+      "group": "step-sand",
+      "input": "Fantozzi-footsteps/flac/Fantozzi-SandR1.flac",
+      "author": "Fantozzi (edited by qubodup)",
+      "source": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "sourceSha256": "3514d12f3369297233e915814364ed02902003d4103b010371c2ac15c2aa48fe",
+      "trimStartSeconds": 0.0035,
+      "durationSeconds": 0.40225
+    },
+    {
+      "group": "step-sand",
+      "input": "Fantozzi-footsteps/flac/Fantozzi-SandL2.flac",
+      "author": "Fantozzi (edited by qubodup)",
+      "source": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "sourceSha256": "9bb57478cc96e1410cae27d926aa8d77d5f2d368d9776822f63cf0b37c6d2faf",
+      "trimStartSeconds": 0.0006666666666666666,
+      "durationSeconds": 0.3189166666666667
+    },
+    {
+      "group": "step-sand",
+      "input": "Fantozzi-footsteps/flac/Fantozzi-SandR2.flac",
+      "author": "Fantozzi (edited by qubodup)",
+      "source": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "sourceSha256": "0356f659313887f01a9f21fd5bedf57a77073d0d74d57b5621279ee453a80f3c",
+      "trimStartSeconds": 0.0004583333333333333,
+      "durationSeconds": 0.33975
+    },
+    {
+      "group": "step-stone",
+      "input": "Fantozzi-footsteps/flac/Fantozzi-StoneL1.flac",
+      "author": "Fantozzi (edited by qubodup)",
+      "source": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "sourceSha256": "7cfa4a2f500ae2bd19a961022296611d837c34ca2e556fe68deb692388f49971",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.3685
+    },
+    {
+      "group": "step-stone",
+      "input": "Fantozzi-footsteps/flac/Fantozzi-StoneR1.flac",
+      "author": "Fantozzi (edited by qubodup)",
+      "source": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "sourceSha256": "7073bddd2e3ba432e15a83844180c0ebc52835c2c6bab0fa902ee5952499c729",
+      "trimStartSeconds": 0.00008333333333333333,
+      "durationSeconds": 0.3565833333333333
+    },
+    {
+      "group": "step-stone",
+      "input": "Fantozzi-footsteps/flac/Fantozzi-StoneL2.flac",
+      "author": "Fantozzi (edited by qubodup)",
+      "source": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "sourceSha256": "dcbd6be44af4b3206daa36c5398035ca527bb057c51ce00482b9ca6356be2468",
+      "trimStartSeconds": 0.002916666666666667,
+      "durationSeconds": 0.3287083333333333
+    },
+    {
+      "group": "step-stone",
+      "input": "Fantozzi-footsteps/flac/Fantozzi-StoneR2.flac",
+      "author": "Fantozzi (edited by qubodup)",
+      "source": "https://opengameart.org/content/fantozzis-footsteps-grasssand-stone",
+      "license": "CC0-1.0",
+      "sourceSha256": "d66330b4a32e93b0dfdcb8c53667654de8702a0fa48b2d06c48d94dc66b3e1cc",
+      "trimStartSeconds": 0.0027083333333333334,
+      "durationSeconds": 0.3199166666666667
+    },
+    {
+      "group": "mining",
+      "input": "impact/Audio/impactMining_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "36b4ea107222d073c67ca64dde26944975609202d5090b2f2021213c1a7e35cd",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.5724166666666667
+    },
+    {
+      "group": "mining",
+      "input": "impact/Audio/impactMining_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "61235a18de3f3d92118235398222dbf51d448f1be70b1c8bc962b10b86f2d9c6",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.5227916666666667
+    },
+    {
+      "group": "mining",
+      "input": "impact/Audio/impactMining_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "059558ec751115ca6b1441e00f0adc837c1a3eeb0a066b109e0fd879fc5d0b0c",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.4821666666666667
+    },
+    {
+      "group": "mining",
+      "input": "impact/Audio/impactMining_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "4237fa2cd80364ad81cd0af44f67d7497f1c5edcc7bdb02cd22be2ba4580c83d",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.5904166666666667
+    },
+    {
+      "group": "wood",
+      "input": "impact/Audio/impactWood_heavy_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "15ff82332f342c30e469215539e1cc57e11b221aa2cf7e11e811d313a9927f3d",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.2663333333333333
+    },
+    {
+      "group": "wood",
+      "input": "impact/Audio/impactWood_heavy_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "f1b07a53ac10c615fff9ba470511fdeb722b5902e1a8520759fc20ad6f546015",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.24245833333333333
+    },
+    {
+      "group": "wood",
+      "input": "impact/Audio/impactWood_heavy_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "ce1e06f2a05f2634c645cb72f6a1623e64bc2d92be34917430a61031fb6597d4",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.310125
+    },
+    {
+      "group": "wood",
+      "input": "impact/Audio/impactWood_heavy_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "af07511902b309b3f6d8f0e1fafbe93869127fb88099ebdc0aa6a00a98dc3cb0",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.19991666666666666
+    },
+    {
+      "group": "metal",
+      "input": "impact/Audio/impactMetal_heavy_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "e07045693e4a2b3d165c424e3dab4c781d9ff8880a386880ac89a51315d7f831",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.16475
+    },
+    {
+      "group": "metal",
+      "input": "impact/Audio/impactMetal_heavy_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "83554049f81f4db9209379e103c30bfa63f65c42189a03f300b045c2c82e23ae",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.25233333333333335
+    },
+    {
+      "group": "metal",
+      "input": "impact/Audio/impactMetal_heavy_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "b914c8f1eb7c0f34bb165d7c77f4be0351f6be0660c13c53e65424e262e2c093",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.11441666666666667
+    },
+    {
+      "group": "metal",
+      "input": "impact/Audio/impactMetal_heavy_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "b0f2ba4dabde9a87eb9c188a19d31e0c2300fd321adeba08d3b9b8aa011d7037",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.204
+    },
+    {
+      "group": "stone-light",
+      "input": "impact/Audio/impactGeneric_light_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "f0e982611e97512fee5f777986b67e8b435434b601f94992ec044f7e89fb5acb",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.12108333333333333
+    },
+    {
+      "group": "stone-light",
+      "input": "impact/Audio/impactGeneric_light_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "c3cd1c073d186ae8fa35788ba94de581f1826e7427a7bb26490b2695fac18efa",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.114625
+    },
+    {
+      "group": "stone-light",
+      "input": "impact/Audio/impactGeneric_light_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "d0bf60905b59ff630ffe01eb0edeeacd2504eaa8fb6523aeef7d2458b78264d3",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.16108333333333333
+    },
+    {
+      "group": "stone-light",
+      "input": "impact/Audio/impactGeneric_light_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "0e8896706130f6bc88cdf1f0157aaacdbe88dce86cf0330f9136e44eb1209e81",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.13508333333333333
+    },
+    {
+      "group": "hit",
+      "input": "impact/Audio/impactPunch_heavy_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "b33a8f14068aec24ec69ba85e5e87fdc41228975f6a1a3e44a6e7d6fc3d9f8d8",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.4225
+    },
+    {
+      "group": "hit",
+      "input": "impact/Audio/impactPunch_heavy_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "f92f5cb6ba4ff2766497292ffd90865654317eeca976f5652e0708dbdcdc0dd9",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.35379166666666667
+    },
+    {
+      "group": "hit",
+      "input": "impact/Audio/impactPunch_heavy_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "7993dd4c156b9979ad69f17be5ebe31850b16039a3857f8477141be54dfee1b3",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.33158333333333334
+    },
+    {
+      "group": "hit",
+      "input": "impact/Audio/impactPunch_heavy_003.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "4ab53b26f4ea575120dcc1348526c9e0db2afc6af7a442aa0489bdead2ca80b6",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.31604166666666667
+    },
+    {
+      "group": "chop",
+      "input": "rpg/Audio/chop.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "d00c2b3c9fff07e376145c8c8c45c90e5084ec192f6ce0387db233f7b86f1486",
+      "trimStartSeconds": 0.014875,
+      "durationSeconds": 0.225375
+    },
+    {
+      "group": "chop",
+      "input": "impact/Audio/impactWood_heavy_000.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "15ff82332f342c30e469215539e1cc57e11b221aa2cf7e11e811d313a9927f3d",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.2663333333333333
+    },
+    {
+      "group": "chop",
+      "input": "impact/Audio/impactWood_heavy_001.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "f1b07a53ac10c615fff9ba470511fdeb722b5902e1a8520759fc20ad6f546015",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.24245833333333333
+    },
+    {
+      "group": "chop",
+      "input": "impact/Audio/impactWood_heavy_002.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/impact-sounds",
+      "license": "CC0-1.0",
+      "sourceSha256": "ce1e06f2a05f2634c645cb72f6a1623e64bc2d92be34917430a61031fb6597d4",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.310125
+    },
+    {
+      "group": "cloth",
+      "input": "rpg/Audio/cloth1.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "ddb93a3671233f95da0e0b10367f082f7eb42fa6caaddcf776410aa8833c747d",
+      "trimStartSeconds": 0.03179166666666667,
+      "durationSeconds": 0.548125
+    },
+    {
+      "group": "cloth",
+      "input": "rpg/Audio/cloth2.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "8a7451193c38bc05483aec25dd193e163a15d44cf7fff04ac7912573231b0201",
+      "trimStartSeconds": 0.036583333333333336,
+      "durationSeconds": 0.344125
+    },
+    {
+      "group": "cloth",
+      "input": "rpg/Audio/cloth3.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "a48632d17a4f1416541d261a32a31612e01267144c407fa3ecab3ff410f0085b",
+      "trimStartSeconds": 0.011125,
+      "durationSeconds": 0.4654583333333333
+    },
+    {
+      "group": "cloth",
+      "input": "rpg/Audio/cloth4.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "e7ab9a6c4466dea874196c61f59bf1da05cfe58748f42fadd695d441a154a99b",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.38433333333333336
+    },
+    {
+      "group": "coins",
+      "input": "rpg/Audio/handleCoins.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "8a91f969e932df709df80ee124d86a51389eed9b67f22e5e716bc2bbf60d8dab",
+      "trimStartSeconds": 0.05075,
+      "durationSeconds": 0.7180833333333333
+    },
+    {
+      "group": "coins",
+      "input": "rpg/Audio/handleCoins2.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "4b857968d64f9ac9336a10ffac6694d7547e1f01566ad6857b30bc8db3ee6c32",
+      "trimStartSeconds": 0.018208333333333333,
+      "durationSeconds": 0.30670833333333336
+    },
+    {
+      "group": "door",
+      "input": "rpg/Audio/doorOpen_1.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "4ab93bab96522d8eb109ff96dc57cb6765deb02448fe14c10472084be5bb2a0b",
+      "trimStartSeconds": 0.005541666666666667,
+      "durationSeconds": 0.8960833333333333
+    },
+    {
+      "group": "door",
+      "input": "rpg/Audio/doorOpen_2.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "68962fb0458c9bac59dec3adefa9849703c7c89d34712de03dd0075d095e79e9",
+      "trimStartSeconds": 0.0315,
+      "durationSeconds": 1.3533333333333333
+    },
+    {
+      "group": "door",
+      "input": "rpg/Audio/doorClose_3.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "d0a2540e5e1639bc2fbeef34e76f28e9f9cb8a151736a0ac4c13859994328d0e",
+      "trimStartSeconds": 0.010541666666666666,
+      "durationSeconds": 0.698625
+    },
+    {
+      "group": "door",
+      "input": "rpg/Audio/doorClose_4.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "fd21c0e7a9d0317375d2561590f0770dd3380ee35507d064862cb44d6f71595b",
+      "trimStartSeconds": 0.010333333333333333,
+      "durationSeconds": 0.5165833333333333
+    },
+    {
+      "group": "equip-metal",
+      "input": "rpg/Audio/drawKnife1.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "276403e72c3b71c47bc24db3083970c23f8e5551ffa78f436f83483c56f3f0bb",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.343875
+    },
+    {
+      "group": "equip-metal",
+      "input": "rpg/Audio/drawKnife2.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "d5df6a4130cbb016f97b4883769a418917b9629cb4c21717030b186e0c73281a",
+      "trimStartSeconds": 0,
+      "durationSeconds": 0.37516666666666665
+    },
+    {
+      "group": "equip-metal",
+      "input": "rpg/Audio/drawKnife3.ogg",
+      "author": "Kenney",
+      "source": "https://kenney.nl/assets/rpg-audio",
+      "license": "CC0-1.0",
+      "sourceSha256": "a11ae62fb1a628425769d11a9de394980ad8909c31f4c9a4316f226963e21caf",
+      "trimStartSeconds": 0.035458333333333335,
+      "durationSeconds": 0.30366666666666664
+    },
+    {
+      "group": "swing",
+      "input": "swords/sword - StarNinjas/sword.1.ogg",
+      "author": "StarNinjas",
+      "source": "https://opengameart.org/content/20-sword-sound-effects-attacks-and-clashes",
+      "license": "CC0-1.0",
+      "sourceSha256": "4a3e80705619cbd7500682ab51004011ddf67e14ccf1818ceb9e5b539fe42b75",
+      "trimStartSeconds": 0.12541666666666668,
+      "durationSeconds": 0.8415
+    },
+    {
+      "group": "swing",
+      "input": "swords/sword - StarNinjas/sword.2.ogg",
+      "author": "StarNinjas",
+      "source": "https://opengameart.org/content/20-sword-sound-effects-attacks-and-clashes",
+      "license": "CC0-1.0",
+      "sourceSha256": "e74221f6cec0acaa7c19095618c683c3cdc1741f02193b61cb28a2ec56cbfce2",
+      "trimStartSeconds": 0.194,
+      "durationSeconds": 0.6030833333333333
+    },
+    {
+      "group": "swing",
+      "input": "swords/sword - StarNinjas/sword.3.ogg",
+      "author": "StarNinjas",
+      "source": "https://opengameart.org/content/20-sword-sound-effects-attacks-and-clashes",
+      "license": "CC0-1.0",
+      "sourceSha256": "ce09eb2987531d1323415065d7811a9cf0ea8639766d9fa77655d602e7e14989",
+      "trimStartSeconds": 0.031083333333333334,
+      "durationSeconds": 0.5622083333333333
+    },
+    {
+      "group": "swing",
+      "input": "swords/sword - StarNinjas/sword.4.ogg",
+      "author": "StarNinjas",
+      "source": "https://opengameart.org/content/20-sword-sound-effects-attacks-and-clashes",
+      "license": "CC0-1.0",
+      "sourceSha256": "320aa8a77d35f9354c3d7e03a53e987ae67b0c5721f0dd2680100c5e6b5e4cc4",
+      "trimStartSeconds": 0.043958333333333335,
+      "durationSeconds": 0.537125
+    },
+    {
+      "group": "clash",
+      "input": "clashes/sword_clash.1.ogg",
+      "author": "StarNinjas",
+      "source": "https://opengameart.org/content/20-sword-sound-effects-attacks-and-clashes",
+      "license": "CC0-1.0",
+      "sourceSha256": "5c5e78e466ba78fe2414f2b7a2a6eb674822ccfc8a8bc9fda32be22f5dde5e69",
+      "trimStartSeconds": 0.15583333333333332,
+      "durationSeconds": 0.7817083333333333
+    },
+    {
+      "group": "clash",
+      "input": "clashes/sword_clash.2.ogg",
+      "author": "StarNinjas",
+      "source": "https://opengameart.org/content/20-sword-sound-effects-attacks-and-clashes",
+      "license": "CC0-1.0",
+      "sourceSha256": "e09f222b70d53f2967514d076e2ae50c21526ac640fe4919965f964af043da1a",
+      "trimStartSeconds": 0.02775,
+      "durationSeconds": 0.3797916666666667
+    },
+    {
+      "group": "clash",
+      "input": "clashes/sword_clash.3.ogg",
+      "author": "StarNinjas",
+      "source": "https://opengameart.org/content/20-sword-sound-effects-attacks-and-clashes",
+      "license": "CC0-1.0",
+      "sourceSha256": "6c588bc79b7e4fe202e3b65fa849954d684d2d2342f6ad04813540854c421663",
+      "trimStartSeconds": 0.10608333333333334,
+      "durationSeconds": 0.537625
+    },
+    {
+      "group": "clash",
+      "input": "clashes/sword_clash.4.ogg",
+      "author": "StarNinjas",
+      "source": "https://opengameart.org/content/20-sword-sound-effects-attacks-and-clashes",
+      "license": "CC0-1.0",
+      "sourceSha256": "4c2c962f8703882b8a6f863c1f5a35c6ae518d0281755fac9a13e63a73b86fa5",
+      "trimStartSeconds": 0.03891666666666667,
+      "durationSeconds": 0.30916666666666665
+    },
+    {
+      "group": "rustle",
+      "input": "rustle/rustle01.flac",
+      "author": "qubodup",
+      "source": "https://opengameart.org/content/20-rustles-dry-leaves",
+      "license": "CC0-1.0",
+      "sourceSha256": "9c5da19eb8d37b59890c0be1171c40fe4dd16177e7a97558a156c1036b7bed05",
+      "trimStartSeconds": 0.054375,
+      "durationSeconds": 1.4833333333333334
+    },
+    {
+      "group": "rustle",
+      "input": "rustle/rustle02.flac",
+      "author": "qubodup",
+      "source": "https://opengameart.org/content/20-rustles-dry-leaves",
+      "license": "CC0-1.0",
+      "sourceSha256": "1e01e752b2165d78482bd91ef8b859541601ae4de6b7cf6178e935cce0036c69",
+      "trimStartSeconds": 0.009916666666666667,
+      "durationSeconds": 0.8425
+    },
+    {
+      "group": "rustle",
+      "input": "rustle/rustle03.flac",
+      "author": "qubodup",
+      "source": "https://opengameart.org/content/20-rustles-dry-leaves",
+      "license": "CC0-1.0",
+      "sourceSha256": "517bbf429a21d3a0cd39f6f7bf9be1894615091fa07c4926f8cf69bbbfa05366",
+      "trimStartSeconds": 0.04716666666666667,
+      "durationSeconds": 1.9528333333333334
+    },
+    {
+      "group": "rustle",
+      "input": "rustle/rustle04.flac",
+      "author": "qubodup",
+      "source": "https://opengameart.org/content/20-rustles-dry-leaves",
+      "license": "CC0-1.0",
+      "sourceSha256": "ef00c41e4c72f0ae5a96e1c90f9b3b3f53b5612adf60fdf9be367194d6780afa",
+      "trimStartSeconds": 0.008208333333333333,
+      "durationSeconds": 1.9917916666666666
+    },
+    {
+      "group": "step-water",
+      "input": "water/splash_01.ogg",
+      "author": "rubberduck",
+      "source": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "license": "CC0-1.0",
+      "sourceSha256": "156f4df0fa1a552d1c4e451284a55000417ea871954dc4b5e0d4302a49e228a8",
+      "trimStartSeconds": 0.025958333333333333,
+      "durationSeconds": 0.9101666666666667
+    },
+    {
+      "group": "step-water",
+      "input": "water/splash_02.ogg",
+      "author": "rubberduck",
+      "source": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "license": "CC0-1.0",
+      "sourceSha256": "eab0bb4bc01386528ba1e6244c6fd8940ee8d3c91ddb9e9cfea186e8560e04de",
+      "trimStartSeconds": 0.013208333333333334,
+      "durationSeconds": 0.57275
+    },
+    {
+      "group": "step-water",
+      "input": "water/splash_03.ogg",
+      "author": "rubberduck",
+      "source": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "license": "CC0-1.0",
+      "sourceSha256": "ae2cff9a47934ece590dda45ff18acf89c5c98cb5497ce71c50b3a315b225a94",
+      "trimStartSeconds": 0.026791666666666665,
+      "durationSeconds": 0.5415833333333333
+    },
+    {
+      "group": "step-water",
+      "input": "water/splash_04.ogg",
+      "author": "rubberduck",
+      "source": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "license": "CC0-1.0",
+      "sourceSha256": "58dddea3843b89e9504e6f174ea49cd061b1002bb6ae8a94f358409fabb8340a",
+      "trimStartSeconds": 0.01125,
+      "durationSeconds": 0.8569166666666667
+    },
+    {
+      "id": "wind",
+      "input": "wind-first4MiB.wav",
+      "author": "Thimras",
+      "source": "https://opengameart.org/content/park-ambiences",
+      "license": "CC0-1.0",
+      "sourceSha256": "191344450516a439efc67ae52197d61e91df331e2740c19f411f3010d7c82f85",
+      "sourceRange": "bytes=0-4194303 (HTTP206; remaining recording not downloaded)",
+      "transforms": "Mono24kHz; first seconds selected; equal-power seam crossfade up to1s; normalized RMS0.13/peak0.8; MP3 80kbps",
+      "durationSeconds": 11
+    },
+    {
+      "id": "water",
+      "input": "river-first4MiB.wav",
+      "author": "Thimras",
+      "source": "https://opengameart.org/content/park-ambiences",
+      "license": "CC0-1.0",
+      "sourceSha256": "2cad15f01d537c03e43e25839489445e29191029ab3c948b7e42fee27c0ab071",
+      "sourceRange": "bytes=0-4194303 (HTTP206; remaining recording not downloaded)",
+      "transforms": "Mono24kHz; first seconds selected; equal-power seam crossfade up to1s; normalized RMS0.13/peak0.8; MP3 80kbps",
+      "durationSeconds": 15
+    },
+    {
+      "id": "birds",
+      "input": "birds-first4MiB.wav",
+      "author": "Thimras",
+      "source": "https://opengameart.org/content/park-ambiences",
+      "license": "CC0-1.0",
+      "sourceSha256": "7e242a11e06a167ca503b09729d5c5f815cbecdde85a357a2a1dd223eb4203e3",
+      "sourceRange": "bytes=0-4194303 (HTTP206; remaining recording not downloaded)",
+      "transforms": "Mono24kHz; first seconds selected; equal-power seam crossfade up to1s; normalized RMS0.13/peak0.8; MP3 80kbps",
+      "durationSeconds": 15
+    },
+    {
+      "id": "insects",
+      "input": "crickets.mp3",
+      "author": "Wolfgang_ / Ted Kerr",
+      "source": "https://opengameart.org/content/crickets-ambient-noise-loopable",
+      "license": "CC0-1.0",
+      "sourceSha256": "5b5bd1f744087888c5623543c3ff80be9c2ce106093993e7c8a8492b0280b2c0",
+      "transforms": "Mono24kHz; first seconds selected; equal-power seam crossfade up to1s; normalized RMS0.13/peak0.8; MP3 80kbps",
+      "durationSeconds": 10
+    },
+    {
+      "id": "fire",
+      "input": "fire.ogg",
+      "author": "AntumDeluge",
+      "source": "https://opengameart.org/content/fire-crackling",
+      "license": "CC0-1.0",
+      "sourceSha256": "f922929805bc6afdf0a35727fa3998033db544c1b6f62ed3aeab94341ed6ddeb",
+      "transforms": "Mono24kHz; first seconds selected; equal-power seam crossfade up to1s; normalized RMS0.13/peak0.8; MP3 80kbps",
+      "durationSeconds": 2.6927916666666665
+    }
+  ],
+  "outputs": [
+    {
+      "file": "birds-9f9954e46768.mp3",
+      "bytes": 150764,
+      "sha256": "9f9954e46768b3cfd2267803e84eb8e79828ddf089fd592d77f76c062a4f0195"
+    },
+    {
+      "file": "fire-488bab2d953a.mp3",
+      "bytes": 27884,
+      "sha256": "488bab2d953a877092862e455f7717df15a76c6a4e97e132957e60ec07c602cf"
+    },
+    {
+      "file": "foley-662704446fff.wav",
+      "bytes": 1799818,
+      "sha256": "662704446fff9e28c5a95af1a577766e3bb9c5c272fe3cead99926ce8771b521"
+    },
+    {
+      "file": "insects-f5506a429b52.mp3",
+      "bytes": 100844,
+      "sha256": "f5506a429b521abb45b612c37c5c7e348bd84390c94a2299dd80bf6e05574642"
+    },
+    {
+      "file": "water-29c7c1bd9902.mp3",
+      "bytes": 150764,
+      "sha256": "29c7c1bd99027f90e133da2fb6d7d5fc134c7a337b1826328bec7ef65a4bb86f"
+    },
+    {
+      "file": "wind-145d6f104306.mp3",
+      "bytes": 110924,
+      "sha256": "145d6f10430618fff19fc2f28919eeb7d881e42e3a359211435a62ada725d0e4"
+    }
+  ],
+  "registryNotes": [
+    "The identical upstream carpet002 take is excluded from playback;73 uniquePCM recordings are used.",
+    "Door recordings are separated into open/close groups; wooden collision takes also serve chopping; cloth also supplies soft nonmetal swishes.",
+    "Bow release and musical instruments are original physical models, not third-party recordings."
+  ],
+  "sourceDownloads": [
+    {
+      "url": "https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip",
+      "sha256": "029d734af1582474edf3a694d1b0cebc97c1c152f2f39fa34d4c2bafc5de77f8"
+    },
+    {
+      "url": "https://kenney.nl/media/pages/assets/rpg-audio/8e99002d76-1677590336/kenney_rpg-audio.zip",
+      "sha256": "6dbeaf8544da958d8f2adcb4a4a4b76c1ade34a05f8ab9edccd327da7375f38b"
+    },
+    {
+      "url": "https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z",
+      "sha256": "415d360e0911c1c1c5355ee94023b772e6f4044f59b9b580610e7dbffd1840fd"
+    },
+    {
+      "url": "https://opengameart.org/sites/default/files/sword_-_starninjas_1.zip",
+      "sha256": "87a1fe1cfeee5f282fe06a7a9c25ab9ebf24b7674fe19171b7f2762dffb628c1"
+    },
+    {
+      "url": "https://opengameart.org/sites/default/files/sword_clash_-_starninjas_0.zip",
+      "sha256": "f363c80ea1627548d336370750651b0d2d092978148ecfb3642717c2efb54b6b"
+    },
+    {
+      "url": "https://opengameart.org/sites/default/files/qubodup-rustle.7z",
+      "sha256": "c5d7458085e9b208009388b832184bddc0045482f6fa67a1eb6ea09335bb7a43"
+    },
+    {
+      "url": "https://opengameart.org/sites/default/files/water-splash-slime-sfx.zip",
+      "sha256": "7cd39abb49d4362a37ba18dc0e454c7dc1d08029d4e5b683149046bc237b2eba"
+    },
+    {
+      "url": "https://opengameart.org/sites/default/files/crickets_1.mp3",
+      "sha256": "5b5bd1f744087888c5623543c3ff80be9c2ce106093993e7c8a8492b0280b2c0"
+    },
+    {
+      "url": "https://opengameart.org/sites/default/files/fire-1_0.ogg",
+      "sha256": "f922929805bc6afdf0a35727fa3998033db544c1b6f62ed3aeab94341ed6ddeb"
+    }
+  ]
+}

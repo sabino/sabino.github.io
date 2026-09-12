@@ -1,3 +1,10 @@
+import { FOLEY_LIMITS, foleyGroup, planFoley } from './foley.ts';
+import type { FoleyEvent } from './foley.ts';
+import { FOLEY_CLIPS } from './foley-clips.ts';
+import { SoundBank } from './sound-bank.ts';
+import type { SampleBankId } from './sound-bank.ts';
+import { instrumentSamples } from './physical-instruments.ts';
+export type { FoleyEvent, FoleyMaterial } from './foley.ts';
 import {
   AUDIO_LIMITS,
   ambientEvents,
@@ -24,16 +31,35 @@ export interface AudioDiagnostics {
   permanentSources: number;
   schedulerRunning: boolean;
   settings: AudioSettings;
+  samples: {
+    ready: number;
+    loading: number;
+    failed: number;
+    decodedBytes: number;
+    activeLoads: number;
+  };
+  foleyPlayed: number;
+  foleyPending: number;
+  lastFoley: string;
 }
 
 /**
- * Verso's small, entirely procedural sound world.
+ * Recorded material Foley, field ambience and physically modeled instruments.
  *
  * Construction is silent. Call start() from a user gesture before using the
  * director; browsers that cannot create or resume audio remain playable.
  */
 export class AudioDirector {
   private context: AudioContext | null = null;
+  private soundBank: SoundBank | null = null;
+  private sampledLoops = new Map<SampleBankId, { source: AudioBufferSourceNode; gain: GainNode }>();
+  private sampleLoads = new Set<SampleBankId>();
+  private pendingFoley = new Map<string, { event: FoleyEvent; at: number; sequence: number }>();
+  private foleySequence = new Map<string, number>();
+  private previousFoleyTake = new Map<string, number>();
+  private foleyPlayed = 0;
+  private lastFoley = '';
+  private instrumentBuffers = new Map<string, AudioBuffer>();
   private master: GainNode | null = null;
   private music: GainNode | null = null;
   private effects: GainNode | null = null;
@@ -102,6 +128,16 @@ export class AudioDirector {
       permanentSources: this.permanentSources.length,
       schedulerRunning: this.timer !== null,
       settings: this.getSettings(),
+      samples: this.soundBank?.diagnostics() ?? {
+        ready: 0,
+        loading: 0,
+        failed: 0,
+        decodedBytes: 0,
+        activeLoads: 0,
+      },
+      foleyPlayed: this.foleyPlayed,
+      foleyPending: this.pendingFoley.size,
+      lastFoley: this.lastFoley,
     };
   }
 
@@ -253,6 +289,8 @@ export class AudioDirector {
     this.nextNote = this.context.currentTime + 0.12;
     this.updateLevels();
     this.ensureScheduler();
+    this.warmFoley();
+    this.updateSampledAmbience();
   }
 
   setMuted(muted: boolean): void {
@@ -271,6 +309,9 @@ export class AudioDirector {
 
   /** A seed determines the world's motif, tempo, root, and texture. */
   setWorld(mission: number, seed: number): void {
+    this.instrumentBuffers.clear();
+    this.previousFoleyTake.clear();
+    this.foleySequence.clear();
     this.mission = Number.isFinite(mission) ? Math.max(0, Math.floor(mission)) : 0;
     this.seed = Number.isFinite(seed) ? seed >>> 0 : 1;
     const worldSeed = (this.seed ^ Math.imul(this.mission + 1, 0x9e3779b9)) >>> 0;
@@ -300,6 +341,18 @@ export class AudioDirector {
 
   /** Short names keep gameplay decoupled from the synthesis implementation. */
   play(event: string): void {
+    const physical: Record<string, FoleyEvent> = {
+      step: { kind: 'footstep', material: this.environment?.location.interior ? 'wood' : 'grass' },
+      blade: { kind: 'swing', material: 'metal' },
+      hurt: { kind: 'hit', material: 'flesh' },
+      'enemy-death': { kind: 'hit', material: 'flesh', intensity: 0.8 },
+      click: { kind: 'equip', material: 'cloth', intensity: 0.2 },
+      dash: { kind: 'equip', material: 'cloth', intensity: 0.7 },
+    };
+    if (physical[event]) {
+      this.playFoley(physical[event]);
+      return;
+    }
     const context = this.context;
     const bus = this.effects;
     if (
@@ -469,6 +522,7 @@ export class AudioDirector {
     const paused = this.paused || this.lifecycleHidden;
     this.updateLevels();
     if (paused) {
+      this.pendingFoley.clear();
       if (this.timer) clearInterval(this.timer);
       this.timer = null;
       // Scheduled transients are cancelled so a suspended context cannot replay stale events.
@@ -574,70 +628,7 @@ export class AudioDirector {
       data[index] = previous;
     }
 
-    this.droneLevel = context.createGain();
-    this.droneLevel.gain.value = 0.11;
-    this.droneFilter = context.createBiquadFilter();
-    this.droneFilter.type = 'lowpass';
-    this.droneFilter.frequency.value = 560;
-    this.droneLevel.connect(this.droneFilter).connect(this.music);
-    [0.5, 0.75, 1].forEach((multiple, index) => {
-      const oscillator = context.createOscillator();
-      oscillator.type = index === 1 ? 'triangle' : 'sine';
-      oscillator.frequency.value = this.tonic * multiple;
-      oscillator.detune.value = [-3, 2, 4][index];
-      const level = context.createGain();
-      level.gain.value = [0.44, 0.21, 0.12][index];
-      oscillator.connect(level).connect(this.droneLevel!);
-      oscillator.start();
-      this.droneVoices.push(oscillator);
-      this.permanentSources.push(oscillator);
-    });
-
-    const wind = context.createBufferSource();
-    wind.buffer = this.noiseBuffer;
-    wind.loop = true;
-    this.windFilter = context.createBiquadFilter();
-    this.windFilter.type = 'bandpass';
-    this.windFilter.frequency.value = 510;
-    this.windFilter.Q.value = 0.55;
-    this.windLevel = context.createGain();
-    this.windLevel.gain.value = 0.085;
-    wind.connect(this.windFilter).connect(this.windLevel).connect(this.ambience);
-    wind.start();
-    this.permanentSources.push(wind);
-    // The reusable noise buffer is pooled. Source nodes are one-shot by Web Audio design;
-    // these three long-lived loops are never recreated on a location transition.
-    for (const [index, name] of ['water', 'leaves', 'room'].entries()) {
-      const source = context.createBufferSource();
-      source.buffer = this.noiseBuffer;
-      source.loop = true;
-      const filter = context.createBiquadFilter();
-      filter.type = name === 'water' ? 'lowpass' : 'bandpass';
-      filter.frequency.value = [1850, 2350, 180][index];
-      filter.Q.value = 0.35;
-      const level = context.createGain();
-      level.gain.value = 0;
-      source.connect(filter).connect(level).connect(this.ambience!);
-      source.start(0, index * 0.77);
-      this.ambienceLayers.set(name, { level, filter });
-      this.permanentSources.push(source);
-    }
-
-    const breeze = context.createOscillator();
-    breeze.frequency.value = 0.065;
-    const breezeAmount = context.createGain();
-    breezeAmount.gain.value = 130;
-    breeze.connect(breezeAmount).connect(this.windFilter.frequency);
-    breeze.start();
-    this.permanentSources.push(breeze);
-
-    const breath = context.createOscillator();
-    breath.frequency.value = 0.09;
-    const breathAmount = context.createGain();
-    breathAmount.gain.value = 0.012;
-    breath.connect(breathAmount).connect(this.droneLevel.gain);
-    breath.start();
-    this.permanentSources.push(breath);
+    this.soundBank = new SoundBank(context);
   }
 
   private schedule(): void {
@@ -723,42 +714,29 @@ export class AudioDirector {
         const pan = atmosphereRandom(frame.variationSeed, this.phraseStep, 91) * 1.2 - 0.6;
         const temple = frame.zone === 'temple',
           tavern = frame.zone === 'tavern';
-        const shape: OscillatorType =
-          frame.culture === 'electronic' ? 'sine' : temple ? 'sine' : 'triangle';
-        this.tone(
+        this.instrument(
           note,
           this.nextNote,
-          temple ? 3.3 : tavern ? 0.48 : 1.4,
-          0.037 * frame.melodyGain,
+          0.1 * frame.melodyGain,
           bus,
-          {
-            shape,
-            attack: temple ? 0.4 : tavern ? 0.009 : 0.09,
-            cutoff: temple ? 1100 : tavern ? 2600 : 1450,
-            pan,
-          },
+          temple || frame.culture === 'electronic' ? 'resonator' : 'string',
+          pan,
         );
-        if (temple)
-          this.tone(note * ratio(7), this.nextNote + 0.08, 3.1, 0.014, bus, {
-            attack: 0.5,
-            cutoff: 1400,
-            pan: -pan,
-          });
-        if (tavern && frame.culture === 'acoustic')
-          this.tone(note * 2, this.nextNote, 0.2, 0.01, bus, { shape: 'sine', cutoff: 2400, pan });
+        if (temple && step % 8 === 0)
+          this.instrument(note * ratio(7), this.nextNote + 0.08, 0.028, bus, 'resonator', -pan);
       }
       if (
         step % 4 === 0 &&
         (frame.zone === 'danger' ||
           ((frame.zone === 'tavern' || frame.zone === 'workshop') && frame.activity > 0.2))
       ) {
-        this.tone(
+        this.instrument(
           this.tonic / 2,
           this.nextNote,
-          0.22,
-          frame.zone === 'danger' ? 0.043 : 0.018,
+          frame.zone === 'danger' ? 0.075 : 0.028,
           bus,
-          { endHz: this.tonic / 3, cutoff: 330, attack: 0.006 },
+          'string',
+          0,
         );
       }
       this.phraseStep++;
@@ -786,80 +764,317 @@ export class AudioDirector {
   }
 
   private environmentSound(kind: string, now: number, strength: number, pan: number): void {
-    const bus = this.ambience;
-    if (!bus || strength <= 0 || this.ambientVoices.size >= AUDIO_LIMITS.ambienceVoices) return;
-    const volume = strength * 0.035;
-    const options = { pan, category: 'ambience' as const };
-    if (kind === 'bird') {
-      const base = 1600 + atmosphereRandom(this.seed, Math.floor(now), 17) * 1500;
-      this.tone(base, now, 0.17, volume * 0.6, bus, {
-        ...options,
-        endHz: base * 1.55,
-        attack: 0.025,
-      });
-      this.tone(base * 1.36, now + 0.2, 0.22, volume * 0.5, bus, {
-        ...options,
-        endHz: base * 0.91,
-        attack: 0.022,
-      });
-      this.tone(base, now + 0.5, 0.12, volume * 0.28, bus, {
-        ...options,
-        endHz: base * 1.25,
-        attack: 0.016,
-      });
-    } else if (kind === 'insect') {
-      for (let index = 0; index < 4; index++)
-        this.tone(3700 + index * 32, now + index * 0.075, 0.043, volume * 0.23, bus, options);
-    } else if (kind === 'fire' || kind === 'flee') {
-      this.noise(
+    if (!this.ambience || strength <= 0 || !this.soundBank) return;
+    if (kind === 'bird' || kind === 'insect' || kind === 'fire') {
+      const bank: SampleBankId = kind === 'bird' ? 'birds' : kind === 'insect' ? 'insects' : 'fire';
+      const buffer = this.soundBank.get(bank);
+      if (!buffer) {
+        void this.soundBank.load(bank);
+        return;
+      }
+      const duration = Math.min(1.6, buffer.duration);
+      const offset =
+        atmosphereRandom(this.seed, Math.floor(now), 83) * Math.max(0, buffer.duration - duration);
+      this.sample(
+        buffer,
+        offset,
+        duration,
         now,
-        kind === 'fire' ? 0.18 : 0.42,
-        volume * 1.6,
-        kind === 'fire' ? 1900 : 850,
-        'bandpass',
+        strength * (kind === 'bird' ? 0.16 : 0.08),
+        1,
         pan,
-        0.013,
-        bus,
+        8500,
+        this.ambience,
+        true,
+        0.08,
       );
-    } else if (kind === 'work') {
-      this.tone(
-        this.soundscape?.culture === 'electronic' ? 880 : 520,
-        now,
-        0.18,
-        volume * 0.7,
-        bus,
-        { ...options, endHz: 410, shape: 'triangle', cutoff: 1600 },
-      );
-      this.noise(now, 0.07, volume, 1750, 'highpass', pan, 0.004, bus);
-    } else if (kind === 'social') {
-      // Abstract low room murmur: never synthesized intelligible words or recorded speech.
-      [130, 185, 230].forEach((hz, index) =>
-        this.tone(hz, now + index * 0.14, 0.4, volume * 0.16, bus, {
-          ...options,
-          shape: 'triangle',
-          attack: 0.12,
-          endHz: hz * 1.14,
-          cutoff: 650,
-        }),
-      );
-    } else if (kind === 'grazer') {
-      this.tone(340, now, 0.42, volume * 0.65, bus, {
-        ...options,
-        shape: 'triangle',
-        endHz: 220,
-        attack: 0.09,
-        cutoff: 1100,
-      });
-    } else if (kind === 'predator') {
-      this.noise(now, 0.9, volume, 330, 'lowpass', pan, 0.2, bus);
-      this.tone(104, now, 0.8, volume * 0.7, bus, {
-        ...options,
-        shape: 'triangle',
-        endHz: 66,
-        attack: 0.14,
-        cutoff: 400,
-      });
+      return;
     }
+    const group = kind === 'work' ? 'wood' : kind === 'social' ? 'cloth' : 'rustle';
+    const buffer = this.soundBank.get('foley'),
+      clips = FOLEY_CLIPS[group];
+    if (!buffer || !clips) return;
+    const clip = clips[Math.floor(atmosphereRandom(this.seed, Math.floor(now), 84) * clips.length)];
+    this.sample(
+      buffer,
+      clip.offset,
+      clip.duration,
+      now,
+      strength * (kind === 'work' ? 0.075 : 0.05),
+      1,
+      pan,
+      6500,
+      this.ambience,
+      true,
+    );
+  }
+
+  /** Real contact events only; counter-stratified takes prevent machine-gun repetition. */
+  playFoley(event: FoleyEvent): void {
+    const context = this.context;
+    if (
+      !context ||
+      !this.effects ||
+      this.disposed ||
+      context.state !== 'running' ||
+      this.paused ||
+      this.lifecycleHidden ||
+      this.muted ||
+      this.settings.effects <= 0 ||
+      this.settings.master <= 0
+    )
+      return;
+    const group = foleyGroup(event),
+      key = `${event.actorId ?? 'player'}:${event.kind}`.slice(0, 96);
+    if (
+      !this.allowEvent(
+        `foley:${key}`,
+        context.currentTime,
+        event.kind === 'footstep' ? 0.095 : 0.045,
+      )
+    )
+      return;
+    const sequence = this.foleySequence.get(group) ?? 0;
+    this.foleySequence.set(group, sequence + 1);
+    if (group === 'bow-release') {
+      this.renderBowRelease(event, sequence);
+      return;
+    }
+    if (!this.soundBank?.get('foley')) {
+      this.pendingFoley.delete(key);
+      this.pendingFoley.set(key, { event: { ...event }, at: context.currentTime, sequence });
+      while (this.pendingFoley.size > FOLEY_LIMITS.pendingEvents)
+        this.pendingFoley.delete(this.pendingFoley.keys().next().value!);
+      this.warmFoley();
+      return;
+    }
+    this.renderFoley(event, sequence, context.currentTime);
+  }
+
+  private flushFoley(): void {
+    const now = this.context?.currentTime ?? 0;
+    for (const pending of this.pendingFoley.values()) {
+      if (now - pending.at <= FOLEY_LIMITS.pendingSeconds)
+        this.renderFoley(
+          { ...pending.event, delay: Math.max(0, (pending.event.delay ?? 0) - (now - pending.at)) },
+          pending.sequence,
+          now,
+        );
+    }
+    this.pendingFoley.clear();
+  }
+
+  private warmFoley(): void {
+    if (!this.soundBank || this.sampleLoads.has('foley')) return;
+    this.sampleLoads.add('foley');
+    void this.soundBank.load('foley').then(() => {
+      this.sampleLoads.delete('foley');
+      this.flushFoley();
+    });
+  }
+
+  private renderFoley(event: FoleyEvent, sequence: number, now: number): void {
+    if (
+      !this.context ||
+      this.context.state !== 'running' ||
+      this.paused ||
+      this.lifecycleHidden ||
+      this.muted ||
+      this.disposed ||
+      this.settings.effects <= 0 ||
+      this.settings.master <= 0 ||
+      !this.effects
+    )
+      return;
+    const buffer = this.soundBank?.get('foley'),
+      clips = FOLEY_CLIPS[foleyGroup(event)];
+    if (!buffer || !clips) return;
+    const plan = planFoley(event, sequence, this.seed, clips.length);
+    if (!plan || plan.gain <= 0) return;
+    if (clips.length > 1 && this.previousFoleyTake.get(plan.group) === plan.variant)
+      plan.variant = (plan.variant + 1) % clips.length;
+    const clip = clips[plan.variant];
+    if (
+      this.sample(
+        buffer,
+        clip.offset,
+        clip.duration,
+        now + plan.delay,
+        plan.gain,
+        plan.rate,
+        plan.pan,
+        plan.cutoff,
+        this.effects,
+      )
+    ) {
+      this.foleyPlayed++;
+      this.lastFoley = `${plan.group}:${plan.variant}`;
+      this.previousFoleyTake.set(plan.group, plan.variant);
+    }
+  }
+
+  private renderBowRelease(event: FoleyEvent, sequence: number): void {
+    const context = this.context;
+    if (!context || !this.effects) return;
+    const plan = planFoley(event, sequence, this.seed);
+    if (!plan) return;
+    const key = 'bow-release';
+    let buffer = this.instrumentBuffers.get(key);
+    if (!buffer) {
+      const data = instrumentSamples('string', 105, this.seed, 24000).slice(0, 6000);
+      for (let i = 0; i < data.length; i++)
+        data[i] *= Math.exp(-i / 1350) * Math.min(1, (data.length - i) / 300);
+      buffer = context.createBuffer(1, data.length, 24000);
+      buffer.getChannelData(0).set(data);
+      this.instrumentBuffers.set(key, buffer);
+      while (this.instrumentBuffers.size > 20)
+        this.instrumentBuffers.delete(this.instrumentBuffers.keys().next().value!);
+    }
+    if (
+      this.sample(
+        buffer,
+        0,
+        buffer.duration,
+        context.currentTime + plan.delay,
+        plan.gain * 2.2,
+        plan.rate,
+        plan.pan,
+        8200,
+        this.effects,
+      )
+    ) {
+      this.foleyPlayed++;
+      this.lastFoley = 'bow-release:physical-string';
+    }
+  }
+
+  private sample(
+    buffer: AudioBuffer,
+    offset: number,
+    duration: number,
+    now: number,
+    volume: number,
+    rate: number,
+    pan: number,
+    cutoff: number,
+    bus: AudioNode,
+    ambient = false,
+    attack = 0.002,
+  ): boolean {
+    const context = this.context;
+    if (
+      !context ||
+      this.voices.size >= AUDIO_LIMITS.transientVoices ||
+      (bus !== this.effects && this.voices.size >= AUDIO_LIMITS.transientVoices - 12) ||
+      (ambient && this.ambientVoices.size >= AUDIO_LIMITS.ambienceVoices)
+    )
+      return false;
+    const source = context.createBufferSource(),
+      filter = context.createBiquadFilter(),
+      gain = context.createGain(),
+      panner = context.createStereoPanner();
+    source.buffer = buffer;
+    source.playbackRate.value = rate;
+    filter.type = 'lowpass';
+    filter.frequency.value = cutoff;
+    panner.pan.value = pan;
+    const end = now + duration / rate;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(volume, now + Math.min(attack, duration / 4));
+    gain.gain.setValueAtTime(volume, Math.max(now + attack, end - 0.018));
+    gain.gain.linearRampToValueAtTime(0, end);
+    source.connect(filter).connect(gain).connect(panner).connect(bus);
+    this.track(source, [filter, gain, panner], ambient);
+    source.start(now, offset, duration);
+    source.stop(end + 0.01);
+    return true;
+  }
+
+  private updateSampledAmbience(): void {
+    const context = this.context,
+      bank = this.soundBank,
+      frame = this.soundscape;
+    if (!context || !bank || !this.ambience || this.disposed) return;
+    const targets: Array<[SampleBankId, number]> = [
+      ['wind', frame ? frame.wind * 2.1 + frame.leaves * 2 : 0],
+      ['water', frame ? frame.water * 2.4 : 0],
+      ['birds', frame ? frame.birds * 0.22 : 0],
+      ['insects', frame ? frame.insects * 0.2 : 0],
+    ];
+    for (const [id, target] of targets) {
+      const current = this.sampledLoops.get(id);
+      if (current) {
+        current.gain.gain.setTargetAtTime(target, context.currentTime, 1.35);
+        continue;
+      }
+      if (
+        target <= 0 ||
+        !this.started ||
+        this.paused ||
+        this.lifecycleHidden ||
+        this.settings.ambience <= 0 ||
+        this.settings.master <= 0 ||
+        this.muted
+      )
+        continue;
+      const buffer = bank.get(id);
+      if (!buffer) {
+        if (!this.sampleLoads.has(id)) {
+          this.sampleLoads.add(id);
+          void bank.load(id).then((value) => {
+            this.sampleLoads.delete(id);
+            if (value && !this.disposed) this.updateSampledAmbience();
+          });
+        }
+        continue;
+      }
+      const source = context.createBufferSource(),
+        gain = context.createGain();
+      source.buffer = buffer;
+      source.loop = true;
+      gain.gain.value = 0;
+      source.connect(gain).connect(this.ambience);
+      source.start(0, atmosphereRandom(this.seed, 0, id.length) * buffer.duration);
+      gain.gain.setTargetAtTime(target, context.currentTime, 1.35);
+      this.sampledLoops.set(id, { source, gain });
+      this.permanentSources.push(source);
+    }
+  }
+
+  private instrument(
+    hz: number,
+    now: number,
+    volume: number,
+    bus: AudioNode,
+    kind: 'string' | 'resonator',
+    pan: number,
+  ): void {
+    const context = this.context;
+    if (!context || this.settings.music <= 0) return;
+    const rounded = Math.round(hz * 10) / 10,
+      key = `${kind}:${rounded}`;
+    let buffer = this.instrumentBuffers.get(key);
+    if (!buffer) {
+      const data = instrumentSamples(kind, rounded, this.seed, 24000);
+      buffer = context.createBuffer(1, data.length, 24000);
+      buffer.getChannelData(0).set(data);
+      this.instrumentBuffers.set(key, buffer);
+      while (this.instrumentBuffers.size > 20)
+        this.instrumentBuffers.delete(this.instrumentBuffers.keys().next().value!);
+    }
+    this.sample(
+      buffer,
+      0,
+      buffer.duration,
+      now,
+      volume,
+      1,
+      pan,
+      kind === 'string' ? 7800 : 6000,
+      bus,
+      false,
+      0.004,
+    );
   }
 
   private updateLevels(): void {
@@ -879,6 +1094,7 @@ export class AudioDirector {
       duck.timeConstant,
     );
     this.effects?.gain.setTargetAtTime(this.settings.effects, now, 0.08);
+    this.updateSampledAmbience();
     const frame = this.soundscape;
     this.droneLevel?.gain.setTargetAtTime(
       frame?.droneGain ?? 0.08 + this.intensity * 0.028,
@@ -1031,6 +1247,13 @@ export class AudioDirector {
   }
 
   private disposeGraph(): void {
+    this.soundBank?.dispose();
+    this.soundBank = null;
+    this.sampleLoads.clear();
+    this.pendingFoley.clear();
+    this.instrumentBuffers.clear();
+    for (const loop of this.sampledLoops.values()) loop.gain.disconnect();
+    this.sampledLoops.clear();
     [...this.permanentSources, ...this.voices].forEach((source) => {
       try {
         source.stop();
