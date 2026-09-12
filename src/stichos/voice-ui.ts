@@ -116,7 +116,9 @@ export function mountVoiceUi(options: VoiceUiOptions) {
           ? state.transmitting
             ? 'Stop talking'
             : 'Tap to talk'
-          : 'Hold to talk';
+          : state.transmitting
+            ? 'Talking…'
+            : 'Hold to talk';
     talk.setAttribute('aria-pressed', String(state.transmitting));
     talk.setAttribute(
       'aria-label',
