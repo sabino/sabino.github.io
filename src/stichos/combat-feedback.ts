@@ -28,6 +28,8 @@ export interface CombatCue extends Point {
   actorId?: string;
   text?: string;
   shape?: 'cone' | 'line' | 'circle';
+  halfAngle?: number;
+  halfWidth?: number;
   style?: 'arc' | 'thrust' | 'cleave' | 'bolt';
   symbol?: 'heal' | 'burn' | 'chill' | 'stagger';
 }
@@ -130,6 +132,10 @@ export function validCombatCue(cue: CombatCue): boolean {
     (cue.actorId === undefined || (typeof cue.actorId === 'string' && cue.actorId.length <= 160)) &&
     (cue.text === undefined || (typeof cue.text === 'string' && cue.text.length <= 96)) &&
     (cue.shape === undefined || ['cone', 'line', 'circle'].includes(cue.shape)) &&
+    (cue.halfAngle === undefined ||
+      (Number.isFinite(cue.halfAngle) && cue.halfAngle > 0 && cue.halfAngle <= Math.PI)) &&
+    (cue.halfWidth === undefined ||
+      (Number.isFinite(cue.halfWidth) && cue.halfWidth > 0 && cue.halfWidth <= 3)) &&
     (cue.style === undefined || ['arc', 'thrust', 'cleave', 'bolt'].includes(cue.style)) &&
     (cue.symbol === undefined || ['heal', 'burn', 'chill', 'stagger'].includes(cue.symbol))
   );

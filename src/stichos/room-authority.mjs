@@ -1,4 +1,5 @@
 import { LivingWorld, faunaContacts } from './living-world.ts';
+import { ACTION_EXPANSION, techniqueById } from './combat-techniques.ts';
 import { worldTimeAt, roomWorldSeconds } from './world-time.ts';
 import { InfiniteWorld } from './world.ts';
 import { generateArtifact, normalizeArtifactDesign } from './artifacts.ts';
@@ -312,6 +313,7 @@ export class CoopRooms {
     for (const room of this.rooms.values()) {
       const members = [...room.members.values()].filter((m) => m.connection);
       if (!members.length) continue;
+      room.combat.setWorldTime(roomWorldSeconds(room.calendarEpochMs, this.now()));
       const frame = room.combat.tick(
         dt,
         members.map((m) => this.combatPeer(m)),
@@ -526,6 +528,7 @@ export class CoopRooms {
       (message.combatActive !== undefined && typeof message.combatActive !== 'boolean') ||
       (message.publicWorld !== undefined && typeof message.publicWorld !== 'boolean') ||
       (message.livingWorld !== undefined && message.livingWorld !== 1) ||
+      (message.actionExpansion !== undefined && message.actionExpansion !== ACTION_EXPANSION) ||
       (message.bodyId !== undefined && !bodyIdValid(message.bodyId)) ||
       (message.progression !== undefined && !validSharedCombatProgression(message.progression)) ||
       (message.room !== undefined &&
@@ -654,6 +657,7 @@ export class CoopRooms {
       connection,
       disconnectedAt: null,
       livingWorld: message.livingWorld === 1,
+      actionExpansion: message.actionExpansion === ACTION_EXPANSION,
       combatActive: message.combatActive === true,
       bodyId: message.bodyId,
       progression: message.progression
@@ -682,6 +686,7 @@ export class CoopRooms {
         opened: [...room.opened],
         combat: this.combatFrame(room, member),
         ...(member.livingWorld ? { living: this.livingFrameFor(room, member) } : {}),
+        ...(member.actionExpansion ? { actionExpansion: ACTION_EXPANSION } : {}),
         chat: room.chat.filter((c) => c.channel === 'world' || distance(c, member) <= 12),
         machines: [...room.machines.values()],
         ...(proof ? { proof } : {}),
@@ -1049,6 +1054,7 @@ export class CoopRooms {
       message.kind,
       message.heading,
       message.guardIds,
+      message.technique,
     ]);
     const old = member.requests.get(message.requestId);
     const deny = (reason) =>
@@ -1090,8 +1096,13 @@ export class CoopRooms {
       this.send(connection, result);
     };
     const invalid = (reason) => answer(false, reason, this.combatFrame(room, member));
-    if (!['attack', 'ward', 'parley'].includes(message.kind))
+    if (!['attack', 'ward', 'parley', 'technique'].includes(message.kind))
       return invalid('Unknown combat action.');
+    if (
+      message.kind === 'technique' &&
+      (!member.actionExpansion || !techniqueById(message.technique))
+    )
+      return invalid('This technique was not negotiated with the room.');
     if (
       message.kind === 'parley'
         ? !Array.isArray(message.guardIds) ||
@@ -1107,7 +1118,9 @@ export class CoopRooms {
     const outcome =
       message.kind === 'parley'
         ? room.combat.parley({ ...peer, combatActive: true }, message.guardIds)
-        : room.combat.attack(peer, message.heading, message.kind);
+        : message.kind === 'technique'
+          ? room.combat.technique(peer, message.heading, message.technique)
+          : room.combat.attack(peer, message.heading, message.kind);
     const frame = { snapshot: outcome.snapshot, hits: outcome.hits, deaths: outcome.deaths };
     this.recordCombat(room, frame);
     answer(outcome.ok, outcome.reason, frame);

@@ -167,6 +167,8 @@ export interface Appearance {
   weapon: 'staff' | 'sword' | 'bow' | 'none';
 }
 export interface Npc extends Point {
+  /** Remaining authoritative stagger; legacy bodies omit it. */
+  stagger?: number;
   id: string;
   seed: number;
   name: string;

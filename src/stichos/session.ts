@@ -1,4 +1,34 @@
 import { findWalkingPath } from './pathfinding.ts';
+import {
+  techniqueById,
+  techniquesFor,
+  techniqueContains,
+  techniqueAngles,
+  assistedAim,
+  STEP_RULES,
+  type TechniqueId,
+} from './combat-techniques.ts';
+import type { CombatCue } from './combat-feedback.ts';
+import type { SharedCast } from './shared-combat.ts';
+import {
+  ExpeditionCatalog,
+  createExpeditionState,
+  restoreExpeditions,
+  observeExpeditions,
+  expeditionStatus,
+  claimExpedition,
+  chooseAttunement,
+  expeditionTechniqueBonus,
+  type ExpeditionState,
+  type ExpeditionContext,
+  type Attunement,
+} from './expeditions.ts';
+import {
+  encounterPattern,
+  encounterContains,
+  encounterSteering,
+  type EncounterPattern,
+} from './encounter-patterns.ts';
 import { footstepMaterial, physicalSound, resourceMaterial } from './foley-events.ts';
 import { worldTimeAt, type WorldTimeSignal } from './world-time.ts';
 import {
@@ -303,6 +333,11 @@ type Arrow = {
   damage: number;
   enchantment?: WeaponProfile['effect'];
   artifactBenefits?: ArtifactGenome['properties'];
+  pierce?: number;
+  struck?: Set<string>;
+  hostileOnly?: boolean;
+  stagger?: number;
+  techniqueToken?: { used: boolean; attunement?: Attunement; bodyId: string };
 };
 type EnemyIntent = {
   remaining: number;
@@ -312,6 +347,7 @@ type EnemyIntent = {
   range: number;
   color: string;
   warning: Effect;
+  pattern?: EncounterPattern;
 };
 export const EXPLORATION_CELL_SIZE = 8;
 export interface ExplorationBounds {
@@ -531,6 +567,450 @@ export class Stichos {
   private arrows: Arrow[] = [];
   private enemyIntents = new Map<string, EnemyIntent>();
   private nextEffect = 1;
+  private techniqueRecovery = new Map<TechniqueId, number>();
+  private preparing: {
+    id: TechniqueId;
+    heading: number;
+    bodyId: string;
+    origin: Point;
+    remaining: number;
+    damage: number;
+    artifactBenefits?: ArtifactGenome['properties'];
+  } | null = null;
+  private sharedCasts: SharedCast[] = [];
+  private sharedReleases: SharedCast[] = [];
+  private encounterReleaseReceipts = new Set<number>();
+  private falling: { npc: Npc; remaining: number }[] = [];
+  get defeatedVisuals() {
+    return this.falling.map((v) => v.npc);
+  }
+  private showDefeat(npc: Npc) {
+    if (this.falling.some((v) => v.npc.id === npc.id)) return;
+    this.falling.push({ npc: { ...clone(npc), hp: 0 }, remaining: 0.55 });
+    this.falling = this.falling.slice(-16);
+    this.queueCue({
+      id: `fall:${this.nextEffect++}`,
+      kind: 'death',
+      x: npc.x,
+      y: npc.y,
+      age: 0,
+      duration: 0.55,
+      actorId: npc.id,
+      color: npc.appearance.trim,
+    });
+  }
+  private presentationCues: CombatCue[] = [];
+  private stepRecovery = 0;
+  readonly expeditionCatalog: ExpeditionCatalog;
+  private expeditionState: ExpeditionState = createExpeditionState();
+  private momentumUntil = 0;
+  private queueCue(cue: CombatCue) {
+    if (this.presentationCues.length >= 64) this.presentationCues.shift();
+    this.presentationCues.push(cue);
+  }
+  private techniqueBenefits(attunement: Attunement | undefined) {
+    const bonus = expeditionTechniqueBonus(attunement, false, false);
+    this.player.breath = clamp(this.player.breath + bonus.breath);
+    this.player.warmth = clamp(this.player.warmth + bonus.warmth);
+  }
+  get expeditions() {
+    return this.expeditionCatalog.plansAround(this.player.x, this.player.y, 96);
+  }
+  get expeditionProgress() {
+    return clone(this.expeditionState);
+  }
+  get expeditionContext(): ExpeditionContext {
+    return {
+      player: this.player,
+      level: this.player.level,
+      inventory: this.inventory,
+      defeated: this.removed,
+      time: this.worldTime,
+    };
+  }
+  deliverExpedition(id: string) {
+    const plan = this.expeditions.find((p) => p.id === id);
+    if (!plan || this.phase !== 'playing')
+      return { ok: false, message: 'Choose a commission from this settlement.' };
+    const pack = this.artifactPacks.get(this.bodyId) ?? { designs: [], equipped: null };
+    if (pack.designs.length >= 64 && !pack.designs.includes(plan.reward.artifactDesign))
+      return {
+        ok: false,
+        message: 'Make room among your inventions before receiving this field implement.',
+      };
+    const result = claimExpedition(plan, this.expeditionState, this.expeditionContext);
+    if (result.ok && result.reward) {
+      const reward = result.reward;
+      this.player.coins += reward.coins;
+      this.awardXp(reward.xp);
+      grantPractice(this.progression, reward.practice.profession, reward.practice.amount);
+      const design = normalizeArtifactDesign(reward.artifactDesign);
+      if (!pack.designs.includes(design)) pack.designs.push(design);
+      this.artifactPacks.set(this.bodyId, pack);
+      const npc = this.npcs.find((n) => n.id === plan.giver.id);
+      if (npc) this.society.remember(npc, 'aid', this.worldTime);
+      this.changeReputation(plan.town.clan, 3);
+      this.entry(
+        plan.title,
+        `Helped ${plan.town.name}, restored its field work and received a unique implement. ${plan.observationText}`,
+      );
+      this.event(
+        'quest',
+        `${plan.title} completed · ${reward.coins} coins · ${reward.xp} experience · field implement received.`,
+      );
+    }
+    return { ok: result.ok, message: result.reason };
+  }
+  attuneExpedition(id: Attunement) {
+    return chooseAttunement(this.expeditionState, id);
+  }
+  private actionDebt = 0;
+  private stepping: { heading: number; remaining: number } | null = null;
+
+  get techniques() {
+    return techniquesFor(this.player.appearance.weapon, this.activeArtifact?.delivery).map((t) => ({
+      ...t,
+      remaining: this.techniqueRecovery.get(t.id) ?? 0,
+      unlocked: this.player.level >= t.level,
+    }));
+  }
+  get dodgeCooldown() {
+    return this.stepRecovery;
+  }
+  get usesSharedCombat() {
+    return this.sharedCombat;
+  }
+  private payAcceptedAction(amount: number) {
+    this.actionDebt += Math.max(0, amount - this.player.stamina);
+    this.player.stamina = Math.max(0, this.player.stamina - amount);
+  }
+  get preparingTechnique() {
+    return this.preparing ? techniqueById(this.preparing.id) : undefined;
+  }
+  get actionCues(): CombatCue[] {
+    const own = this.preparing;
+    const cues: CombatCue[] = [
+      ...this.presentationCues,
+      ...this.sharedReleases.map((cast): CombatCue => {
+        const t = techniqueById(cast.technique)!;
+        return {
+          id: `room-release:${cast.id}`,
+          kind:
+            t.pattern === 'radial'
+              ? 'area'
+              : t.pattern === 'fan' || t.pattern === 'pierce'
+                ? 'projectile'
+                : 'melee',
+          x: cast.x,
+          y: cast.y,
+          age: cast.duration - cast.remaining,
+          duration: cast.duration,
+          heading: cast.heading,
+          radius: t.radius,
+          color: t.color,
+          actorId: cast.bodyId ?? cast.actorId,
+        };
+      }),
+      ...[...this.enemyIntents].flatMap(([id, intent]): CombatCue[] => {
+        const n = this.npcs.find((n) => n.id === id);
+        if (!n) return [];
+        const shape = intent.pattern?.shape ?? (intent.kind === 'bow' ? 'volley' : 'cone');
+        const angles = shape === 'volley' ? (intent.pattern?.angles ?? [0]) : [0];
+        return angles.map((offset, index) => ({
+          id: `enemy-warning:${intent.warning.id}:${index}`,
+          kind: 'telegraph',
+          x: n.x,
+          y: n.y,
+          age: intent.warning.age,
+          duration: intent.warning.duration,
+          heading: intent.heading + offset,
+          radius: intent.range,
+          color: intent.color,
+          actorId: id,
+          text: intent.pattern?.name ?? intent.warning.text,
+          shape:
+            shape === 'radial'
+              ? 'circle'
+              : shape === 'line' || shape === 'volley'
+                ? 'line'
+                : 'cone',
+          halfAngle: Math.acos(0.35),
+          halfWidth: shape === 'line' ? 0.62 : 0.35,
+        }));
+      }),
+      ...[...this.sharedEnemies.values()].flatMap((n): CombatCue[] => {
+        const i = n.intent;
+        if (!i || distance(n, this.player) > 22) return [];
+        const shape = i.shape ?? (i.kind === 'arrow' ? 'volley' : 'cone');
+        const angles = shape === 'volley' ? (i.angles ?? [0]) : [0];
+        return angles.map((offset, index) => ({
+          id: `room-warning:${this.sharedWarnings.get(n.id)?.id ?? n.id}:${index}`,
+          kind: 'telegraph',
+          x: n.x,
+          y: n.y,
+          age: i.duration - i.remaining,
+          duration: i.duration,
+          heading: i.heading + offset,
+          radius: i.range,
+          color: i.color,
+          actorId: n.id,
+          text:
+            encounterPattern(n.id, n.seed, n.hp, n.maxHp, this.worldTime)?.name ??
+            (i.kind === 'arrow' ? 'Drawing bow' : 'Striking'),
+          shape:
+            shape === 'radial'
+              ? 'circle'
+              : shape === 'line' || shape === 'volley'
+                ? 'line'
+                : 'cone',
+          halfAngle: Math.acos(0.35),
+          halfWidth: shape === 'line' ? 0.62 : 0.35,
+        }));
+      }),
+      ...(own && !this.sharedCombat
+        ? [
+            {
+              id: `preparing:${this.bodyId}:${own.id}`,
+              kind: 'charge' as const,
+              ...own.origin,
+              age: techniqueById(own.id)!.windup - own.remaining,
+              duration: techniqueById(own.id)!.windup,
+              heading: own.heading,
+              radius: techniqueById(own.id)!.radius,
+              color: techniqueById(own.id)!.color,
+              actorId: this.bodyId,
+              text: techniqueById(own.id)!.name,
+            },
+          ]
+        : []),
+      ...this.sharedCasts.map((cast) => {
+        const t = techniqueById(cast.technique)!;
+        return {
+          id: `cast:${cast.id}`,
+          kind: 'charge' as const,
+          x: cast.x,
+          y: cast.y,
+          age: cast.duration - cast.remaining,
+          duration: cast.duration,
+          heading: cast.heading,
+          radius: t.radius,
+          color: t.color,
+          actorId: cast.bodyId ?? cast.actorId,
+          text: t.name,
+        };
+      }),
+    ];
+    const priority = (cue: CombatCue) =>
+      cue.kind === 'telegraph' ? 0 : cue.kind === 'charge' ? 1 : 2;
+    return cues
+      .filter(
+        (cue) => cue.age < cue.duration && distance(cue, this.player) < 24 + (cue.radius ?? 1),
+      )
+      .sort(
+        (a, b) => priority(a) - priority(b) || distance(a, this.player) - distance(b, this.player),
+      )
+      .slice(0, 64);
+  }
+  aimAssist(): Point | undefined {
+    const weapon = this.player.appearance.weapon;
+    const range =
+      this.activeArtifact?.properties.range ??
+      (weapon === 'none' ? 2 : this.weaponProfile(weapon).range);
+    return assistedAim(this.player, this.player.heading, this.npcs, Math.max(3, range), (n) =>
+      this.lineOfSight(this.player, n),
+    );
+  }
+  techniquePreview(id: TechniqueId, target?: Point) {
+    const t = techniqueById(id),
+      p = this.player;
+    const heading =
+      target && finite(target.x) && finite(target.y) && distance(target, p) > 0.01
+        ? Math.atan2(target.y - p.y, target.x - p.x)
+        : p.heading;
+    const fail = (message: string) => ({ ok: false, message, heading, bodyId: this.bodyId });
+    if (!t || !this.techniques.some((v) => v.id === id) || p.level < t.level)
+      return fail('This weapon technique is not yet available.');
+    if (
+      this.phase !== 'playing' ||
+      this.dialogue ||
+      this.preparing ||
+      p.attackCooldown > 0 ||
+      (this.techniqueRecovery.get(id) ?? 0) > 0
+    )
+      return fail('Finish recovering before preparing a technique.');
+    const cost =
+      t.stamina -
+      expeditionTechniqueBonus(
+        this.expeditionState.attunement,
+        this.momentumUntil > this.time,
+        false,
+      ).staminaReduction;
+    if (p.stamina < cost) return fail(`Recover ${cost} energy for ${t.name}.`);
+    if (this.sharedCombat && this.sharedSequence < 0)
+      return fail('Wait for the room combat state.');
+    return { ok: true, message: 'Ready', heading, bodyId: this.bodyId };
+  }
+  technique(id: TechniqueId, target?: Point) {
+    if (this.sharedCombat) return { ok: false, message: 'Room confirmation is required.' };
+    const preview = this.techniquePreview(id, target);
+    if (!preview.ok) return preview;
+    return this.commitTechnique(id, preview.heading, preview.bodyId);
+  }
+  commitTechnique(id: TechniqueId, heading: number, bodyId: string) {
+    const t = techniqueById(id);
+    if (!t || !finite(heading) || bodyId !== this.bodyId || this.phase !== 'playing')
+      return { ok: false, message: 'The preparing body changed.' };
+    const artifact = this.activeArtifact,
+      weapon = this.player.appearance.weapon;
+    const damage =
+      artifact?.properties.damage ??
+      this.weaponProfile(weapon === 'none' ? 'staff' : weapon).damage;
+    this.payAcceptedAction(
+      t.stamina -
+        expeditionTechniqueBonus(
+          this.expeditionState.attunement,
+          this.momentumUntil > this.time,
+          false,
+        ).staminaReduction,
+    );
+    this.momentumUntil = 0;
+    this.player.heading = heading;
+    this.techniqueRecovery.set(id, t.cooldown);
+    this.preparing = {
+      id,
+      heading,
+      bodyId,
+      origin: { x: this.player.x, y: this.player.y },
+      remaining: t.windup,
+      damage,
+      artifactBenefits: artifact?.properties,
+    };
+    return { ok: true, message: `Preparing ${t.name}.` };
+  }
+  dodge(heading = this.player.heading) {
+    if (
+      !finite(heading) ||
+      this.phase !== 'playing' ||
+      this.dialogue ||
+      this.stepRecovery > 0 ||
+      this.player.stamina < STEP_RULES.stamina
+    )
+      return false;
+    this.preparing = null;
+    this.player.stamina -= STEP_RULES.stamina;
+    this.stepRecovery = STEP_RULES.cooldown;
+    this.momentumUntil = this.time + 3;
+    this.stepping = { heading, remaining: STEP_RULES.duration };
+    this.queueCue({
+      id: `step:${this.nextEffect++}`,
+      kind: 'dash',
+      x: this.player.x,
+      y: this.player.y,
+      age: 0,
+      duration: 0.3,
+      heading,
+      color: '#b2c4c0',
+      actorId: this.bodyId,
+    });
+    this.event('foley', undefined, {
+      kind: 'footstep',
+      material: footstepMaterial(this.world.tile(this.player.x, this.player.y)),
+      intensity: 0.9,
+      speed: 1,
+      actorId: this.bodyId,
+    });
+    return true;
+  }
+
+  private releaseTechnique() {
+    const cast = this.preparing;
+    this.preparing = null;
+    if (
+      !cast ||
+      this.sharedCombat ||
+      cast.bodyId !== this.bodyId ||
+      distance(cast.origin, this.player) > 0.65
+    )
+      return;
+    const t = techniqueById(cast.id)!;
+    const techniqueToken = {
+      used: false,
+      attunement: this.expeditionState.attunement,
+      bodyId: cast.bodyId,
+    };
+    this.event('attack');
+    this.queueCue({
+      id: `technique:${this.nextEffect++}`,
+      kind:
+        t.pattern === 'radial'
+          ? 'area'
+          : t.pattern === 'fan' || t.pattern === 'pierce'
+            ? 'projectile'
+            : 'melee',
+      ...cast.origin,
+      age: 0,
+      duration: 0.45,
+      heading: cast.heading,
+      radius: t.radius,
+      color: t.color,
+      actorId: this.bodyId,
+      strength: 0.85,
+    });
+    if (t.pattern === 'fan' || t.pattern === 'pierce') {
+      for (const heading of techniqueAngles(t, cast.heading)) {
+        if (this.arrows.length >= 128) break;
+        const effect = this.effect('arrow', cast.origin, t.color, t.radius / 12, heading);
+        effect.actorId = this.bodyId;
+        this.arrows.push({
+          owner: 'player',
+          effect,
+          vx: Math.cos(heading) * 12,
+          vy: Math.sin(heading) * 12,
+          damage: Math.round(cast.damage * t.multiplier),
+          pierce: t.targets,
+          struck: new Set(),
+          hostileOnly: true,
+          stagger: t.stagger,
+          artifactBenefits: cast.artifactBenefits,
+          techniqueToken,
+        });
+      }
+    } else {
+      const targets = this.npcs
+        .filter(
+          (n) =>
+            n.hp > 0 &&
+            n.hostile &&
+            techniqueContains(t, cast.origin, n, cast.heading) &&
+            this.lineOfSight(cast.origin, n),
+        )
+        .sort(
+          (a, b) => distance(a, cast.origin) - distance(b, cast.origin) || a.id.localeCompare(b.id),
+        )
+        .slice(0, t.targets);
+      for (const n of targets) {
+        const bonus = expeditionTechniqueBonus(
+          this.expeditionState.attunement,
+          false,
+          (n.stagger ?? 0) > 0,
+        );
+        this.damageNpc(n, Math.round(cast.damage * t.multiplier * bonus.damageMultiplier));
+        if (n.hp > 0) {
+          n.cooldown = Math.max(n.cooldown, t.stagger);
+          n.stagger = Math.max(n.stagger ?? 0, t.stagger);
+          const d = Math.max(0.01, distance(cast.origin, n));
+          this.move(
+            n,
+            ((n.x - cast.origin.x) / d) * t.knockback,
+            ((n.y - cast.origin.y) / d) * t.knockback,
+          );
+          this.npcMemory.set(n.id, clone(n));
+        }
+      }
+      if (targets.length && cast.artifactBenefits) this.artifactBenefits(cast.artifactBenefits);
+      if (targets.length) this.techniqueBenefits(this.expeditionState.attunement);
+    }
+  }
   private refreshClock = 0;
   private stepClock = 0;
   private lifeCount = 0;
@@ -544,6 +1024,7 @@ export class Stichos {
     this.seed = seed >>> 0;
     this.progression = createProgression(this.seed);
     this.world = new InfiniteWorld(this.seed, generation);
+    this.expeditionCatalog = new ExpeditionCatalog(this.world);
     this.restAnchor = { ...this.world.spawn };
     this.player = {
       ...this.world.spawn,
@@ -2044,14 +2525,22 @@ export class Stichos {
       level: this.player.level,
       combatXp: this.progression.xp.combat,
       upgrade: this.progression.upgrades[this.bodyId]?.[kind] ?? 0,
+      ...(this.expeditionState.attunement ? { attunement: this.expeditionState.attunement } : {}),
     };
   }
   setSharedCombat(active: boolean, roomIdentity?: string) {
     if (active === this.sharedCombat && (!roomIdentity || roomIdentity === this.sharedRoom)) return;
+    this.preparing = null;
+    this.sharedCasts = [];
+    this.sharedReleases = [];
+    this.stepping = null;
+    this.presentationCues = [];
+    this.falling = [];
     if (roomIdentity && roomIdentity !== this.sharedRoom) {
       this.sharedRoom = roomIdentity;
       this.sharedSequence = -1;
       this.sharedReceipts.clear();
+      this.encounterReleaseReceipts.clear();
       this.sharedBenefitStrikes.clear();
       this.sharedReceiptFloor = 0;
       this.sharedAcknowledged = 0;
@@ -2122,14 +2611,13 @@ export class Stichos {
       this.phase !== 'playing' ||
       this.dialogue ||
       !['attack', 'ward'].includes(kind) ||
-      (kind === 'attack' ? this.player.attackCooldown : this.player.wardCooldown) > 0 ||
-      this.player.stamina < (kind === 'attack' ? 8 : 30)
+      (kind === 'attack' ? this.player.attackCooldown : this.player.wardCooldown) > 0
     )
       return { ok: false, message: 'This body cannot commit that action now.' };
     const p = this.player;
     p.heading = heading;
     if (kind === 'ward') {
-      p.stamina -= 30;
+      this.payAcceptedAction(30);
       p.wardCooldown = 8;
       p.breath = clamp(p.breath + 5);
       const effect = this.effect('ward', p, '#9abde9', 0.75, heading);
@@ -2140,7 +2628,7 @@ export class Stichos {
         weapon = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon,
         profile = this.weaponProfile(weapon);
       const delivery = artifact?.delivery ?? (weapon === 'bow' ? 'projectile' : 'contact');
-      p.stamina -= 8;
+      this.payAcceptedAction(8);
       p.attackCooldown = artifact?.properties.cooldown ?? profile.cooldown;
       // The released projectile comes from the authoritative room snapshot.
       const effect = this.effect(
@@ -2216,8 +2704,59 @@ export class Stichos {
       this.sharedSnapshotLoaded = true;
       this.sharedSequence = frame.snapshot.seq;
       this.sharedEnemies = new Map(frame.snapshot.enemies.map((n) => [n.id, clone(n)]));
+      this.sharedCasts = (frame.snapshot.casts ?? [])
+        .filter((c) => distance(c, this.player) < 24)
+        .map(clone);
+      this.sharedReleases = (frame.snapshot.releases ?? [])
+        .filter((c) => distance(c, this.player) < 24)
+        .map(clone);
+      for (const release of frame.snapshot.encounterReleases ?? []) {
+        if (this.encounterReleaseReceipts.has(release.id)) continue;
+        this.encounterReleaseReceipts.add(release.id);
+        while (this.encounterReleaseReceipts.size > 64)
+          this.encounterReleaseReceipts.delete(
+            this.encounterReleaseReceipts.values().next().value!,
+          );
+        if (distance(release, this.player) > 16 || release.remaining <= 0) continue;
+        this.queueCue({
+          id: `shared-enemy-release:${release.id}`,
+          actorId: release.actorId,
+          kind:
+            release.shape === 'radial'
+              ? 'area'
+              : release.shape === 'volley'
+                ? 'projectile'
+                : 'melee',
+          x: release.x,
+          y: release.y,
+          age: 0.35 - release.remaining,
+          duration: 0.35,
+          heading: release.heading,
+          radius: release.range,
+          color: release.color,
+        });
+        const sound =
+          release.shape === 'radial' ? 'craft' : release.shape === 'line' ? 'tool-impact' : 'swing';
+        this.event(
+          'foley',
+          undefined,
+          physicalSound(
+            sound,
+            sound === 'tool-impact' ? 'stone' : 'wood',
+            release,
+            this.player,
+            release.actorId,
+            this.sharedEnemies.get(release.actorId)?.seed ?? 0,
+            0.8,
+            0,
+            release.shape === 'volley' ? 'release' : undefined,
+          ),
+        );
+      }
       this.sharedPeaceful = new Set(frame.snapshot.peaceful);
       for (const id of frame.snapshot.dead) {
+        const fallen = !this.removed.has(id) ? this.npcs.find((n) => n.id === id) : undefined;
+        if (fallen) this.showDefeat(fallen);
         this.removed.add(id);
         const npc = this.npcMemory.get(id) ?? this.npcs.find((n) => n.id === id);
         if (npc) {
@@ -2324,9 +2863,11 @@ export class Stichos {
           grantPractice(this.progression, 'combat', 2);
           if (this.phase === 'playing' && (!hit.actorBodyId || hit.actorBodyId === this.bodyId)) {
             const strike = hit.strikeId ?? hit.id;
-            if (hit.artifactDesign && !this.sharedBenefitStrikes.has(strike)) {
+            if ((hit.artifactDesign || hit.technique) && !this.sharedBenefitStrikes.has(strike)) {
               this.sharedBenefitStrikes.add(strike);
-              this.artifactBenefits(generateArtifact(hit.artifactDesign).properties);
+              if (hit.artifactDesign)
+                this.artifactBenefits(generateArtifact(hit.artifactDesign).properties);
+              if (hit.technique && hit.renewal) this.techniqueBenefits('renewal');
             }
             if (hit.effect === 'breath') this.player.breath = clamp(this.player.breath + 2);
             if (hit.effect === 'warmth') this.player.warmth = clamp(this.player.warmth + 3);
@@ -3115,17 +3656,49 @@ export class Stichos {
     this.calendarSeconds += dt;
     p.attackCooldown = Math.max(0, p.attackCooldown - dt);
     p.wardCooldown = Math.max(0, p.wardCooldown - dt);
+    this.stepRecovery = Math.max(0, this.stepRecovery - dt);
+    for (const [id, remaining] of this.techniqueRecovery) {
+      if (remaining <= dt) this.techniqueRecovery.delete(id);
+      else this.techniqueRecovery.set(id, remaining - dt);
+    }
+    for (const cue of this.presentationCues) cue.age += dt;
+    this.presentationCues = this.presentationCues.filter((c) => c.age < c.duration).slice(-64);
+    for (const fall of this.falling) fall.remaining -= dt;
+    this.falling = this.falling.filter((v) => v.remaining > 0);
+    for (const cast of [...this.sharedCasts, ...this.sharedReleases])
+      cast.remaining = Math.max(0, cast.remaining - dt);
+    if (this.preparing) {
+      if (this.preparing.bodyId !== this.bodyId || distance(this.preparing.origin, p) > 0.65)
+        this.preparing = null;
+      else {
+        this.preparing.remaining -= dt;
+        if (this.preparing.remaining <= 0) this.releaseTechnique();
+      }
+    }
+    let walkingDt = dt;
+    if (this.stepping) {
+      const step = this.stepping,
+        consumed = Math.min(dt, step.remaining),
+        amount = (consumed * STEP_RULES.distance) / STEP_RULES.duration;
+      walkingDt = Math.max(0, dt - consumed);
+      const before = { x: p.x, y: p.y };
+      this.move(p, Math.cos(step.heading) * amount, Math.sin(step.heading) * amount);
+      this.distanceTraveled += distance(p, before);
+      p.phase += distance(p, before) * 2.5;
+      step.remaining -= dt;
+      if (step.remaining <= 0) this.stepping = null;
+    }
     p.cequinTime = Math.max(0, p.cequinTime - dt);
     const length = Math.hypot(input.x, input.y);
     const running = input.run && length > 0 && p.stamina > 1;
-    if (length > 0) {
+    if (length > 0 && walkingDt > 0) {
       p.heading = Math.atan2(input.y, input.x);
       const speed = p.speed * (running ? 1.55 : 1);
       const before = { x: p.x, y: p.y };
       this.move(
         p,
-        (input.x / Math.max(1, length)) * speed * dt,
-        (input.y / Math.max(1, length)) * speed * dt,
+        (input.x / Math.max(1, length)) * speed * walkingDt,
+        (input.y / Math.max(1, length)) * speed * walkingDt,
       );
       const moved = distance(p, before);
       this.distanceTraveled += moved;
@@ -3143,7 +3716,9 @@ export class Stichos {
         });
       }
     }
-    p.stamina = clamp(p.stamina + (running ? -15 : 18) * dt);
+    const recovery = running ? 0 : Math.min(this.actionDebt, 18 * dt);
+    this.actionDebt -= recovery;
+    p.stamina = clamp(p.stamina + (running ? -15 : 18) * dt - recovery);
     const tile = this.world.tile(p.x, p.y);
     const sheltered = tile.terrain === 'floor';
     if (this.universeLife) {
@@ -3160,6 +3735,10 @@ export class Stichos {
       this.refreshClock = 0.6;
       this.refreshNpcs();
       this.visit();
+      observeExpeditions(this.expeditionState, this.expeditions, {
+        player: p,
+        time: this.worldTime,
+      });
     }
     this.updateLivingWorld(dt, length > 0);
     this.updateNpcs(dt);
@@ -3292,7 +3871,10 @@ export class Stichos {
       this.npcRuntime.set(npc.id, clone(npc));
     }
     while (this.npcRuntime.size > 128) this.npcRuntime.delete(this.npcRuntime.keys().next().value!);
-    const generated = this.world.npcsAround(this.player.x, this.player.y, 15);
+    const generated = [
+      ...this.world.npcsAround(this.player.x, this.player.y, 15),
+      ...this.expeditionCatalog.enemiesAround(this.player.x, this.player.y, 15),
+    ];
     const candidates = new Map<string, Npc>();
     for (const npc of generated) {
       const saved = this.npcMemory.get(npc.id) ?? this.npcRuntime.get(npc.id);
@@ -3362,6 +3944,8 @@ export class Stichos {
       )
         continue;
       npc.cooldown = Math.max(0, npc.cooldown - dt);
+      npc.stagger = Math.max(0, (npc.stagger ?? 0) - dt);
+      if (npc.stagger > 0) continue;
       if (npc.role === 'guard' && this.reputation[npc.clan] < -24) npc.hostile = true;
       const range = distance(npc, this.player);
       const routine = !npc.hostile ? this.residentRoutines.get(npc.id) : undefined;
@@ -3371,6 +3955,11 @@ export class Stichos {
         route?.points[0] ?? (routine && this.clear(routine.target) ? routine.target : npc.home);
       const target = npc.hostile && range < 8 ? this.player : routineTarget;
       const targetDistance = distance(npc, target);
+      const special = encounterPattern(npc.id, npc.seed, npc.hp, npc.maxHp, this.worldTime);
+      if (special && npc.hostile) {
+        this.updateEncounter(npc, special, range < 8 ? this.player : undefined, dt);
+        continue;
+      }
       const intent = this.enemyIntents.get(npc.id);
       if (intent) {
         intent.remaining -= dt;
@@ -3490,6 +4079,104 @@ export class Stichos {
     }
   }
 
+  private updateEncounter(
+    npc: Npc,
+    pattern: EncounterPattern,
+    target: Point | undefined,
+    dt: number,
+  ) {
+    const intent = this.enemyIntents.get(npc.id);
+    if (intent) {
+      intent.remaining -= dt;
+      npc.heading = intent.heading;
+      if (intent.remaining > 0) return;
+      this.enemyIntents.delete(npc.id);
+      intent.warning.age = intent.warning.duration;
+      const locked = intent.pattern ?? pattern;
+      this.queueCue({
+        id: `enemy-release:${this.nextEffect++}`,
+        kind:
+          locked.shape === 'radial' ? 'area' : locked.shape === 'volley' ? 'projectile' : 'melee',
+        x: npc.x,
+        y: npc.y,
+        age: 0,
+        duration: 0.35,
+        heading: intent.heading,
+        radius: intent.range,
+        color: intent.color,
+        actorId: npc.id,
+      });
+      this.event(
+        'foley',
+        undefined,
+        physicalSound(
+          locked.sound,
+          locked.sound === 'tool-impact' ? 'stone' : 'wood',
+          npc,
+          this.player,
+          npc.id,
+          npc.seed,
+          0.8,
+          0,
+          locked.shape === 'volley' ? 'release' : undefined,
+        ),
+      );
+      if (locked.shape === 'volley') {
+        for (const offset of locked.angles) {
+          if (this.arrows.length >= 128) break;
+          const heading = intent.heading + offset,
+            effect = this.effect('arrow', npc, intent.color, intent.range / 7, heading);
+          effect.actorId = npc.id;
+          this.arrows.push({
+            owner: 'enemy',
+            effect,
+            vx: Math.cos(heading) * 7,
+            vy: Math.sin(heading) * 7,
+            damage: intent.damage,
+          });
+        }
+      } else if (
+        encounterContains(locked, npc, this.player, intent.heading) &&
+        this.lineOfSight(npc, this.player)
+      )
+        this.hurt(intent.damage);
+      return;
+    }
+    if (
+      target &&
+      distance(npc, target) <= pattern.range &&
+      this.lineOfSight(npc, target) &&
+      npc.cooldown <= 0
+    ) {
+      npc.heading = Math.atan2(target.y - npc.y, target.x - npc.x);
+      npc.cooldown = pattern.windup + pattern.recovery;
+      const warning = this.effect('speech', npc, pattern.color, pattern.windup, npc.heading);
+      warning.actorId = npc.id;
+      warning.text = pattern.name;
+      this.enemyIntents.set(npc.id, {
+        remaining: pattern.windup,
+        heading: npc.heading,
+        kind: pattern.shape === 'volley' ? 'bow' : 'staff',
+        damage: pattern.damage,
+        range: pattern.range,
+        color: pattern.color,
+        warning,
+        pattern,
+      });
+    } else {
+      const destination = target ?? npc.home,
+        d = distance(npc, destination);
+      const steering = target
+        ? encounterSteering(pattern, npc, target, npc.cooldown)
+        : {
+            x: (destination.x - npc.x) / Math.max(0.01, d),
+            y: (destination.y - npc.y) / Math.max(0.01, d),
+          };
+      const before = { x: npc.x, y: npc.y };
+      if (d > 0.3) this.move(npc, steering.x * npc.speed * dt, steering.y * npc.speed * dt);
+      npc.phase += distance(npc, before) * 2.5;
+    }
+  }
   private lineOfSight(from: Point, to: Point) {
     const steps = Math.max(1, Math.ceil(distance(from, to) / 0.15));
     for (let step = 1; step <= steps; step++) {
@@ -5401,7 +6088,14 @@ export class Stichos {
       return;
     }
     const p = this.player;
-    if (this.phase !== 'playing' || this.dialogue || p.attackCooldown > 0 || p.stamina < 8) return;
+    if (
+      this.phase !== 'playing' ||
+      this.dialogue ||
+      this.preparing ||
+      p.attackCooldown > 0 ||
+      p.stamina < 8
+    )
+      return;
     if (target && finite(target.x) && finite(target.y) && distance(target, p) > 0.01)
       p.heading = Math.atan2(target.y - p.y, target.x - p.x);
     const artifact = this.activeArtifact;
@@ -5525,12 +6219,40 @@ export class Stichos {
           }
           continue;
         }
-        const hit = this.npcs.find((n) => n.hp > 0 && distance(n, arrow.effect) < 0.4);
+        const hit = this.npcs.find(
+          (n) =>
+            n.hp > 0 &&
+            (!arrow.hostileOnly || n.hostile) &&
+            !arrow.struck?.has(n.id) &&
+            distance(n, arrow.effect) < 0.4,
+        );
         if (hit) {
-          this.damageNpc(hit, arrow.damage, arrow.enchantment);
-          if (arrow.artifactBenefits) this.artifactBenefits(arrow.artifactBenefits);
-          arrow.effect.age = arrow.effect.duration;
-          break;
+          const bonus = expeditionTechniqueBonus(
+            arrow.techniqueToken?.attunement,
+            false,
+            (hit.stagger ?? 0) > 0,
+          );
+          this.damageNpc(hit, Math.round(arrow.damage * bonus.damageMultiplier), arrow.enchantment);
+          if (arrow.techniqueToken) {
+            const token = arrow.techniqueToken;
+            if (!token.used && token.bodyId === this.bodyId) {
+              token.used = true;
+              this.techniqueBenefits(token.attunement);
+              if (arrow.artifactBenefits) this.artifactBenefits(arrow.artifactBenefits);
+            }
+          } else if (arrow.artifactBenefits) this.artifactBenefits(arrow.artifactBenefits);
+          if (arrow.stagger && hit.hp > 0) {
+            hit.cooldown = Math.max(hit.cooldown, arrow.stagger);
+            hit.stagger = Math.max(hit.stagger ?? 0, arrow.stagger);
+            this.npcMemory.set(hit.id, clone(hit));
+          }
+          if (arrow.pierce && arrow.pierce > 1) {
+            arrow.pierce--;
+            (arrow.struck ??= new Set()).add(hit.id);
+          } else {
+            arrow.effect.age = arrow.effect.duration;
+            break;
+          }
         }
       }
     }
@@ -5555,7 +6277,10 @@ export class Stichos {
     if (!wasFriendly && npc.hp > 0) grantPractice(this.progression, 'combat', 2);
     npc.hp = Math.max(0, npc.hp - amount);
     npc.hostile = true;
-    if (enchantment === 'stagger') npc.cooldown = Math.max(npc.cooldown, 1.35);
+    if (enchantment === 'stagger') {
+      npc.cooldown = Math.max(npc.cooldown, 1.35);
+      npc.stagger = Math.max(npc.stagger ?? 0, 1.35);
+    }
     if (enchantment === 'breath') this.player.breath = clamp(this.player.breath + 2);
     if (enchantment === 'warmth') this.player.warmth = clamp(this.player.warmth + 3);
     this.effect('hurt', npc, '#ec8277', 0.45);
@@ -5575,6 +6300,7 @@ export class Stichos {
           guard.hostile = true;
     }
     if (npc.hp <= 0) {
+      this.showDefeat(npc);
       this.removed.add(npc.id);
       if (npc.role === 'raider') {
         this.recordFreeLife('watch', npc.id, 1);
@@ -5611,6 +6337,8 @@ export class Stichos {
       this.dialogue = null;
       this.arrows = [];
       this.currentWork = null;
+      this.preparing = null;
+      this.stepping = null;
       this.enemyIntents.clear();
       this.entry(
         'The body falls quiet',
@@ -6137,6 +6865,11 @@ export class Stichos {
       worldGeneration: this.world.generation,
       seed: this.seed,
       player: this.player,
+      actionRecovery: {
+        techniques: [...this.techniqueRecovery],
+        step: this.stepRecovery,
+        debt: this.actionDebt,
+      },
       lifeOrigin: this.originRecord ?? undefined,
       personalStories: this.personalStories.records.length ? this.personalStories : undefined,
       production: this.production.structures.length ? this.production : undefined,
@@ -6149,6 +6882,7 @@ export class Stichos {
           ? { state: this.winterState, laborBaseline: this.winterLaborBaseline }
           : undefined,
       progression: this.progression,
+      expeditions: this.expeditionState.records.length ? this.expeditionState : undefined,
       freeLife: this.freeLifeState,
       sharedCombatRewards: [...this.sharedRewarded],
       sharedCombatLedger: {
@@ -6236,6 +6970,10 @@ export class Stichos {
       }
     }
     game.player = clone(data.player);
+    game.expeditionState = restoreExpeditions(data.expeditions, data.seed);
+    game.techniqueRecovery = new Map(data.actionRecovery?.techniques ?? []);
+    game.stepRecovery = data.actionRecovery?.step ?? 0;
+    game.actionDebt = data.actionRecovery?.debt ?? 0;
     const priestBodyId = `body:theo-priest:${data.seed}`;
     game.notebook = data.notebook ?? (data.occupiedNpcId ?? priestBodyId) === priestBodyId;
     game.inventory = { ...data.inventory };
@@ -6669,6 +7407,25 @@ function validateSave(value: unknown): SaveData {
     return fail();
   if (value.worldElapsed !== undefined && !number(value.worldElapsed, 0, Number.MAX_SAFE_INTEGER))
     return fail();
+  if (value.actionRecovery !== undefined) {
+    const a = value.actionRecovery;
+    if (object(a) && a.debt !== undefined && !number(a.debt, 0, 100)) return fail();
+    if (
+      !object(a) ||
+      !number(a.step, 0, STEP_RULES.cooldown) ||
+      !Array.isArray(a.techniques) ||
+      a.techniques.length > 6 ||
+      !a.techniques.every(
+        (r) =>
+          Array.isArray(r) &&
+          r.length === 2 &&
+          !!techniqueById(r[0]) &&
+          number(r[1], 0, techniqueById(r[0])!.cooldown),
+      ) ||
+      new Set(a.techniques.map((r) => r[0])).size !== a.techniques.length
+    )
+      return fail();
+  }
   if (value.society !== undefined && !validSocietySave(value.society)) return fail();
   if (
     value.wildlifeNotes !== undefined &&
@@ -6702,6 +7459,7 @@ function validateSave(value: unknown): SaveData {
     number(n.clan, 0, 5, true) &&
     look(n.appearance) &&
     number(n.maxHp, 1, 1000) &&
+    (n.stagger === undefined || number(n.stagger, 0, 3)) &&
     number(n.hp, 0, n.maxHp as number) &&
     point(n.home) &&
     number(n.speed, 0, 10) &&

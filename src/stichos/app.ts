@@ -4,6 +4,13 @@ import './life.css';
 import './universe-ui.css';
 import './screen-ui.css';
 import './mobile-ui.css';
+import '../announcements.css';
+import { createAnnouncementInbox } from '../announcements.ts';
+import { mountPortraitControls, type PortraitControlState } from './portrait-controls.ts';
+import { STEP_RULES, type TechniqueId } from './combat-techniques.ts';
+import './expedition-ui.css';
+import { renderExpeditionPanel, expeditionTracker } from './expedition-ui.ts';
+import type { Attunement } from './expeditions.ts';
 import { mountMobileViewport, isTextEntry } from './mobile-viewport.ts';
 import { createWorldExperience } from './experience.ts';
 import { mountVoiceUi } from './voice-ui.ts';
@@ -123,10 +130,21 @@ const renderer = new StichosRenderer(canvas);
 const audio = new AudioDirector();
 const storageKey = 'verso.stichos.v1';
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const announcements = createAnnouncementInbox();
+let effectIntensity = 0.75;
+try {
+  const saved = localStorage.getItem('verso.effects.intensity');
+  const n = Number(saved);
+  if (saved !== null && Number.isFinite(n)) effectIntensity = Math.max(0, Math.min(1, n));
+} catch {}
+let heldAttack = false;
+let heldTechnique: { index: number; start: number } | null = null;
+let touchAiming = false;
 let game = new Stichos(0x53544943);
 const multiplayer = new MultiplayerConnection();
 const peerEmotes = new Map<string, { text: string; until: number }>();
 let sharedActionPending = false;
+let combatPending = false;
 let multiplayerRoster = '';
 let roomName = 'Traveler';
 let roomServer = worldNodeEndpoint();
@@ -143,6 +161,7 @@ let started = false,
   packView: 'pack' | 'craft' = 'pack';
 let selectedItem: ItemId | null = null;
 let trackedQuestId: string | null = null;
+let trackedExpedition: string | null = null;
 let mapWaypoint: Point | null = null;
 let chartView: AtlasView | null = null;
 let chartControl: AtlasController | null = null;
@@ -162,6 +181,21 @@ try {
 } catch {}
 const atlasPainter = new AtlasPainter();
 function trackedQuest() {
+  if (trackedExpedition && (!game.usesSharedCombat || multiplayer.actionExpansion)) {
+    const plan = game.expeditions.find((p) => p.id === trackedExpedition);
+    if (plan) {
+      const tracker = expeditionTracker(plan, game.expeditionProgress, game.expeditionContext);
+      return {
+        id: plan.id,
+        title: tracker.title,
+        description: plan.description,
+        objective: tracker.text,
+        target: tracker.target,
+        complete: false,
+        stage: 0,
+      };
+    }
+  }
   if (trackedQuestId === 'map-waypoint' && mapWaypoint)
     return {
       id: 'map-waypoint',
@@ -244,7 +278,58 @@ function applyAppMode() {
 }
 addEventListener('verso-app-mode-change', applyAppMode);
 applyAppMode();
-const mobileViewport = mountMobileViewport(root, () => resize());
+const portraitControls = mountPortraitControls(root, {
+  canAct: () =>
+    started &&
+    !paused &&
+    !modal &&
+    (!sharedActionPending || combatPending) &&
+    !game.dialogue &&
+    !transferStarted &&
+    !root.classList.contains('satchel-open') &&
+    game.phase === 'playing',
+  onMoveStart: () => {
+    walk = [];
+    pointer = null;
+    touchAiming = true;
+    if (isTextEntry(document.activeElement)) (document.activeElement as HTMLElement).blur();
+  },
+  onAction: (action, phase) => {
+    touchAiming = true;
+    if (action === 'attack') {
+      heldAttack = phase === 'press';
+      if (phase === 'press') act('attack');
+    } else if (action.startsWith('technique-')) {
+      const index = action === 'technique-1' ? 0 : 1;
+      if (phase === 'press') heldTechnique = { index, start: performance.now() };
+      else {
+        heldTechnique = null;
+        if (phase === 'release') {
+          const t = game.techniques[index];
+          if (t) void useTechnique(t.id);
+        }
+      }
+    } else if (phase === 'press') {
+      if (action === 'dodge') {
+        const input = portraitControls.input;
+        game.dodge(
+          Math.hypot(input.x, input.y) > 0.1 ? Math.atan2(input.y, input.x) : game.player.heading,
+        );
+      } else act(action);
+    }
+  },
+});
+const mobileViewport = mountMobileViewport(root, () => resize(), {
+  installed: () => appMode().installedWindow,
+  onPortraitBlocked: () => {
+    portraitControls.release();
+    heldAttack = false;
+    heldTechnique = null;
+    keys.clear();
+    walk = [];
+    voiceUi.release();
+  },
+});
 
 function resize() {
   if (innerWidth >= 900 && root.classList.contains('satchel-open')) {
@@ -344,6 +429,9 @@ function setInert(value: boolean) {
 }
 let modalInvoker: HTMLElement | null = null;
 function openModal(kind: string, html: string) {
+  heldAttack = false;
+  heldTechnique = null;
+  portraitControls.release();
   voiceUi.release();
   if (isTextEntry(document.activeElement)) (document.activeElement as HTMLElement).blur();
   if (!modal) modalInvoker = document.activeElement as HTMLElement;
@@ -453,6 +541,11 @@ function title() {
     `<div class="v-window-heading"><div class="s-title-mark">VERSO</div><button id="v-install-title">Install app</button></div><h2>One universe.<br>A life of your own.</h2><p>Work the land. Build a livelihood. Find other minds among the stars. Every world has an address; every life leaves something behind.</p>${invite ? `<div class="v-incoming"><b>Invitation to room ${esc(invite.room)}</b><span>${esc(planetAt(invite.seed).name)} · your friend’s planet is already selected</span><button id="v-join-invite" class="s-primary">Join this world</button></div>` : ''}${stored ? '<button id="s-continue" class="s-primary s-continue">Continue this life</button>' : ''}<div class="v-entry-columns"><form id="s-start"><label>Planet seed <span>Leave blank for a new signal</span><input id="s-seed-input" value="" maxlength="64" aria-label="World seed" placeholder="A name, number, or leave to chance"></label><button class="s-primary" type="submit">Choose a life</button><button id="v-theo-story" type="button">Theo Bishop’s story · Stíchos</button></form><form id="v-title-room"><label>Join friends<input id="v-title-code" maxlength="600" placeholder="Complete room code or invitation link" autocapitalize="characters" autocomplete="off"></label><button type="submit">Find room</button><p id="v-title-room-error" class="v-room-error" role="alert" hidden></p><button id="v-title-galaxy" type="button">Browse the galaxy</button></form></div><p class="s-title-foot">Your continuing life is kept in this browser. Share a room link to bring friends to the same world.</p>`,
   );
   el('v-install-title').onclick = () => void requestInstall().then(toast);
+  el('v-install-title').insertAdjacentHTML(
+    'beforebegin',
+    `<button id="v-title-announcements" class="v-announcements-entry">${announcements.buttonLabel()}</button>`,
+  );
+  el('v-title-announcements').onclick = announcementMenu;
   el('v-title-galaxy').onclick = galaxyMenu;
   el<HTMLFormElement>('s-start').onsubmit = (e) => {
     e.preventDefault();
@@ -874,6 +967,81 @@ function updateTransfer(now: number) {
   if (p >= 1 && transferKind !== 'opening') endTransfer();
 }
 
+function announcementMenu() {
+  openModal('announcements', announcements.html());
+  disposeSpecial = announcements.mount(el('s-modal'), {
+    onClose: () => (started ? pauseMenu() : title()),
+  });
+}
+function techniquesMenu() {
+  openModal(
+    'techniques',
+    `<h2>Weapon techniques</h2><p>Each equipped construction has two techniques. The second awakens at level 4. Stand your ground during preparation; stepping away interrupts it. Tap Strike for one attack, or hold it to keep striking.</p><div class="s-menu-buttons">${game.techniques.map((t, i) => `<article><h3>${esc(t.name)} · ${i === 0 ? 'R' : 'T'}</h3><p>${esc(t.description)}</p><small>Level ${t.level} · ${t.stamina} energy · ${t.cooldown}s recovery · ${t.radius} tiles</small><button data-use-technique="${t.id}" ${!t.unlocked ? 'disabled' : ''}>${t.unlocked ? 'Use technique' : `Unlocks at level ${t.level}`}</button></article>`).join('') || '<p>Equip a weapon or an invented implement to learn its techniques.</p>'}</div><p>Space: quick step. A step moves through clear ground and does not make you invulnerable. Wards repel threats; health supplies remain in your satchel.</p><button id="v-techniques-return" class="s-primary">Return to the world</button>`,
+  );
+  el('v-techniques-return').onclick = closeModal;
+  el('s-modal')
+    .querySelectorAll<HTMLButtonElement>('[data-use-technique]')
+    .forEach(
+      (b) =>
+        (b.onclick = () => {
+          closeModal();
+          void useTechnique(b.dataset.useTechnique as TechniqueId);
+        }),
+    );
+}
+function expeditionMenu(selected?: string) {
+  if (game.usesSharedCombat && !multiplayer.actionExpansion) {
+    openModal(
+      'expeditions',
+      '<h2>Field expeditions</h2><p>This room runs an earlier world build. Its host must update the world node before expedition enemies and weapon techniques are available here.</p><p>Your existing quests, ordinary attacks, wards and shared world remain available. Field expeditions also work in a solo life.</p><button id="v-expeditions-return" class="s-primary">Return to the world</button>',
+    );
+    el('v-expeditions-return').onclick = closeModal;
+    return;
+  }
+  openModal(
+    'expeditions',
+    `${renderExpeditionPanel(game.expeditions, game.expeditionProgress, game.expeditionContext, selected)}<button id="v-expeditions-return" class="s-primary">Return to the world</button>`,
+  );
+  el('v-expeditions-return').onclick = closeModal;
+  el('s-modal')
+    .querySelectorAll<HTMLButtonElement>('[data-expedition-action]')
+    .forEach(
+      (button) =>
+        (button.onclick = () => {
+          if (game.usesSharedCombat && !multiplayer.actionExpansion) {
+            expeditionMenu();
+            return;
+          }
+          const id = button.dataset.expedition!,
+            action = button.dataset.expeditionAction;
+          if (action === 'select') expeditionMenu(id);
+          if (action === 'track') {
+            trackedExpedition = id;
+            trackedQuestId = null;
+            closeModal();
+            updateUI();
+            drawMap();
+          }
+          if (action === 'claim') {
+            const result = game.deliverExpedition(id);
+            expeditionMenu(id);
+            toast(result.message);
+            save();
+          }
+        }),
+    );
+  el('s-modal')
+    .querySelectorAll<HTMLButtonElement>('[data-attunement]')
+    .forEach(
+      (button) =>
+        (button.onclick = () => {
+          if (game.attuneExpedition(button.dataset.attunement as Attunement)) {
+            save();
+            expeditionMenu(selected);
+          }
+        }),
+    );
+}
 function soundSettings() {
   const settings = audio.getSettings();
   const mode = appMode();
@@ -885,7 +1053,7 @@ function soundSettings() {
   };
   openModal(
     'sound',
-    `<h2>Sound & app settings</h2><p>Your sound choices stay in this browser. Nearby voices have their own volume and microphone controls.</p><div class="v-audio-controls">${Object.entries(
+    `<h2>Sound, touch & app settings</h2><p>Your sound choices stay in this browser. Nearby voices have their own volume and microphone controls.</p><div class="v-audio-controls">${Object.entries(
       labels,
     )
       .map(
@@ -897,6 +1065,21 @@ function soundSettings() {
       )}</div><div class="s-menu-buttons"><button id="v-audio-enable">${settings.muted ? 'Unmute game sound' : audio.needsGesture ? 'Enable game sound' : 'Mute game sound'}</button><button id="v-audio-preview">Listen to this place</button><button id="v-audio-voice">Nearby voices & microphone</button><button id="v-audio-return" class="s-primary">Return to the world</button></div><details class="v-app-diagnostics"><summary>App & audio diagnostics</summary><p>${esc(mode.label)}<br>${esc(mode.source)}<br>Launch handling: ${mode.launchQueueSupported ? 'supported' : 'unavailable'}${mode.launchObserved ? ' · launch observed' : ''}<br>Viewport: ${mobileViewport.diagnostics.height}px · ${mobileViewport.diagnostics.visualViewport ? 'visual viewport tracked' : 'window size fallback'}<br>Soundscape: ${esc(audio.getDiagnostics().zone)} · ${esc(game.worldTime.label)}</p><p>Browsers cannot reliably tell whether another installation exists. Bluetooth routing and interruptions are controlled by your device.</p><button id="v-settings-install">Install Verso</button></details>`,
   );
   const revision = modalRevision;
+  const settingsPanel = el('s-modal');
+  settingsPanel
+    .querySelector('.v-audio-controls')!
+    .insertAdjacentHTML(
+      'afterend',
+      `<div class="v-audio-controls"><label>Combat effect intensity<output id="v-effect-value">${Math.round(effectIntensity * 100)}%</output><input id="v-effect-intensity" aria-label="Combat effect intensity" type="range" min="0" max="1" step="0.05" value="${effectIntensity}"></label><p>Lower intensity keeps warnings visible and reduces flashes, particles and camera motion. Your device’s reduced-motion preference is always respected.</p></div>${portraitControls.settingsHtml()}`,
+    );
+  portraitControls.bindSettings(settingsPanel);
+  el<HTMLInputElement>('v-effect-intensity').oninput = (event) => {
+    effectIntensity = Number((event.target as HTMLInputElement).value);
+    el('v-effect-value').textContent = `${Math.round(effectIntensity * 100)}%`;
+    try {
+      localStorage.setItem('verso.effects.intensity', String(effectIntensity));
+    } catch {}
+  };
   const toggle = el('v-audio-enable');
   el('s-modal')
     .querySelectorAll<HTMLInputElement>('[data-audio-bus]')
@@ -970,6 +1153,17 @@ function pauseMenu() {
   el('v-pause-resume').onclick = closeModal;
   el('s-new').onclick = galaxyMenu;
   el('s-pause-help').onclick = controls;
+  el('s-pause-help').insertAdjacentHTML(
+    'beforebegin',
+    `<button id="v-menu-announcements" class="v-announcements-entry">${announcements.buttonLabel()}</button><button id="v-menu-techniques">Weapon techniques</button>`,
+  );
+  el('v-menu-announcements').onclick = announcementMenu;
+  el('v-menu-techniques').onclick = techniquesMenu;
+  el('v-menu-techniques').insertAdjacentHTML(
+    'beforebegin',
+    '<button id="v-menu-expeditions">Field expeditions</button>',
+  );
+  el('v-menu-expeditions').onclick = () => expeditionMenu();
   el('s-pause-life').onclick = () => lifeMenu();
   el('s-pause-together').onclick = togetherMenu;
   el('v-sound-settings').onclick = soundSettings;
@@ -1050,7 +1244,7 @@ function controls() {
   const touch = matchMedia('(pointer: coarse)').matches || innerWidth < 900;
   openModal(
     'help',
-    `<span class="s-chapter">Living on ${esc(currentPlanet.name)}</span><h2>Explore at your own pace.</h2>${touch ? '<article><h3>Touch controls</h3><p>Tap the ground to walk. Hold an arrow to move; hold Run with a direction to move faster. Tap a person, plant or object to approach, then tap the action shown above the hotbar.</p><p>Satchel opens your belongings and preparation recipes. More opens equipment, supplies, journal and saved phrases. Pinch is not required: use the chart buttons to zoom.</p></article>' : ''}<details ${touch ? '' : 'open'}><summary>Keyboard and mouse</summary><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click ground / person</b><span>Approach the selected place or person</span></p><p><b>E</b><span>Talk, work with a tool, gather, read or open</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor with held equipment</span></p><p><b>Q / 2</b><span>Release a ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Breath supply · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare / equipment</span></p><p><b>J / M / L / G</b><span>Notebook / world atlas / Life / galaxy</span></p><p><b>Enter / F7–F9</b><span>Chat / send saved phrases</span></p><p><b>Escape</b><span>Close a window, cancel construction or pause</span></p><p><b>Mouse wheel</b><span>Zoom the world or chart under the cursor</span></p></div></details><p>Use actual tools to harvest resources. Learn local needs, earn wages, hire people you trust and build a home. Roads connect settlements; wilderness contains supplies and danger.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
+    `<span class="s-chapter">Living on ${esc(currentPlanet.name)}</span><h2>Explore at your own pace.</h2>${touch ? '<article><h3>Touch controls</h3><p>Drag the movement stick to walk; push to its edge to run. Tap Strike once or hold it for repeated attacks. Release a skill button to prepare its technique, and use Step to evade through clear ground. Tap a person or object to approach, then Interact.</p><p>Satchel opens belongings and recipes. More opens equipment, techniques, journal and saved phrases. Sound and touch settings can swap your movement hand or restore direction buttons. Use chart buttons to zoom.</p></article>' : ''}<details ${touch ? '' : 'open'}><summary>Keyboard and mouse</summary><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click ground / person</b><span>Approach the selected place or person</span></p><p><b>E</b><span>Talk, work with a tool, gather, read or open</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor with held equipment</span></p><p><b>R / T / Space</b><span>Weapon techniques / quick step</span></p><p><b>Q / 2</b><span>Release a ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Breath supply · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare / equipment</span></p><p><b>J / M / L / G</b><span>Notebook / world atlas / Life / galaxy</span></p><p><b>Enter / F7–F9</b><span>Chat / send saved phrases</span></p><p><b>Escape</b><span>Close a window, cancel construction or pause</span></p><p><b>Mouse wheel</b><span>Zoom the world or chart under the cursor</span></p></div></details><p>Use actual tools to harvest resources. Learn local needs, earn wages, hire people you trust and build a home. Roads connect settlements; wilderness contains supplies and danger.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
   );
   el('s-help-return').onclick = closeModal;
 }
@@ -1060,6 +1254,16 @@ function moreActions() {
     `<h2>Actions</h2><div class="s-menu-buttons"><button id="v-more-gear">Equipment</button><button id="v-more-ward">Release a ward</button><button id="v-more-journal">Notebook</button><button id="v-more-life">Life, home and work</button><button id="v-more-warm">Use warming tonic · ${game.inventory.tonic ?? 0}</button><button id="v-more-eat">Eat food · ${game.inventory.rations ?? 0}</button><button id="v-more-phrases">Words and shortcuts</button><button id="v-more-atlas">World atlas</button><button id="v-more-galaxy">Galaxy</button><button id="v-more-work">Construct & automate</button><button id="v-more-observe">Observe wildlife</button><button id="v-more-sound">Sound, voice & app settings</button></div>`,
   );
   el('v-more-gear').onclick = equipmentMenu;
+  el('v-more-gear').insertAdjacentHTML(
+    'afterend',
+    '<button id="v-more-techniques">Weapon techniques</button>',
+  );
+  el('v-more-techniques').onclick = techniquesMenu;
+  el('v-more-techniques').insertAdjacentHTML(
+    'beforebegin',
+    '<button id="v-more-expeditions">Field expeditions</button>',
+  );
+  el('v-more-expeditions').onclick = () => expeditionMenu();
   el('v-more-ward').onclick = () => {
     closeModal();
     act('ward');
@@ -1506,6 +1710,51 @@ function updateDialogue() {
   };
 }
 function updateUI() {
+  const techniquePair = game.techniques;
+  const cooldownProfile =
+    game.activeArtifact?.properties ??
+    game.weaponProfile(
+      game.player.appearance.weapon === 'none' ? 'staff' : game.player.appearance.weapon,
+    );
+  portraitControls.update({
+    enabled:
+      started &&
+      !paused &&
+      !modal &&
+      (!sharedActionPending || combatPending) &&
+      !game.dialogue &&
+      !transferStarted &&
+      !root.classList.contains('satchel-open') &&
+      !mobileViewport.diagnostics.portraitRequired &&
+      game.phase === 'playing',
+    attackCooldown: game.player.attackCooldown / cooldownProfile.cooldown,
+    wardCooldown: game.player.wardCooldown / 8,
+    dodgeCooldown: game.dodgeCooldown / STEP_RULES.cooldown,
+    charge: heldTechnique ? Math.min(1, (performance.now() - heldTechnique.start) / 650) : 0,
+    techniques: [0, 1].map((i) => ({
+      label: techniquePair[i]?.name ?? (i ? 'Level 4' : 'Equip'),
+      shortLabel: techniquePair[i]
+        ? (
+            {
+              crescent: 'Reap',
+              faultline: 'Seam',
+              fan: 'Split',
+              thread: 'Needle',
+              pulse: 'Root',
+              bloom: 'Bloom',
+            } as const
+          )[techniquePair[i].id]
+        : 'Equip',
+      lockedReason: !techniquePair[i]
+        ? 'Equip a weapon'
+        : !techniquePair[i].unlocked
+          ? 'Unlocks at level 4'
+          : 'This room needs the action expansion',
+      cooldown: techniquePair[i] ? techniquePair[i].remaining / techniquePair[i].cooldown : 0,
+      unlocked:
+        !!techniquePair[i]?.unlocked && (!game.usesSharedCombat || multiplayer.actionExpansion),
+    })) as NonNullable<PortraitControlState['techniques']>,
+  });
   const soundMuted = audio.getSettings().muted;
   el('s-sound').textContent = soundMuted ? '♩' : '♫';
   el('s-sound').setAttribute(
@@ -2583,7 +2832,7 @@ async function interactShared(id?: string, keepRoute = false) {
 async function combatShared(kind: 'attack' | 'ward') {
   if (sharedActionPending || game.phase !== 'playing') return;
   if (multiplayer.status === 'offline') {
-    if (kind === 'attack') game.attack(pointer ?? undefined);
+    if (kind === 'attack') game.attack(touchAiming ? game.aimAssist() : (pointer ?? undefined));
     else game.ward();
     return;
   }
@@ -2591,16 +2840,18 @@ async function combatShared(kind: 'attack' | 'ward') {
     toast('Reconnect from Together, or leave the room before fighting alone.');
     return;
   }
-  const preview = game.sharedCombatPreview(kind, pointer ?? undefined);
+  const preview = game.sharedCombatPreview(
+    kind,
+    touchAiming ? game.aimAssist() : (pointer ?? undefined),
+  );
   if (!preview.ok) {
     toast(preview.message);
     return;
   }
   const current = game;
   sharedActionPending = true;
-  keys.clear();
+  combatPending = true;
   walk = [];
-  setInert(true);
   sendCombatPose(true, true);
   try {
     const result = await multiplayer.combat(kind, preview.heading);
@@ -2611,8 +2862,44 @@ async function combatShared(kind: 'attack' | 'ward') {
     save();
   } finally {
     sharedActionPending = false;
-    if (!modal && !transferStarted) setInert(false);
+    combatPending = false;
     if (document.hidden && !modal && !transferStarted) pauseMenu();
+  }
+}
+async function useTechnique(id: TechniqueId) {
+  if (!started || paused || modal || sharedActionPending || transferStarted || game.dialogue)
+    return;
+  const target = touchAiming ? game.aimAssist() : (pointer ?? undefined);
+  if (!game.usesSharedCombat) {
+    const result = game.technique(id, target);
+    if (!result.ok) toast(result.message);
+    updateUI();
+    return;
+  }
+  const preview = game.techniquePreview(id, target);
+  if (!preview.ok) {
+    toast(preview.message);
+    return;
+  }
+  if (!multiplayer.actionExpansion) {
+    toast('This room runs an earlier build. Ordinary attacks and wards still work.');
+    return;
+  }
+  const current = game;
+  sharedActionPending = true;
+  combatPending = true;
+  walk = [];
+  sendCombatPose(true, true);
+  try {
+    const result = await multiplayer.technique(id, preview.heading);
+    if (current !== game) return;
+    if (result.ok) game.commitTechnique(id, preview.heading, preview.bodyId);
+    else toast(result.reason ?? 'The room could not accept the technique.');
+    updateUI();
+    save();
+  } finally {
+    sharedActionPending = false;
+    combatPending = false;
   }
 }
 async function parleyShared() {
@@ -2733,6 +3020,7 @@ canvas.addEventListener('pointerleave', () => {
   el('s-hover').hidden = true;
 });
 canvas.addEventListener('pointerdown', (event) => {
+  touchAiming = event.pointerType === 'touch';
   if (
     paused ||
     sharedActionPending ||
@@ -2799,6 +3087,7 @@ root.addEventListener('click', (event) => {
   const d = button.dataset;
   audio.play('click');
   if (d.trackQuest) {
+    trackedExpedition = null;
     trackedQuestId = d.trackQuest;
     if (modal === 'journal') foldNotebook(true);
     else closeModal();
@@ -2859,7 +3148,8 @@ el('s-pocketbook').onclick = () => {
   notebookView.open = false;
   journal();
 };
-el('s-track').onclick = () => journal('threads');
+el('s-track').onclick = () =>
+  trackedExpedition ? expeditionMenu(trackedExpedition) : journal('threads');
 el('s-expand-map').onclick = mapModal;
 el('s-help').onclick = controls;
 el('s-inspect-gear').onclick = equipmentMenu;
@@ -2885,7 +3175,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((button) => 
 });
 addEventListener('keydown', (e) => {
   if (e.defaultPrevented) return;
-  if (sharedActionPending) {
+  if (sharedActionPending && !combatPending) {
     e.preventDefault();
     return;
   }
@@ -2898,7 +3188,7 @@ addEventListener('keydown', (e) => {
         ? document.querySelector<HTMLElement>('.s-sidebar')!
         : el(transferStarted ? 's-transfer' : modal ? 's-modal' : 's-dialogue')
       ).querySelectorAll<HTMLElement>(
-        'button:not(:disabled),input:not(:disabled):not([hidden]),select:not(:disabled),textarea:not(:disabled),a[href],[tabindex="0"]',
+        'button:not(:disabled),input:not(:disabled):not([hidden]),select:not(:disabled),textarea:not(:disabled),a[href],summary,[tabindex="0"]',
       ),
     ].filter((node) => node.getClientRects().length && !node.closest('[hidden],[inert]'));
     const first = focus[0],
@@ -3009,6 +3299,14 @@ addEventListener('keydown', (e) => {
   void audio.start(game.world.seed);
   if (k === 'e') act('interact');
   if (k === 'f' || k === '1') act('attack');
+  if (k === 'r' || k === 't') {
+    const technique = game.techniques[k === 'r' ? 0 : 1];
+    if (technique) void useTechnique(technique.id);
+  }
+  if (k === ' ') {
+    e.preventDefault();
+    game.dodge();
+  }
   if (k === 'q' || k === '2') act('ward');
   const item = (
     { '3': 'cequin', '4': 'salve', '5': 'tonic', '6': 'rations' } as Record<string, ItemId>
@@ -3056,13 +3354,26 @@ function frame(now: number) {
   const sharedTime = multiplayer.worldElapsedSeconds;
   if (sharedTime !== null) game.applyWorldClock(sharedTime);
   experience.update(now);
-  if (started && !paused && !sharedActionPending && !game.dialogue && !transferStarted) {
+  if (
+    started &&
+    !paused &&
+    (!sharedActionPending || combatPending) &&
+    !game.dialogue &&
+    !transferStarted &&
+    !mobileViewport.diagnostics.portraitRequired
+  ) {
     let x =
         Number(keys.has('d') || keys.has('arrowright')) -
         Number(keys.has('a') || keys.has('arrowleft')),
       y =
         Number(keys.has('s') || keys.has('arrowdown')) -
         Number(keys.has('w') || keys.has('arrowup'));
+    const touchInput = portraitControls.input;
+    if (!x && !y) {
+      x = touchInput.x;
+      y = touchInput.y;
+    }
+    if (heldAttack && game.player.attackCooldown <= 0 && !game.preparingTechnique) act('attack');
     if (walk.length && !x && !y) {
       const next = walk[0],
         dx = next.x - game.player.x,
@@ -3101,7 +3412,8 @@ function frame(now: number) {
         toast('The path is blocked. Choose another way around.');
       }
     }
-    if (!sharedActionPending) game.update(dt, { x, y, run: keys.has('shift') });
+    if (!sharedActionPending || combatPending)
+      game.update(dt, { x, y, run: keys.has('shift') || touchInput.run });
     if (game.phase !== lastPhase) {
       lastPhase = game.phase;
       if (game.phase === 'lost') lost();
@@ -3168,6 +3480,8 @@ function frame(now: number) {
     playerAppearance: game.displayAppearance,
     emotes: peerEmotes,
     reducedMotion: reducedMotion.matches,
+    effectIntensity,
+    combatCues: game.actionCues,
     transfer: transferStarted
       ? Math.max(
           0.0001,
@@ -3219,6 +3533,14 @@ Object.defineProperty(window, 'stichos', {
         residentActivities: [...game.residentActivities],
         appMode: appMode(),
         viewport: mobileViewport.diagnostics,
+        portraitControls: portraitControls.diagnostics,
+        touchControls: portraitControls.diagnostics,
+        combatFeedback: renderer.feedbackDiagnostics,
+        techniques: game.techniques,
+        expeditions: game.expeditions,
+        expeditionProgress: game.expeditionProgress,
+        actionCues: game.actionCues,
+        dodgeCooldown: game.dodgeCooldown,
         audio: audio.getDiagnostics(),
         voice: experience.voice.snapshot,
         paused,

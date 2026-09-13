@@ -4,6 +4,7 @@ import type { Appearance, Point } from './types.ts';
 import type { WorldGeneration } from './world.ts';
 import type { SharedCombatFrame, SharedCombatProgression } from './shared-combat.ts';
 import type { SignedRoomCheckpoint, RoomHelloProof } from './room-checkpoint.ts';
+import type { TechniqueId } from './combat-techniques.ts';
 
 export const MULTIPLAYER_PROTOCOL = 3 as const;
 export const MAX_ROOM_PLAYERS = 8;
@@ -61,6 +62,7 @@ export type MultiplayerClientMessage =
       room?: string;
       publicWorld?: boolean;
       livingWorld?: 1;
+      actionExpansion?: 1;
       seed: number;
       generation: WorldGeneration;
       name: string;
@@ -86,6 +88,13 @@ export type MultiplayerClientMessage =
       name?: string;
     }
   | { type: 'combat'; requestId: string; kind: 'attack' | 'ward'; heading: number }
+  | {
+      type: 'combat';
+      requestId: string;
+      kind: 'technique';
+      technique: TechniqueId;
+      heading: number;
+    }
   | { type: 'combat'; requestId: string; kind: 'parley'; guardIds: string[] }
   | { type: 'combat_ack'; eventId: number }
   | {
@@ -111,6 +120,7 @@ export type MultiplayerServerMessage =
       type: 'welcome';
       voice?: VoiceCapability;
       living?: FaunaFrame;
+      actionExpansion?: 1;
       protocol: typeof MULTIPLAYER_PROTOCOL;
       room: string;
       peerId: string;

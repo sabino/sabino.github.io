@@ -4,6 +4,7 @@ import type { RoomTransport } from './peer-transport';
 import { PEER_CONNECT_TIMEOUT, peerFailure, type PeerNetworkDiagnostic } from './peer-network.ts';
 import type { SharedCombatFrame } from './shared-combat';
 import type { SharedCombatProgression } from './shared-combat';
+import { ACTION_EXPANSION, type TechniqueId } from './combat-techniques.ts';
 import { MULTIPLAYER_PROTOCOL } from './multiplayer-protocol.ts';
 import type {
   ClientMessage,
@@ -43,6 +44,7 @@ export interface RoomIdentity {
   progression?: SharedCombatProgression;
 }
 export class MultiplayerConnection {
+  actionExpansion = false;
   private socket: RoomTransport | WebSocket | null = null;
   voiceCapability: VoiceCapability | null = null;
   onVoiceSessionChange: () => void = () => {};
@@ -76,6 +78,7 @@ export class MultiplayerConnection {
     });
   }
   private clearVoiceSession() {
+    this.actionExpansion = false;
     this.voiceCapability = null;
     this.livingClock = null;
     for (const r of this.voiceRequests.values()) {
@@ -232,6 +235,7 @@ export class MultiplayerConnection {
         this.send({
           type: 'join',
           livingWorld: 1,
+          actionExpansion: ACTION_EXPANSION,
           protocol: MULTIPLAYER_PROTOCOL,
           ...identity,
           room: forceHost && !hostedRestore ? undefined : room || undefined,
@@ -280,6 +284,7 @@ export class MultiplayerConnection {
               ? message.voice
               : null;
           this.room = message.room;
+          this.actionExpansion = message.actionExpansion === ACTION_EXPANSION;
           this.peerId = message.peerId;
           this.resumeToken = message.resumeToken;
           this.persistCredential();
@@ -631,6 +636,14 @@ export class MultiplayerConnection {
   }
   combat(kind: 'attack' | 'ward', heading: number) {
     return this.request({ type: 'combat', requestId: '', kind, heading });
+  }
+  technique(technique: TechniqueId, heading: number) {
+    if (!this.actionExpansion)
+      return Promise.resolve({
+        ok: false,
+        reason: 'This room runs an earlier build. Ordinary attacks and wards still work.',
+      });
+    return this.request({ type: 'combat', requestId: '', kind: 'technique', technique, heading });
   }
   parley(guardIds: string[]) {
     return this.request({ type: 'combat', requestId: '', kind: 'parley', guardIds });

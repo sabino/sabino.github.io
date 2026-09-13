@@ -4,6 +4,21 @@ import { createProgression, skillBonuses } from './progression.ts';
 import type { Appearance, Npc, Point } from './types.ts';
 import type { InfiniteWorld } from './world.ts';
 import { STOP_SPACING } from './world.ts';
+import {
+  techniqueById,
+  techniquesFor,
+  techniqueContains,
+  techniqueAngles,
+  type TechniqueId,
+} from './combat-techniques.ts';
+import { ExpeditionCatalog, expeditionTechniqueBonus, type Attunement } from './expeditions.ts';
+import {
+  encounterPattern,
+  encounterContains,
+  encounterSteering,
+  type EncounterPattern,
+} from './encounter-patterns.ts';
+import { worldTimeAt } from './world-time.ts';
 
 export interface SharedCombatPeer extends Point {
   id: string;
@@ -17,6 +32,7 @@ export interface SharedCombatProgression {
   level: number;
   combatXp: number;
   upgrade: number;
+  attunement?: Attunement;
 }
 export interface SharedIntent {
   kind: 'slash' | 'arrow';
@@ -27,6 +43,8 @@ export interface SharedIntent {
   color: string;
   targetId: string;
   damage: number;
+  shape?: 'cone' | 'line' | 'radial' | 'volley';
+  angles?: number[];
 }
 export interface SharedEnemy extends Npc {
   intent?: SharedIntent;
@@ -44,6 +62,21 @@ export interface SharedProjectile extends Point {
   artifactDesign?: string;
   actorBodyId?: string;
   strikeId?: number;
+  /** Optional additive mechanics; legacy arrows omit these fields. */
+  pierce?: number;
+  struck?: string[];
+  stagger?: number;
+  technique?: TechniqueId;
+  attunement?: Attunement;
+}
+export interface SharedCast extends Point {
+  id: number;
+  actorId: string;
+  bodyId?: string;
+  technique: TechniqueId;
+  heading: number;
+  remaining: number;
+  duration: number;
 }
 export interface SharedCombatHit {
   id: number;
@@ -58,6 +91,8 @@ export interface SharedCombatHit {
   actorBodyId?: string;
   targetBodyId?: string;
   strikeId?: number;
+  technique?: TechniqueId;
+  renewal?: boolean;
 }
 export interface SharedCombatDeath {
   id: number;
@@ -72,6 +107,18 @@ export interface SharedCombatSnapshot {
   projectiles: SharedProjectile[];
   dead: string[];
   peaceful: string[];
+  casts?: SharedCast[];
+  releases?: SharedCast[];
+  encounterReleases?: SharedEncounterRelease[];
+}
+export interface SharedEncounterRelease extends Point {
+  id: number;
+  actorId: string;
+  heading: number;
+  range: number;
+  shape: EncounterPattern['shape'];
+  color: string;
+  remaining: number;
 }
 export interface SharedCombatFrame {
   snapshot: SharedCombatSnapshot;
@@ -88,6 +135,7 @@ export interface SharedCombatCheckpoint {
   serial: number;
   contributors: [string, string[]][];
   cooldowns: [string, { attack: number; ward: number }][];
+  techniqueCooldowns?: [string, number][];
 }
 export function validSharedCombatCheckpoint(v: unknown): v is SharedCombatCheckpoint {
   if (
@@ -114,6 +162,13 @@ export function validSharedCombatCheckpoint(v: unknown): v is SharedCombatCheckp
       return false;
   }
   return (
+    (v.techniqueCooldowns === undefined ||
+      boundedArray(
+        v.techniqueCooldowns,
+        128,
+        (row) =>
+          Array.isArray(row) && row.length === 2 && text(row[0], 340) && finite(row[1], 0, 30000),
+      )) &&
     unique(v.records.map((n) => n.id)) &&
     v.contributors.every(
       (row) =>
@@ -195,6 +250,10 @@ const appearance = (v: unknown) =>
   typeof v.cloak === 'boolean' &&
   ['staff', 'sword', 'bow', 'none'].includes(v.weapon as string);
 const benefits = (v: Record<string, unknown>) =>
+  (v.technique === undefined || !!techniqueById(v.technique)) &&
+  (v.renewal === undefined || typeof v.renewal === 'boolean') &&
+  (v.attunement === undefined ||
+    ['momentum', 'precision', 'renewal'].includes(v.attunement as string)) &&
   (v.effect === undefined || ['stagger', 'breath', 'warmth'].includes(v.effect as string)) &&
   (v.artifactDesign === undefined || design(v.artifactDesign)) &&
   optionalText(v.actorBodyId) &&
@@ -214,7 +273,9 @@ export function validSharedCombatProgression(value: unknown): value is SharedCom
     object(value) &&
     integer(value.level, 1, 50) &&
     integer(value.combatXp, 0, 1000000) &&
-    integer(value.upgrade, 0, 3)
+    integer(value.upgrade, 0, 3) &&
+    (value.attunement === undefined ||
+      ['momentum', 'precision', 'renewal'].includes(value.attunement as string))
   );
 }
 /** Constant shape checks only: no world generation, rendering, mutation, or simulation. */
@@ -222,6 +283,57 @@ export function validSharedCombatFrame(value: unknown): value is SharedCombatFra
   try {
     if (!object(value) || !object(value.snapshot)) return false;
     const s = value.snapshot;
+    if (
+      s.encounterReleases !== undefined &&
+      !boundedArray(
+        s.encounterReleases,
+        16,
+        (c) =>
+          point(c) &&
+          integer(c.id, 1) &&
+          text(c.actorId) &&
+          finite(c.heading, -1e6, 1e6) &&
+          finite(c.range, 0, 16) &&
+          ['cone', 'volley', 'line', 'radial'].includes(c.shape as string) &&
+          color(c.color) &&
+          finite(c.remaining, 0, 0.35),
+      )
+    )
+      return false;
+    if (
+      s.casts !== undefined &&
+      !boundedArray(
+        s.casts,
+        8,
+        (c) =>
+          point(c) &&
+          integer(c.id, 1) &&
+          text(c.actorId) &&
+          optionalText(c.bodyId) &&
+          !!techniqueById(c.technique) &&
+          finite(c.heading, -1e6, 1e6) &&
+          finite(c.duration, 0, 2) &&
+          finite(c.remaining, 0, c.duration),
+      )
+    )
+      return false;
+    if (
+      s.releases !== undefined &&
+      !boundedArray(
+        s.releases,
+        16,
+        (c) =>
+          point(c) &&
+          integer(c.id, 1) &&
+          text(c.actorId) &&
+          optionalText(c.bodyId) &&
+          !!techniqueById(c.technique) &&
+          finite(c.heading, -1e6, 1e6) &&
+          finite(c.duration, 0, 2) &&
+          finite(c.remaining, 0, c.duration),
+      )
+    )
+      return false;
     if (
       !integer(s.seq) ||
       !boundedArray(s.enemies, 512, (n) => {
@@ -240,7 +352,8 @@ export function validSharedCombatFrame(value: unknown): value is SharedCombatFra
           !finite(n.heading, -1e6, 1e6) ||
           !finite(n.phase, 0, Number.MAX_SAFE_INTEGER) ||
           typeof n.hostile !== 'boolean' ||
-          !finite(n.cooldown, 0, 30)
+          !finite(n.cooldown, 0, 30) ||
+          (n.stagger !== undefined && !finite(n.stagger, 0, 3))
         )
           return false;
         if (n.intent === undefined) return true;
@@ -254,7 +367,10 @@ export function validSharedCombatFrame(value: unknown): value is SharedCombatFra
           finite(i.range, 0, 32) &&
           color(i.color) &&
           text(i.targetId) &&
-          finite(i.damage, 0, 1000)
+          finite(i.damage, 0, 1000) &&
+          (i.shape === undefined ||
+            ['cone', 'line', 'radial', 'volley'].includes(i.shape as string)) &&
+          (i.angles === undefined || boundedArray(i.angles, 3, (a) => finite(a, -1, 1)))
         );
       }) ||
       !unique(s.enemies.map((n) => (n as { id: string }).id))
@@ -274,6 +390,9 @@ export function validSharedCombatFrame(value: unknown): value is SharedCombatFra
           finite(p.speed, 0.1, 32) &&
           finite(p.damage, 0, 1000) &&
           color(p.color) &&
+          (p.pierce === undefined || integer(p.pierce, 1, 3)) &&
+          (p.struck === undefined || boundedArray(p.struck, 3, (id) => text(id))) &&
+          (p.stagger === undefined || finite(p.stagger, 0, 3)) &&
           benefits(p),
       ) ||
       !unique(s.projectiles.map((p) => (p as { id: number }).id))
@@ -348,6 +467,13 @@ export class SharedCombat {
   private projectiles: SharedProjectile[] = [];
   private peers: SharedCombatPeer[] = [];
   private cooldowns = new Map<string, { attack: number; ward: number }>();
+  private techniqueCooldowns = new Map<string, number>();
+  private casts = new Map<
+    string,
+    { cast: SharedCast; peer: SharedCombatPeer; profile: CombatProfile }
+  >();
+  private releases: SharedCast[] = [];
+  private encounterReleases: SharedEncounterRelease[] = [];
   private profiles = new Map<string, CombatProfile>();
   private opened: ReadonlySet<string> = new Set();
   private collisionRemoved = new Set<string>();
@@ -361,6 +487,8 @@ export class SharedCombat {
   private readonly maxRecords: number;
   private readonly world: CombatWorld;
   private readonly removed: Set<string>;
+  private readonly expeditions?: ExpeditionCatalog;
+  private worldElapsed = 0;
 
   constructor(
     world: CombatWorld,
@@ -368,10 +496,21 @@ export class SharedCombat {
     options: { now?: () => number; maxEnemies?: number; maxRecords?: number } = {},
   ) {
     this.world = world;
+    if ('seed' in world && 'settlementsAround' in world)
+      this.expeditions = new ExpeditionCatalog(world as InfiniteWorld);
     this.removed = removed;
     this.now = options.now ?? Date.now;
     this.maxEnemies = Math.floor(clamp(options.maxEnemies ?? 256, 1, 512));
     this.maxRecords = Math.floor(clamp(options.maxRecords ?? 2048, 1, 16384));
+  }
+  setWorldTime(elapsedSeconds: number) {
+    if (Number.isFinite(elapsedSeconds) && elapsedSeconds >= 0) this.worldElapsed = elapsedSeconds;
+  }
+  private enemiesAround(x: number, y: number, radius: number) {
+    return [
+      ...this.world.npcsAround(x, y, radius),
+      ...(this.expeditions?.enemiesAround(x, y, radius) ?? []),
+    ];
   }
 
   snapshot(): SharedCombatSnapshot {
@@ -381,19 +520,32 @@ export class SharedCombat {
       projectiles: this.projectiles.map(copy),
       dead: [...this.dead].sort(),
       peaceful: [...this.peaceful].sort(),
+      ...(this.casts.size ? { casts: [...this.casts.values()].map((v) => copy(v.cast)) } : {}),
+      ...(this.releases.length ? { releases: this.releases.map(copy) } : {}),
+      ...(this.encounterReleases.length
+        ? { encounterReleases: this.encounterReleases.map(copy) }
+        : {}),
     };
   }
 
   /** Trusted authority persistence; never accepted as a client combat command. */
   checkpoint(): SharedCombatCheckpoint {
+    const snapshot = this.snapshot();
+    delete snapshot.casts;
+    delete snapshot.releases;
+    delete snapshot.encounterReleases;
     return {
-      snapshot: this.snapshot(),
+      snapshot,
       records: [...this.records.values()].map(copy),
       serial: this.serial,
       contributors: [...this.contributors].map(([id, peers]) => [id, [...peers]]),
       cooldowns: [...this.cooldowns].map(([id, c]) => [
         id,
         { attack: Math.max(0, c.attack - this.now()), ward: Math.max(0, c.ward - this.now()) },
+      ]),
+      techniqueCooldowns: [...this.techniqueCooldowns].map(([id, until]) => [
+        id,
+        Math.max(0, until - this.now()),
       ]),
     };
   }
@@ -417,6 +569,13 @@ export class SharedCombat {
       ]),
     );
     this.discovery = 0;
+    // In-flight preparation is interrupted by a restart, but its paid recovery is retained.
+    this.casts.clear();
+    this.releases = [];
+    this.encounterReleases = [];
+    this.techniqueCooldowns = new Map(
+      (value.techniqueCooldowns ?? []).map(([id, remaining]) => [id, this.now() + remaining]),
+    );
   }
 
   private frame(advance = true): SharedCombatFrame {
@@ -587,7 +746,7 @@ export class SharedCombat {
       }
     }
     for (const peer of peers)
-      for (const npc of this.world.npcsAround(peer.x, peer.y, 16)) this.load(npc);
+      for (const npc of this.enemiesAround(peer.x, peer.y, 16)) this.load(npc);
   }
 
   private recordable(id: string) {
@@ -623,6 +782,8 @@ export class SharedCombat {
     benefits?: Pick<CombatProfile, 'artifactDesign' | 'effect'> & {
       actorBodyId?: string;
       strikeId?: number;
+      technique?: TechniqueId;
+      renewal?: boolean;
     },
   ) {
     if (npc.hp <= 0 || !npc.hostile || this.dead.has(npc.id) || !this.recordable(npc.id))
@@ -631,6 +792,7 @@ export class SharedCombat {
     npc.hp = Math.max(0, npc.hp - amount);
     delete npc.intent;
     npc.cooldown = Math.max(npc.cooldown, benefits?.effect === 'stagger' ? 1.35 : 0.35);
+    if (benefits?.effect === 'stagger') npc.stagger = Math.max(npc.stagger ?? 0, 1.35);
     const contributors = this.contributors.get(npc.id) ?? new Set<string>();
     contributors.add(actorId);
     while (contributors.size > 32) contributors.delete(contributors.values().next().value!);
@@ -648,6 +810,8 @@ export class SharedCombat {
       ...(benefits?.actorBodyId ? { actorBodyId: benefits.actorBodyId } : {}),
       targetBodyId: npc.id,
       ...(benefits?.strikeId ? { strikeId: benefits.strikeId } : {}),
+      ...(benefits?.technique ? { technique: benefits.technique } : {}),
+      ...(benefits?.renewal ? { renewal: true } : {}),
     });
     if (npc.hp <= 0) {
       this.dead.add(npc.id);
@@ -672,6 +836,7 @@ export class SharedCombat {
     kind: 'attack' | 'ward' = 'attack',
   ): SharedCombatResult {
     this.refreshCollision();
+    if (this.casts.has(peer.id)) return this.result(false, 'Finish preparing the technique first.');
     if (
       !this.validPeer(peer) ||
       !Number.isFinite(heading) ||
@@ -709,7 +874,7 @@ export class SharedCombat {
       return this.result(false, 'Too many combat identities in this room.');
     cooldown[kind] = now + (kind === 'ward' ? 8000 : profile.cooldown * 1000);
     this.cooldowns.set(peer.id, cooldown);
-    for (const npc of this.world.npcsAround(peer.x, peer.y, 16)) this.load(npc);
+    for (const npc of this.enemiesAround(peer.x, peer.y, 16)) this.load(npc);
     const range = kind === 'ward' ? 2.7 : profile.range;
     const color = kind === 'ward' ? '#9abde9' : profile.color;
     const strikeId = ++this.serial;
@@ -765,6 +930,144 @@ export class SharedCombat {
       }
     }
     return this.result(true);
+  }
+
+  /** Only called after the room negotiated the additive action capability. */
+  technique(peer: SharedCombatPeer, heading: number, id: TechniqueId): SharedCombatResult {
+    this.refreshCollision();
+    const technique = techniqueById(id);
+    if (!technique || !this.validPeer(peer) || !finite(heading, -1e6, 1e6))
+      return this.result(false, 'Invalid technique intent.');
+    let profile: CombatProfile;
+    try {
+      profile = this.profile(peer.appearance, peer.progression);
+    } catch {
+      return this.result(false, 'Equip an owned implement.');
+    }
+    if (
+      !techniquesFor(
+        peer.appearance.weapon,
+        peer.appearance.artifactDesign ? profile.delivery : undefined,
+      ).some((t) => t.id === id) ||
+      (peer.progression?.level ?? 1) < technique.level
+    )
+      return this.result(false, 'This body has not learned that weapon technique.');
+    const now = this.now(),
+      key = `${peer.id}:${peer.bodyId ?? ''}:${id}`;
+    if (!Number.isFinite(now)) return this.result(false, 'Authority clock unavailable.');
+    for (const [k, until] of this.techniqueCooldowns)
+      if (until <= now) this.techniqueCooldowns.delete(k);
+    if (
+      this.casts.has(peer.id) ||
+      now < (this.cooldowns.get(peer.id)?.attack ?? 0) ||
+      now < (this.techniqueCooldowns.get(key) ?? 0)
+    )
+      return this.result(false, 'The technique is still recovering.');
+    if (
+      this.casts.size >= 8 ||
+      (!this.techniqueCooldowns.has(key) && this.techniqueCooldowns.size >= 128)
+    )
+      return this.result(false, 'The room is busy resolving techniques.');
+    if (this.projectiles.length + (technique.pattern === 'fan' ? 3 : 1) > 128)
+      return this.result(false, 'Too many projectiles.');
+    this.techniqueCooldowns.set(key, now + technique.cooldown * 1000);
+    this.casts.set(peer.id, {
+      cast: {
+        id: ++this.serial,
+        actorId: peer.id,
+        ...(peer.bodyId ? { bodyId: peer.bodyId } : {}),
+        x: peer.x,
+        y: peer.y,
+        heading,
+        technique: id,
+        remaining: technique.windup,
+        duration: technique.windup,
+      },
+      peer: copy(peer),
+      profile,
+    });
+    return this.result(true);
+  }
+
+  private releaseTechnique(value: {
+    cast: SharedCast;
+    peer: SharedCombatPeer;
+    profile: CombatProfile;
+  }) {
+    const { cast, peer, profile } = value,
+      technique = techniqueById(cast.technique)!;
+    this.releases.push({ ...cast, duration: 0.35, remaining: 0.35 });
+    this.releases = this.releases.slice(-16);
+    for (const npc of this.enemiesAround(cast.x, cast.y, 16)) this.load(npc);
+    if (technique.pattern === 'fan' || technique.pattern === 'pierce') {
+      for (const heading of techniqueAngles(technique, cast.heading)) {
+        if (this.projectiles.length >= 128) break;
+        this.projectiles.push({
+          id: ++this.serial,
+          actorId: peer.id,
+          actorBodyId: peer.bodyId,
+          owner: 'peer',
+          x: cast.x,
+          y: cast.y,
+          heading,
+          speed: 12,
+          remaining: technique.radius,
+          damage: Math.round(profile.damage * technique.multiplier),
+          color: technique.color,
+          effect: profile.effect,
+          artifactDesign: profile.artifactDesign,
+          strikeId: cast.id,
+          pierce: technique.targets,
+          struck: [],
+          stagger: technique.stagger,
+          technique: technique.id,
+          attunement: peer.progression?.attunement,
+        });
+      }
+    } else {
+      const targets = [...this.enemies.values()]
+        .filter(
+          (n) =>
+            n.hp > 0 &&
+            n.hostile &&
+            techniqueContains(technique, cast, n, cast.heading) &&
+            this.lineOfSight(cast, n),
+        )
+        .sort((a, b) => distance(cast, a) - distance(cast, b) || a.id.localeCompare(b.id))
+        .slice(0, technique.targets);
+      for (const npc of targets) {
+        const bonus = expeditionTechniqueBonus(
+          peer.progression?.attunement,
+          false,
+          (npc.stagger ?? 0) > 0,
+        );
+        const hit = this.damage(
+          npc,
+          Math.round(profile.damage * technique.multiplier * bonus.damageMultiplier),
+          peer.id,
+          technique.pattern === 'radial' ? 'ward' : 'slash',
+          technique.color,
+          {
+            ...profile,
+            actorBodyId: peer.bodyId,
+            strikeId: cast.id,
+            technique: technique.id,
+            renewal: peer.progression?.attunement === 'renewal',
+          },
+        );
+        if (hit && npc.hp > 0) {
+          npc.cooldown = Math.max(npc.cooldown, technique.stagger);
+          npc.stagger = Math.max(npc.stagger ?? 0, technique.stagger);
+          const d = Math.max(0.01, distance(cast, npc));
+          this.move(
+            npc,
+            ((npc.x - cast.x) / d) * technique.knockback,
+            ((npc.y - cast.y) / d) * technique.knockback,
+          );
+          this.records.set(npc.id, copy(npc));
+        }
+      }
+    }
   }
 
   /** Caller pays the campaign medicine/food cost only after this geometric truce is accepted. */
@@ -845,14 +1148,47 @@ export class SharedCombat {
   }
 
   private step(dt: number) {
+    for (const release of this.releases) release.remaining = Math.max(0, release.remaining - dt);
+    this.releases = this.releases.filter((r) => r.remaining > 0);
+    for (const release of this.encounterReleases)
+      release.remaining = Math.max(0, release.remaining - dt);
+    this.encounterReleases = this.encounterReleases.filter((r) => r.remaining > 0);
+    for (const [id, value] of this.casts) {
+      const current = this.peers.find((p) => p.id === id && p.bodyId === value.peer.bodyId);
+      if (!current || distance(current, value.cast) > 0.65) {
+        this.casts.delete(id);
+        continue;
+      }
+      value.cast.remaining = Math.max(0, value.cast.remaining - dt);
+      if (value.cast.remaining === 0) {
+        this.casts.delete(id);
+        this.releaseTechnique(value);
+      }
+    }
     for (const npc of this.enemies.values()) {
       if (npc.hp <= 0 || this.removed.has(npc.id)) continue;
       npc.cooldown = Math.max(0, npc.cooldown - dt);
+      npc.stagger = Math.max(0, (npc.stagger ?? 0) - dt);
+      if (npc.stagger > 0) {
+        delete npc.intent;
+        continue;
+      }
       const target = npc.hostile
         ? this.peers
             .filter((p) => distance(npc, p) < 8)
             .sort((a, b) => distance(npc, a) - distance(npc, b) || a.id.localeCompare(b.id))[0]
         : undefined;
+      const special = encounterPattern(
+        npc.id,
+        npc.seed,
+        npc.hp,
+        npc.maxHp,
+        worldTimeAt(this.worldElapsed, this.expeditions?.world.seed ?? 0),
+      );
+      if (special && npc.hostile) {
+        this.stepEncounter(npc, target, special, dt);
+        continue;
+      }
       if (npc.intent) {
         const intent = npc.intent;
         intent.remaining -= dt;
@@ -973,15 +1309,127 @@ export class SharedCombat {
           }
         } else {
           const npc = [...this.enemies.values()].find(
-            (n) => n.hp > 0 && n.hostile && distance(n, arrow) < 0.4,
+            (n) =>
+              n.hp > 0 && n.hostile && !arrow.struck?.includes(n.id) && distance(n, arrow) < 0.4,
           );
           if (npc) {
-            this.damage(npc, arrow.damage, arrow.actorId, 'arrow', arrow.color, arrow);
-            arrow.remaining = 0;
+            const bonus = expeditionTechniqueBonus(arrow.attunement, false, (npc.stagger ?? 0) > 0);
+            this.damage(
+              npc,
+              Math.round(arrow.damage * bonus.damageMultiplier),
+              arrow.actorId,
+              'arrow',
+              arrow.color,
+              { ...arrow, renewal: arrow.attunement === 'renewal' },
+            );
+            if (arrow.stagger && npc.hp > 0) {
+              npc.cooldown = Math.max(npc.cooldown, arrow.stagger);
+              npc.stagger = Math.max(npc.stagger ?? 0, arrow.stagger);
+              this.records.set(npc.id, copy(npc));
+            }
+            if (arrow.pierce && arrow.pierce > 1) {
+              arrow.pierce--;
+              (arrow.struck ??= []).push(npc.id);
+            } else arrow.remaining = 0;
           }
         }
       }
     }
     this.projectiles = this.projectiles.filter((p) => p.remaining > 0);
+  }
+  private stepEncounter(
+    npc: SharedEnemy,
+    target: SharedCombatPeer | undefined,
+    pattern: EncounterPattern,
+    dt: number,
+  ) {
+    if (npc.intent) {
+      const intent = npc.intent;
+      intent.remaining -= dt;
+      npc.heading = intent.heading;
+      if (intent.remaining > 0) return;
+      delete npc.intent;
+      const locked = {
+        ...pattern,
+        shape: intent.shape ?? pattern.shape,
+        range: intent.range,
+        damage: intent.damage,
+      };
+      this.encounterReleases.push({
+        id: ++this.serial,
+        actorId: npc.id,
+        x: npc.x,
+        y: npc.y,
+        heading: intent.heading,
+        range: intent.range,
+        shape: locked.shape,
+        color: intent.color,
+        remaining: 0.35,
+      });
+      this.encounterReleases = this.encounterReleases.slice(-16);
+      if (locked.shape === 'volley') {
+        for (const offset of intent.angles ?? [0]) {
+          if (this.projectiles.length >= 128) break;
+          this.projectiles.push({
+            id: ++this.serial,
+            actorId: npc.id,
+            actorBodyId: npc.id,
+            owner: 'npc',
+            x: npc.x,
+            y: npc.y,
+            heading: intent.heading + offset,
+            remaining: intent.range,
+            speed: 7,
+            damage: intent.damage,
+            color: intent.color,
+          });
+        }
+      } else
+        for (const peer of this.peers)
+          if (encounterContains(locked, npc, peer, intent.heading) && this.lineOfSight(npc, peer))
+            this.hits.push({
+              id: ++this.serial,
+              actorId: npc.id,
+              actorBodyId: npc.id,
+              targetId: peer.id,
+              targetBodyId: peer.bodyId,
+              target: 'peer',
+              damage: intent.damage,
+              kind: 'slash',
+              color: intent.color,
+            });
+      return;
+    }
+    if (
+      target &&
+      distance(npc, target) <= pattern.range &&
+      this.lineOfSight(npc, target) &&
+      npc.cooldown <= 0
+    ) {
+      npc.heading = Math.atan2(target.y - npc.y, target.x - npc.x);
+      npc.cooldown = pattern.windup + pattern.recovery;
+      npc.intent = {
+        kind: pattern.shape === 'volley' ? 'arrow' : 'slash',
+        heading: npc.heading,
+        remaining: pattern.windup,
+        duration: pattern.windup,
+        range: pattern.range,
+        color: pattern.color,
+        targetId: target.id,
+        damage: pattern.damage,
+        shape: pattern.shape,
+        angles: [...pattern.angles],
+      };
+    } else {
+      const destination = target ?? npc.home;
+      const direction = target
+        ? encounterSteering(pattern, npc, target, npc.cooldown)
+        : {
+            x: (destination.x - npc.x) / Math.max(0.01, distance(npc, destination)),
+            y: (destination.y - npc.y) / Math.max(0.01, distance(npc, destination)),
+          };
+      if (distance(npc, destination) > 0.3)
+        this.move(npc, direction.x * npc.speed * dt, direction.y * npc.speed * dt);
+    }
   }
 }

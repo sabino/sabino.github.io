@@ -12,6 +12,7 @@ import { generateArtifact } from '../src/stichos/artifacts.ts';
 import { InfiniteWorld, STOP_SPACING } from '../src/stichos/world.ts';
 import { createProgression, skillBonuses } from '../src/stichos/progression.ts';
 import type { Appearance, Npc, Prop } from '../src/stichos/types.ts';
+import { techniqueById } from '../src/stichos/combat-techniques.ts';
 
 const look = (seed = 7, weapon: Appearance['weapon'] = 'sword'): Appearance => ({
   seed,
@@ -92,6 +93,67 @@ function arena(npcs: Npc[], props: Prop[] = []) {
     },
   };
 }
+
+test('room techniques prepare before damage, cancel on movement/body loss and retain recovery after restore', () => {
+  const a = arena([enemy('one', 1, 0), enemy('two', 1, 0.5)]),
+    p = { ...peer(), bodyId: 'body:one' };
+  const cast = a.combat.technique(p, 0, 'crescent');
+  assert.equal(cast.ok, true);
+  assert.equal(cast.hits.length, 0);
+  assert.equal(cast.snapshot.casts?.[0].technique, 'crescent');
+  assert.equal(validSharedCombatFrame(cast), true);
+  assert.equal(a.combat.attack(p, 0).ok, false);
+  const release = a.combat.tick(0.2, [p]);
+  assert.equal(release.hits.filter((h) => h.target === 'npc').length, 2);
+  assert.equal(a.combat.technique(p, 0, 'crescent').ok, false);
+  const saved = a.combat.checkpoint();
+  assert.equal(validSharedCombatCheckpoint(saved), true);
+  const resumed = new SharedCombat(a.world, a.removed, { now: () => 100 });
+  resumed.restore(saved);
+  assert.equal(resumed.technique(p, 0, 'crescent').ok, false);
+  const b = arena([enemy()]);
+  b.combat.technique(p, 0, 'crescent');
+  assert.equal(
+    b.combat.tick(0.2, [{ ...p, x: -1 }]).hits.filter((h) => h.target === 'npc').length,
+    0,
+  );
+  const c = arena([enemy()]);
+  c.combat.technique(p, 0, 'crescent');
+  assert.equal(
+    c.combat.tick(0.2, [{ ...p, bodyId: 'body:other' }]).hits.filter((h) => h.target === 'npc')
+      .length,
+    0,
+  );
+});
+
+test('room technique families, unlocks, walls, fixed preparation and piercing hits are authoritative', () => {
+  const a = arena([enemy('a', 2, 0), enemy('b', 3, 0), enemy('c', 4, 0)]);
+  const bow = {
+    ...peer('archer', 0, 0, 'bow'),
+    progression: { level: 4, combatXp: 0, upgrade: 0 },
+  };
+  assert.equal(a.combat.technique(peer(), 0, 'thread').ok, false);
+  assert.equal(a.combat.technique(peer('low', 0, 0, 'bow'), 0, 'thread').ok, false);
+  assert.equal(a.combat.technique(bow, NaN, 'thread').ok, false);
+  assert.equal(a.combat.technique(bow, 0, 'thread').ok, true);
+  let hits: any[] = [];
+  for (let i = 0; i < 10; i++)
+    hits.push(...a.combat.tick(0.1, [bow]).hits.filter((h) => h.target === 'npc'));
+  assert.deepEqual(
+    hits.map((h) => h.targetId),
+    ['a', 'b', 'c'],
+  );
+  assert.equal(new Set(hits.map((h) => h.strikeId)).size, 1);
+  const b = arena([enemy('behind-wall', 2, 0)]);
+  b.walls.add('1,0');
+  b.combat.technique(peer('mage', 0, 0, 'staff'), 0, 'pulse');
+  assert.equal(
+    b.combat.tick(0.25, [peer('mage', 0, 0, 'staff')]).hits.filter((h) => h.target === 'npc')
+      .length,
+    0,
+  );
+  assert.ok(techniqueById('thread')!.windup >= 0.6);
+});
 
 test('authority checkpoint restores streamed injuries, exact cooldown, launched projectile identity and sequence without resetting consequences', () => {
   const a = arena([enemy('wounded', 1, 0), enemy('far', 41, 0)]),

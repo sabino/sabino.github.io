@@ -149,7 +149,9 @@ export class ExpeditionCatalog {
     const candidates: { point: Point; score: number }[] = [];
     for (let attempt = 0; attempt < 96; attempt++) {
       const ring = Math.floor(attempt / 16);
-      const radius = Math.max(25, town.radius + 7) + ring * 3;
+      // Keep the full eight-tile encounter attention radius beyond established
+      // town-edge gatherers and legacy household resource loops.
+      const radius = Math.max(36, town.radius + 16) + ring * 3;
       const angle = initial + ((attempt % 16) - 7.5) * 0.11;
       const point = {
         x: Math.round(town.x + Math.cos(angle) * radius),
@@ -306,7 +308,14 @@ export class ExpeditionCatalog {
         description: `A discarded cultivation experiment is spreading into the ${this.world.tile(site.x, site.y).biome}. Armed keepers are defending it while ${giver.name} tries to protect food plants and grazing grounds. Stop the keepers, then deliver salve and breathing leaves for the injured field workers.`,
       },
     }[kind];
-    let artifactDesign = `${id}:reward`;
+    // Verified reserve blueprints guarantee the advertised physical delivery even
+    // when a bounded addressed search finds none. This never changes old designs.
+    const reserves: Record<string, readonly number[]> = {
+      contact: [15, 20, 31, 41, 78, 82, 104, 116],
+      projectile: [0, 6, 10, 11, 18, 27, 28, 34],
+      pulse: [2, 3, 12, 40, 42, 56, 69, 70],
+    };
+    let artifactDesign = `Field commission ${definitions.weapon} reserve ${reserves[definitions.weapon][seed % 8]}`;
     // Search a bounded addressed sequence for a genuine existing generated implement, never a fake stat label.
     for (let attempt = 0; attempt < 64; attempt++) {
       const design = `Expedition ${seed.toString(36)} ${kind} ${attempt}`;

@@ -6,7 +6,7 @@ export const RELEASE_NOTES: readonly AnnouncementEntry[] = [
     id: 'portrait-action-preview-1',
     version: '0.1.0',
     date: '2026-09-12',
-    title: 'News from across the universe',
+    title: 'Take the field',
     status: 'development',
     changes: [
       {
@@ -17,7 +17,27 @@ export const RELEASE_NOTES: readonly AnnouncementEntry[] = [
       {
         category: 'Improved',
         description:
-          'A quiet unread marker remembers what you have opened on this browser. Read once, then get back to your life.',
+          'Portrait play has a two-thumb movement stick, held strikes, weapon techniques and quick steps. Mirror the controls or use direction buttons in settings.',
+      },
+      {
+        category: 'New',
+        description:
+          'Six weapon techniques add sweeping strikes, piercing flights and botanical pulses. Second techniques unlock at level four; movement can interrupt preparation.',
+      },
+      {
+        category: 'New',
+        description:
+          'Find Field expeditions in More: clear a provision road, confront a relay warden or investigate a troubled garden. Bring supplies back for generated equipment and one of three combat lessons.',
+      },
+      {
+        category: 'Improved',
+        description:
+          'Readable enemy warnings, weapon trails, hit reactions and brief loot effects give actions weight. Effect intensity and reduced motion keep the field clear.',
+      },
+      {
+        category: 'Fixed',
+        description:
+          'Movement continues while shared attacks are acknowledged. Leaving a room cancels prepared attacks, and older rooms keep their existing combat controls.',
       },
     ],
     evidence: [],

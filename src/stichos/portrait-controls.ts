@@ -59,8 +59,20 @@ export interface PortraitControlState {
   interactLabel?: string;
   charge?: number;
   techniques?: [
-    { label: string; cooldown: number; unlocked: boolean; lockedReason?: string },
-    { label: string; cooldown: number; unlocked: boolean; lockedReason?: string },
+    {
+      label: string;
+      shortLabel?: string;
+      cooldown: number;
+      unlocked: boolean;
+      lockedReason?: string;
+    },
+    {
+      label: string;
+      shortLabel?: string;
+      cooldown: number;
+      unlocked: boolean;
+      lockedReason?: string;
+    },
   ];
 }
 const fraction = (n: number | undefined) => Math.max(0, Math.min(1, Number.isFinite(n) ? n! : 0));
@@ -304,7 +316,7 @@ export function mountPortraitControls(
       for (const [index, technique] of state.techniques.entries()) {
         const action = `technique-${index + 1}` as PortraitAction;
         const button = actionButtons.get(action)!;
-        const label = technique.label;
+        const label = technique.shortLabel ?? technique.label;
         button.querySelector<HTMLElement>('.v-control-label')!.textContent = label;
         button.setAttribute(
           'aria-label',

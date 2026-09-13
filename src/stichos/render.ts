@@ -82,6 +82,7 @@ export class StichosRenderer {
   private reducedMotion = false;
   private combatFeedback = new CombatFeedback();
   private cameraImpulse: Point = { x: 0, y: 0 };
+  private canopySubjects: (Point & { worldY: number })[] = [];
   get feedbackDiagnostics() {
     return this.combatFeedback.diagnostics;
   }
@@ -173,7 +174,7 @@ export class StichosRenderer {
     this.actorActions.clear();
     const motionActors = [
       { id: '$player', bodyId: game.bodyId, x: game.player.x, y: game.player.y, player: true },
-      ...game.npcs
+      ...[...game.npcs, ...game.defeatedVisuals]
         .filter((n) => n.id !== game.occupiedNpcId)
         .map((n) => ({ id: n.id, x: n.x, y: n.y, player: false })),
     ];
@@ -238,7 +239,7 @@ export class StichosRenderer {
           heading: peer.heading,
           weapon: peer.appearance.weapon,
         })),
-        ...game.npcs
+        ...[...game.npcs.filter((n) => n.hp > 0), ...game.defeatedVisuals]
           .filter(
             (npc) =>
               npc.id !== game.occupiedNpcId &&
@@ -260,6 +261,27 @@ export class StichosRenderer {
     // Quantized camera preserves crisp pixel clusters without resampling the art.
     this.camera.x = Math.round(this.camera.x * unit) / unit;
     this.camera.y = Math.round(this.camera.y * unit) / unit;
+    // Project once per frame, not once per tree. Only nearby live threats and
+    // companions reveal their silhouette through vegetation; walls stay opaque.
+    this.canopySubjects = [
+      game.player,
+      ...game.npcs
+        .filter(
+          (npc) =>
+            npc.hostile &&
+            npc.hp > 0 &&
+            Math.hypot(npc.x - game.player.x, npc.y - game.player.y) <= 8,
+        )
+        .sort(
+          (a, b) =>
+            Math.hypot(a.x - game.player.x, a.y - game.player.y) -
+            Math.hypot(b.x - game.player.x, b.y - game.player.y),
+        )
+        .slice(0, 16),
+      ...(options.peers ?? [])
+        .filter((peer) => Math.hypot(peer.x - game.player.x, peer.y - game.player.y) <= 8)
+        .slice(0, 8),
+    ].map((subject) => ({ ...this.worldToScreen(subject), worldY: subject.y }));
     ctx.setTransform(this.ratio, 0, 0, this.ratio, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = 1;
@@ -524,7 +546,7 @@ export class StichosRenderer {
         draw: () => drawFauna(ctx, animal, p.x, p.y, unit, this.reducedMotion),
       });
     }
-    for (const npc of game.npcs) {
+    for (const npc of [...game.npcs.filter((n) => n.hp > 0), ...game.defeatedVisuals]) {
       if (npc.id === game.occupiedNpcId) continue;
       if (
         Math.abs(npc.x - this.camera.x) > this.width / unit / 2 + 3 ||
@@ -1158,13 +1180,15 @@ export class StichosRenderer {
       y + sprite.image.height * verticalScale < -30
     )
       return;
-    const player = this.worldToScreen(game.player);
     const occludes =
       prop.kind === 'pine' &&
-      prop.y > game.player.y &&
-      Math.abs(player.x - p.x) < 42 * s &&
-      player.y > y + 15 * s &&
-      player.y < p.y + 2 * s;
+      this.canopySubjects.some(
+        (subject) =>
+          prop.y > subject.worldY &&
+          Math.abs(subject.x - p.x) < 42 * s &&
+          subject.y > y + 15 * s &&
+          subject.y < p.y + 2 * s,
+      );
     this.ctx.save();
     this.ctx.globalAlpha = occludes ? 0.32 : 1;
     this.ctx.drawImage(

@@ -20,14 +20,16 @@ function ring(ctx: CanvasRenderingContext2D, radius: number, phase: number, coun
 function groundShape(ctx: CanvasRenderingContext2D, cue: CombatCue, unit: number) {
   const r = (cue.radius ?? 1.4) * unit;
   if (cue.shape === 'line') {
-    ctx.moveTo(0, -unit * 0.16);
-    ctx.lineTo(r, -unit * 0.16);
-    ctx.lineTo(r, unit * 0.16);
-    ctx.lineTo(0, unit * 0.16);
+    const width = unit * (cue.halfWidth ?? 0.35);
+    ctx.moveTo(0, -width);
+    ctx.lineTo(r, -width);
+    ctx.lineTo(r, width);
+    ctx.lineTo(0, width);
   } else if (cue.shape === 'circle') ctx.ellipse(0, 0, r, r, 0, 0, TAU);
   else {
     ctx.moveTo(0, 0);
-    ctx.arc(0, 0, r, -0.8, 0.8);
+    const angle = cue.halfAngle ?? Math.acos(0.35);
+    ctx.arc(0, 0, r, -angle, angle);
   }
   ctx.closePath();
 }
@@ -245,6 +247,26 @@ export function drawCombatForeground(
   project: Project,
   unit: number,
 ) {
+  // Keep only the boundary above canopies. The filled danger area remains on
+  // the ground, and this essential cue also survives reduced motion/intensity 0.
+  for (const cue of feedback.activeCues) {
+    if (cue.kind !== 'telegraph' && cue.kind !== 'anticipation') continue;
+    const p = project(cue);
+    ctx.save();
+    ctx.translate(Math.round(p.x), Math.round(p.y));
+    ctx.rotate(cue.heading ?? 0);
+    ctx.beginPath();
+    groundShape(ctx, cue, unit);
+    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = '#182d32';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.strokeStyle = '#f0bd86';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
   for (const cue of feedback.activeCues) drawCue(ctx, cue, feedback, project, unit);
   if (feedback.settings.reducedMotion || feedback.settings.intensity === 0) return;
   ctx.save();
