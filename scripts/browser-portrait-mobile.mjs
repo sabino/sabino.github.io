@@ -26,16 +26,22 @@ export async function verifyPortraitMobile({ endpoint, url, out }) {
       await page.resize(width, height);
       const layout = await page.read(`(() => {
         const pane=document.querySelector('.v-portrait-controls');
-        const nodes=[...pane.querySelectorAll('button')];
-        return { coarse:matchMedia('(pointer: coarse)').matches,
+        const nodes=[...pane.querySelectorAll('button')].filter(e=>!e.closest('[hidden]'));
+        const required=['.v-joystick-surface','[data-portrait-action=interact]','[data-portrait-action=attack]','[data-portrait-action=dodge]','[data-travel=pace]','[data-travel=options]'];
+        return { requiredVisible:required.every(selector=>pane.querySelector(selector)?.checkVisibility({visibilityProperty:true})), coarse:matchMedia('(pointer: coarse)').matches,
           gate:!document.querySelector('.v-portrait-gate').hidden,
           width:document.documentElement.scrollWidth,
           world:document.querySelector('.s-world-wrap').getBoundingClientRect().toJSON(),
           buttons:nodes.map(e=>{const r=e.getBoundingClientRect();return {
-            label:e.getAttribute('aria-label'),rect:r.toJSON(),
+            label:e.getAttribute('aria-label')||e.textContent.trim(),rect:r.toJSON(),
             reachable:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))
           }})};
       })()`);
+      assert.equal(
+        layout.requiredVisible,
+        true,
+        `${width}: movement, combat, pace and travel controls remain visible`,
+      );
       assert.equal(layout.coarse, true);
       assert.equal(layout.gate, false);
       assert.ok(layout.width <= width, `${width}: no horizontal overflow`);
@@ -61,6 +67,23 @@ export async function verifyPortraitMobile({ endpoint, url, out }) {
       await shot(page, `${width}x${height}-exploration`);
     }
     await page.resize(390, 844);
+    await page.click('[data-travel="options"]');
+    const travelOptions = await page.read(
+      `Array.from(document.querySelectorAll('#v-travel-options button')).map(e=>{const r=e.getBoundingClientRect();return {label:e.textContent.trim(),visible:e.checkVisibility({visibilityProperty:true}),width:r.width,height:r.height,reachable:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})`,
+    );
+    assert.equal(travelOptions.length, 2, 'direction lock and home remain available in Travel');
+    for (const control of travelOptions) {
+      assert.ok(
+        control.visible && control.width >= 44 && control.height >= 44 && control.reachable,
+        `${control.label}: revealed travel control remains reachable`,
+      );
+    }
+    record(
+      'Travel disclosure exposes reachable automatic movement and home controls',
+      travelOptions,
+    );
+    await page.key('Escape', 'Escape', 27);
+    assert.equal(await page.read("document.querySelector('#v-travel-options').hidden"), true);
     const position = (await page.state()).player;
     const stick = await page.read(
       `document.querySelector('.v-joystick-surface').getBoundingClientRect().toJSON()`,
