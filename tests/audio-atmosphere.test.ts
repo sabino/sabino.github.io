@@ -124,6 +124,7 @@ test('only bounded personal audio preferences persist, invalid and unavailable s
     effects: DEFAULT_AUDIO_SETTINGS.effects,
     ambience: DEFAULT_AUDIO_SETTINGS.ambience,
     muted: true,
+    reducedSensory: false,
   });
   let stored = '';
   const storage = {
@@ -140,6 +141,7 @@ test('only bounded personal audio preferences persist, invalid and unavailable s
     'master',
     'music',
     'muted',
+    'reducedSensory',
   ]);
   assert.deepEqual(
     readAudioSettings({ ...storage, getItem: () => '{bad' }),

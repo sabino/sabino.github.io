@@ -27,7 +27,7 @@ test('footsteps distinguish physical terrain and built surfaces within the same 
   assert.equal(footstepMaterial(tile('grass')), 'grass');
   assert.equal(footstepMaterial(tile('snow')), 'snow');
   assert.equal(footstepMaterial(tile('sand')), 'sand');
-  assert.equal(footstepMaterial(tile('mud')), 'dirt');
+  assert.equal(footstepMaterial(tile('mud')), 'mud');
   assert.equal(footstepMaterial(tile('water')), 'water');
   assert.equal(footstepMaterial(tile('road')), 'gravel');
   assert.equal(footstepMaterial(tile('road', { site: 'town' })), 'stone');

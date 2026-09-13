@@ -1865,12 +1865,10 @@ export class LivingSystems {
       town: town ?? null,
       laws: town ? this.civic.lawsFor(town) : null,
       factions,
-      memberships: this.civic
-        .memberships(peer.id)
-        .map(({ remembered, ...membership }) => ({
-          ...membership,
-          rememberedCount: remembered.length,
-        })),
+      memberships: this.civic.memberships(peer.id).map(({ remembered, ...membership }) => ({
+        ...membership,
+        rememberedCount: remembered.length,
+      })),
       duties: factions.map((f) => this.civic.duty(peer.id, f.id, this.elapsed)).filter((d) => !!d),
       reputation: town ? this.civic.townReputation(town.id, peer.id) : null,
       guards: [...this.guardIntents]

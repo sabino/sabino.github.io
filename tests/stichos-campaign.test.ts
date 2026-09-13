@@ -14,12 +14,73 @@ import type { Point, ItemId, Prop } from '../src/stichos/types.ts';
 
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 
+/** Persistent road attackers must actually be dealt with before a long tool sequence.
+ * Streaming away no longer resets their location or makes a pursuing body disappear.
+ */
+function secureWorksite(game: Stichos) {
+  const visible = (target: Point) => {
+    const steps = Math.max(1, Math.ceil(distance(game.player, target) / 0.2));
+    for (let i = 1; i < steps; i++)
+      if (
+        game.world.blocked(
+          game.player.x + ((target.x - game.player.x) * i) / steps,
+          game.player.y + ((target.y - game.player.y) * i) / steps,
+          game.removed,
+        )
+      )
+        return false;
+    return true;
+  };
+  const threat = () =>
+    game.npcs
+      .filter(
+        (n) =>
+          n.role === 'raider' &&
+          n.hostile &&
+          n.hp > 0 &&
+          distance(n, game.player) < 8 &&
+          visible(n),
+      )
+      .sort((a, b) => distance(a, game.player) - distance(b, game.player))[0];
+  for (let encounter = 0; encounter < 8; encounter++) {
+    const attacker = threat();
+    if (!attacker) return;
+    const id = attacker.id;
+    game.equip('staff');
+    const strike = () => {
+      sustain(game);
+      const target = game.npcs.find((n) => n.id === id && n.hp > 0);
+      if (
+        target &&
+        visible(target) &&
+        distance(target, game.player) <= game.weaponProfile('staff').range
+      )
+        game.attack(target);
+    };
+    for (let frame = 0; frame < 600 && !game.removed.has(id); frame++) {
+      const target = game.npcs.find((n) => n.id === id && n.hp > 0);
+      if (!target) break;
+      if (distance(target, game.player) > game.weaponProfile('staff').range * 0.8)
+        walk(game, target, 0.9, strike);
+      strike();
+      game.update(0.05, { x: 0, y: 0, run: false });
+    }
+    assert.ok(
+      game.removed.has(id),
+      `The persistent road threat ${id} is defeated through actual combat.`,
+    );
+  }
+  assert.equal(threat(), undefined, 'The worksite has a bounded number of visible attackers.');
+}
+
 /** Finish a real finite work sequence with the appropriate carried tool. */
 function workResource(game: Stichos, prop: Prop) {
   const kind = requiredToolFor(prop.kind);
   assert.ok(kind);
   assert.ok(game.equipTool(kind).ok);
   for (let stroke = 0; stroke < 12 && !game.removed.has(prop.id); stroke++) {
+    secureWorksite(game);
+    if (distance(game.player, prop) > 1.8) walk(game, prop);
     game.interact(prop.id);
     if (game.removed.has(prop.id)) break;
     for (let tick = 0; tick < 6; tick++) game.update(0.25, { x: 0, y: 0, run: false });

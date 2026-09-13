@@ -533,7 +533,7 @@
 .v-voice-people input[type='range'] {
   min-height: 44px;
 }
-.s-window:has(.v-voice-consent) .s-window-close {
+.s-window-close {
   min-height: 44px;
   min-width: 44px;
 }

@@ -482,12 +482,28 @@ test('the actual browser client preserves gather and loot actions when given ful
   assert.ok(room.removed.has(plant.id));
   const chest = room.world.propsAround(0, 0, 30).find((p: any) => p.kind === 'chest');
   assert.ok(chest);
-  client.pose(
-    { ...adjacent(room.world, chest), heading: 0, phase: 0 },
-    appearance(42, 'pilgrim', 1),
-    true,
+  // A separate genuinely new life begins beside the chest. Do not teleport a
+  // resumed authoritative life merely to exercise the client command adapter.
+  const looter = new MultiplayerConnection();
+  t.after(() => looter.disconnect());
+  await looter.connect(
+    url,
+    {
+      seed: 3886,
+      generation: 3,
+      name: 'Loot adapter regression',
+      appearance: appearance(43, 'pilgrim', 1),
+      position: adjacent(room.world, chest),
+    },
+    client.room,
   );
-  assert.equal((await client.claim(chest.id, 'loot', chest)).ok, true);
+  [...server.hub.connections]
+    .find((c) => c.member?.id === looter.peerId)!
+    .socket.on('message', (data: Buffer) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'claim') frames.push(message);
+    });
+  assert.equal((await looter.claim(chest.id, 'loot', chest)).ok, true);
   assert.ok(room.opened.has(chest.id));
   assert.deepEqual(
     frames.map((message) => message.kind),

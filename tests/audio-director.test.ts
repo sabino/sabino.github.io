@@ -142,6 +142,21 @@ const memoryStorage = () => {
   };
 };
 
+/** Exercise one generation quantum at a time without depending on host timer scheduling. */
+function drainGenerated(director: AudioDirector): void {
+  const graph = director as unknown as {
+    generationTimer: ReturnType<typeof setTimeout> | null;
+    generateNextBuffer(): void;
+  };
+  let remaining = 512;
+  while (director.getDiagnostics().score.queuedBuffers > 0 && remaining-- > 0) {
+    if (graph.generationTimer) clearTimeout(graph.generationTimer);
+    graph.generationTimer = null;
+    graph.generateNextBuffer();
+  }
+  assert.ok(remaining > 0, 'bounded synthesis jobs must finish in a bounded number of quanta');
+}
+
 async function withAudio(
   run: (director: AudioDirector, context: () => FakeContext) => Promise<void>,
 ) {
@@ -215,7 +230,7 @@ test('spatial wildlife bounds, per-source cooldown and polyphony protect effects
   });
 });
 
-test('zones crossfade through two reusable music buses and long frames never schedule missed notes', async () => {
+test('location changes wait for a phrase boundary, crossfade reusable buses and never replay missed notes', async () => {
   await withAudio(async (director, getContext) => {
     await director.start(13);
     director.setEnvironment({ ...location, interior: true, buildingKind: 'inn' }, worldTimeAt(660));
@@ -223,23 +238,28 @@ test('zones crossfade through two reusable music buses and long frames never sch
       musicSlots: FakeNode[];
       activeMusicSlot: number;
       schedule(): void;
-      phraseStep: number;
     };
+    graph.schedule();
     const first = graph.activeMusicSlot;
-    const sourceCount = director.getDiagnostics().permanentSources;
+    assert.equal(director.getDiagnostics().score.zone, 'tavern');
     director.setEnvironment(
       { ...location, interior: true, buildingKind: 'church' },
       worldTimeAt(660),
     );
+    graph.schedule();
+    assert.equal(first, graph.activeMusicSlot, 'crossing a doorway must not restart the phrase');
+    assert.equal(director.getDiagnostics().score.zone, 'tavern');
+    getContext().advance((32 * 60) / director.getDiagnostics().score.bpm + 0.1);
+    graph.schedule();
     assert.notEqual(first, graph.activeMusicSlot);
+    assert.equal(director.getDiagnostics().score.zone, 'temple');
     assert.equal(graph.musicSlots.length, 2);
     assert.equal(graph.musicSlots[first].gain.value, 0);
     assert.equal(graph.musicSlots[graph.activeMusicSlot].gain.value, 1);
-    assert.equal(director.getDiagnostics().permanentSources, sourceCount);
     getContext().advance(3600);
-    const step = graph.phraseStep;
+    const notes = director.getDiagnostics().score.notesScheduled;
     graph.schedule();
-    assert.ok(graph.phraseStep - step <= AUDIO_LIMITS.maxCatchupNotes);
+    assert.ok(director.getDiagnostics().score.notesScheduled - notes <= 16);
     assert.ok(director.getDiagnostics().transientVoices <= AUDIO_LIMITS.transientVoices);
   });
 });
@@ -374,5 +394,161 @@ test('bow release remains an effect with music disabled and stalled ambience reg
     for (let i = 0; i < 100; i++) director.setEnvironment(location, worldTimeAt(i));
     assert.ok(calls <= 4);
     assert.ok(graph.sampleLoads.size <= 5);
+  });
+});
+
+test('composed score keeps bounded tables and voices through changing biomes without per-note PCM allocation', async () => {
+  await withAudio(async (director, getContext) => {
+    await director.start(13);
+    const graph = director as unknown as {
+      schedule(): void;
+      instrumentBuffers: Map<string, unknown>;
+    };
+    const context = getContext();
+    for (let i = 0; i < 1200; i++) {
+      director.setEnvironment(
+        { ...location, interior: i % 3 === 0, buildingKind: i % 2 ? 'inn' : 'church' },
+        worldTimeAt(i),
+      );
+      context.advance(0.1);
+      graph.schedule();
+      assert.ok(director.getDiagnostics().score.voices <= 20);
+      assert.ok(director.getDiagnostics().transientVoices <= 48);
+    }
+    assert.equal(director.getDiagnostics().score.tables, 7);
+    assert.equal(graph.instrumentBuffers.size, 0, 'score never generates the old plucked strings');
+    assert.ok(director.getDiagnostics().score.notesScheduled > 100);
+  });
+});
+
+test('species calls are rendered once in deferred tasks and pause cancels queued calls', async () => {
+  await withAudio(async (director, getContext) => {
+    await director.start(27);
+    director.playWorldEvent({
+      kind: 'predator',
+      species: 'wolf',
+      state: 'lunge',
+      distance: 2,
+      id: 'wolf-one',
+    });
+    assert.equal(director.getDiagnostics().score.queuedBuffers, 1);
+    drainGenerated(director);
+    assert.equal(director.getDiagnostics().score.generatedBuffers, 1);
+    assert.ok(director.getDiagnostics().ambienceVoices > 0);
+    getContext().advance(3);
+    director.playWorldEvent({
+      kind: 'grazer',
+      species: 'grazer',
+      state: 'flee',
+      distance: 2,
+      id: 'grazer-two',
+    });
+    director.pause(true);
+    getContext().advance(1);
+    drainGenerated(director);
+    assert.equal(
+      director.getDiagnostics().ambienceVoices,
+      0,
+      'a cancelled call must not arrive after pause',
+    );
+    assert.equal(director.getDiagnostics().score.queuedBuffers, 0);
+    assert.equal(director.getDiagnostics().score.generatedBuffers, 1);
+  });
+});
+
+test('one shared crowd gate bounds ten residents plus ambient cues to one clip per 24 seconds', async () => {
+  await withAudio(async (director, getContext) => {
+    await director.start(19);
+    const context = getContext(),
+      atlas = context.createBuffer(1, 24000 * 40, 24000);
+    const graph = director as unknown as {
+      soundBank: { get: (id: string) => unknown };
+      environmentSound(kind: string, at: number, strength: number, pan: number): void;
+    };
+    graph.soundBank.get = () => atlas;
+    director.setEnvironment(
+      {
+        ...location,
+        interior: true,
+        buildingKind: 'inn',
+        audioContext: { population: 10, crowdDistance: 1, crowdPan: 0.1 },
+      },
+      worldTimeAt(11 * 60),
+    );
+    const count = () => context.nodes.filter((node) => node.buffer === atlas && !node.loop).length;
+    for (let slice = 0; slice < 12; slice++) {
+      for (let resident = 0; resident < 10; resident++)
+        director.playWorldEvent({ kind: 'social', id: `resident-${resident}`, distance: 2 });
+      graph.environmentSound('social', context.currentTime + 0.04, 0.8, 0.1);
+      context.advance(0.5);
+    }
+    assert.equal(count(), 1);
+    context.advance(17.9);
+    graph.environmentSound('social', context.currentTime, 0.8, 0.1);
+    assert.equal(count(), 1);
+    context.advance(0.1);
+    graph.environmentSound('social', context.currentTime, 0.8, 0.1);
+    assert.equal(count(), 2);
+  });
+});
+
+test('reduced sensory makes animal and social activity quieter and less frequent', async () => {
+  await withAudio(async (director, getContext) => {
+    await director.start(19);
+    director.setSettings({ reducedSensory: true });
+    const context = getContext(),
+      atlas = context.createBuffer(1, 24000 * 40, 24000);
+    const graph = director as unknown as {
+      soundBank: { get: (id: string) => unknown };
+      environmentSound(kind: string, at: number, strength: number, pan: number): void;
+    };
+    graph.soundBank.get = () => atlas;
+    director.setEnvironment(
+      {
+        ...location,
+        interior: true,
+        buildingKind: 'inn',
+        audioContext: { population: 10, crowdDistance: 1 },
+      },
+      worldTimeAt(11 * 60),
+    );
+    const count = () => context.nodes.filter((node) => node.buffer === atlas && !node.loop).length;
+    graph.environmentSound('social', 0, 1, 0);
+    graph.environmentSound('social', 24, 1, 0);
+    assert.equal(count(), 1);
+    graph.environmentSound('social', 48, 1, 0);
+    assert.equal(count(), 2);
+    director.playWorldEvent({
+      kind: 'grazer',
+      id: 'nearby',
+      species: 'grazer',
+      state: 'curious',
+      distance: 1,
+    });
+    drainGenerated(director);
+    const once = director.getDiagnostics().score.generatedBuffers;
+    context.advance(3);
+    director.playWorldEvent({
+      kind: 'grazer',
+      id: 'nearby',
+      species: 'grazer',
+      state: 'flee',
+      distance: 1,
+    });
+    assert.equal(
+      director.getDiagnostics().score.queuedBuffers,
+      0,
+      'same animal call waits at least five seconds',
+    );
+    assert.equal(director.getDiagnostics().score.generatedBuffers, once);
+    context.advance(2);
+    director.playWorldEvent({
+      kind: 'grazer',
+      id: 'nearby',
+      species: 'grazer',
+      state: 'flee',
+      distance: 1,
+    });
+    assert.equal(director.getDiagnostics().score.queuedBuffers, 1);
   });
 });
