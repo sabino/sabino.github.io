@@ -1,0 +1,244 @@
+.expedition-panel {
+  --field-ink: #e6dec5;
+  --field-muted: #b8b49f;
+  color: var(--field-ink);
+  width: min(100%, 38rem);
+  margin-inline: auto;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.expedition-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.expedition-heading small,
+.expedition-reward > small {
+  color: #cab78a;
+  letter-spacing: 0.14em;
+  font-size: 0.66rem;
+}
+.expedition-heading h2 {
+  margin: 0.1rem 0;
+  font-size: 1.6rem;
+}
+.expedition-seal {
+  border: 1px solid #7e7255;
+  min-width: 4rem;
+  text-align: center;
+  padding: 0.45rem;
+  font-size: 1.3rem;
+}
+.expedition-seal small {
+  display: block;
+  font-size: 0.62rem;
+  letter-spacing: 0;
+}
+.expedition-intro,
+.expedition-fineprint,
+.expedition-town {
+  color: var(--field-muted);
+}
+.expedition-intro {
+  margin: 0.7rem 0 1rem;
+}
+.expedition-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+.expedition-panel button {
+  min-height: 48px;
+  touch-action: manipulation;
+  border: 1px solid #696750;
+  background: #242d2a;
+  color: var(--field-ink);
+  padding: 0.65rem;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+.expedition-panel button:focus-visible,
+.expedition-panel summary:focus-visible {
+  outline: 3px solid #f5d486;
+  outline-offset: 3px;
+}
+.expedition-tabs button {
+  text-align: center;
+  padding: 0.5rem 0.25rem;
+}
+.expedition-tabs button > span {
+  margin-right: 0.3rem;
+  color: #dbc592;
+}
+.expedition-tabs button > small {
+  display: block;
+  color: var(--field-muted);
+  font-size: 0.7rem;
+}
+.expedition-panel button[aria-current='true'],
+.expedition-panel button[aria-pressed='true'] {
+  border-color: #e4c98b;
+  background: #3c4333;
+  box-shadow: inset 0 -3px #e4c98b;
+}
+.expedition-card {
+  border: 1px solid #66634c;
+  padding: 1rem;
+  margin-top: 0.65rem;
+  background: linear-gradient(160deg, #2b342bcc, #1e2728ee);
+}
+.expedition-eyebrow {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #c9b88c;
+  font-size: 0.72rem;
+}
+.expedition-card h3 {
+  margin: 0.3rem 0;
+  font-size: 1.2rem;
+  line-height: 1.3;
+}
+.expedition-town {
+  margin: 0.35rem 0 1rem;
+  font-size: 0.75rem;
+}
+.expedition-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  gap: 0.25rem;
+}
+.expedition-steps li {
+  text-align: center;
+  color: #b8b49f;
+  font-size: 0.7rem;
+  border-bottom: 2px solid #555b4e;
+  padding-bottom: 0.45rem;
+}
+.expedition-steps span {
+  display: block;
+  margin: 0 auto 0.25rem;
+  font-size: 0.85rem;
+}
+.expedition-steps [aria-current='step'] {
+  color: #f3d89c;
+  border-color: #e0bb73;
+}
+.expedition-steps .is-done {
+  color: #afcda3;
+  border-color: #91aa7c;
+}
+.expedition-objective {
+  font-size: 0.86rem;
+  margin: 0.75rem 0;
+}
+.expedition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.expedition-actions button {
+  flex: 1 1 8rem;
+}
+.expedition-panel .expedition-deliver {
+  background: #495942;
+  border-color: #a8bb8e;
+}
+.expedition-panel button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.expedition-details {
+  margin-top: 1rem;
+  border-block: 1px solid #51584a;
+}
+.expedition-details summary {
+  min-height: 44px;
+  padding-block: 0.7rem;
+  cursor: pointer;
+  color: #d7c6a4;
+}
+.expedition-details p {
+  font-size: 0.82rem;
+  color: #c7c9b6;
+}
+.expedition-supplies h4 {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.8rem;
+  color: #d7c6a4;
+}
+.expedition-supplies ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+.expedition-supplies li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+.expedition-supplies .is-ready strong {
+  color: #b8d8a7;
+}
+.expedition-reward {
+  border-top: 1px solid #555b4b;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+}
+.expedition-reward p {
+  margin: 0.45rem 0;
+  font-size: 0.8rem;
+}
+.expedition-reward span {
+  display: block;
+  color: var(--field-muted);
+  font-size: 0.75rem;
+}
+.expedition-lesson {
+  color: #c4d6a8;
+}
+.expedition-attunements h3 {
+  font-size: 1rem;
+  margin: 1rem 0 0;
+}
+.expedition-attunements > p {
+  font-size: 0.78rem;
+  color: var(--field-muted);
+}
+.expedition-attunements button {
+  display: block;
+  width: 100%;
+  margin: 0.5rem 0;
+  text-align: left;
+}
+.expedition-attunements button small {
+  display: block;
+  font-size: 0.75rem;
+  color: #c1c5b4;
+  margin-top: 0.2rem;
+}
+.expedition-fineprint {
+  font-size: 0.7rem;
+  margin-top: 1rem;
+}
+@media (max-width: 380px) {
+  .expedition-card {
+    padding: 0.75rem;
+  }
+  .expedition-heading h2 {
+    font-size: 1.4rem;
+  }
+  .expedition-intro {
+    font-size: 0.8rem;
+  }
+  .expedition-tabs button {
+    font-size: 0.8rem;
+  }
+}
