@@ -17,7 +17,8 @@ if (
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(
   root,
-  '.dream-loop/life-offline' + (new URL(url).hostname === 'sabino.pro' ? '-public' : ''),
+  process.env.VERSO_BROWSER_OUT ||
+    '.dream-loop/life-offline' + (new URL(url).hostname === 'sabino.pro' ? '-public' : ''),
 );
 fs.mkdirSync(out, { recursive: true });
 const started = new Date(),

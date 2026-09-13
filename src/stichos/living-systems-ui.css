@@ -533,7 +533,8 @@
 .v-voice-people input[type='range'] {
   min-height: 44px;
 }
-.s-window-close {
+#s-resume,
+.s-dialog-heading .s-window-close {
   min-height: 44px;
   min-width: 44px;
 }

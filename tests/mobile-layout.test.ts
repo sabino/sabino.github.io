@@ -67,7 +67,7 @@ test(
     await verifyPortraitMobile({
       endpoint: process.env.VERSO_BROWSER_CDP,
       url: process.env.VERSO_BROWSER_URL || 'http://localhost:4197/',
-      out: '.dream-loop/portrait-expansion/responsive-test',
+      out: process.env.VERSO_BROWSER_OUT || '.dream-loop/portrait-expansion/responsive-test',
     });
   },
 );
