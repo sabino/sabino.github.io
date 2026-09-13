@@ -58,92 +58,16 @@ test('all installed display modes and iOS standalone are detected without claimi
   assert.equal(detectAppMode({ matches: (q) => q.includes('fullscreen') }).installedWindow, false);
 });
 
-// A real CSS cascade regression: 761–899px previously inherited display:none
-// from the desktop sheet even though the mobile sheet supplied pad dimensions.
-// Supply only a workspace_browser_targets-verified endpoint; no browser is launched.
+// Supply only an agent-workspace-verified endpoint; this never launches a browser.
 test(
-  'native tablet controls stay visible, reachable and correctly arranged across mobile breakpoints',
-  { skip: !process.env.VERSO_BROWSER_CDP, timeout: 90000 },
+  'native portrait controls, landscape gate and direction fallback remain reachable',
+  { skip: !process.env.VERSO_BROWSER_CDP, timeout: 180000 },
   async () => {
-    const { browserHarness, chooseLife } = await import('../scripts/browser-harness.mjs');
-    const harness = await browserHarness(
-      process.env.VERSO_BROWSER_CDP,
-      '.dream-loop/mobile-mic-realistic-audio/responsive-test',
-    );
-    try {
-      const page = await harness.page(
-        'controls',
-        process.env.VERSO_BROWSER_URL || 'http://localhost:4193/',
-        {
-          width: 768,
-          height: 1024,
-          mobile: true,
-        },
-      );
-      await chooseLife(page, 'Tablet controls QA', '8', true);
-      for (const [width, height] of [
-        [768, 1024],
-        [390, 844],
-        [844, 390],
-        [899, 1024],
-        [900, 1024],
-      ]) {
-        await page.resize(width, height);
-        const controls = await page.read(`(() => {
-          const pad = document.querySelector('.s-mobile-move');
-          return {
-            coarse: matchMedia('(pointer: coarse)').matches,
-            display: getComputedStyle(pad).display,
-            worldWidth: document.querySelector('.s-world-wrap').getBoundingClientRect().width,
-            buttons: [...pad.querySelectorAll('button')].map(e => {
-              const r = e.getBoundingClientRect(), style = getComputedStyle(e);
-              return { action: e.dataset.move, x: r.x, y: r.y, width: r.width, height: r.height,
-                column: style.gridColumnStart, row: style.gridRowStart,
-                reachable: e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)),
-                covering: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.outerHTML.slice(0, 200) };
-            })
-          };
-        })()`);
-        await page.shot(`${width}x${height}`);
-        assert.equal(controls.coarse, true, `${width}: touch emulation is active`);
-        assert.equal(controls.display, 'grid', `${width}: movement pad is displayed`);
-        assert.ok(
-          controls.worldWidth > width * 0.45,
-          `${width}: sidebar cannot consume the world viewport`,
-        );
-        assert.equal(controls.buttons.length, 5);
-        for (const button of controls.buttons) {
-          assert.ok(
-            button.width >= 44 && button.height >= 44,
-            `${width}: ${button.action} touch target`,
-          );
-          assert.ok(
-            button.x >= 0 &&
-              button.y >= 0 &&
-              button.x + button.width <= width &&
-              button.y + button.height <= height,
-            `${width}: ${button.action} remains inside viewport`,
-          );
-          assert.equal(
-            button.reachable,
-            true,
-            `${width}: ${button.action} is not covered by ${button.covering}`,
-          );
-        }
-        const byAction = Object.fromEntries(controls.buttons.map((b) => [b.action, b]));
-        assert.equal(byAction.w.column, '2');
-        assert.equal(byAction.a.column, '1');
-        assert.equal(byAction.s.column, '2');
-        assert.equal(byAction.d.column, '3');
-        assert.equal(byAction.shift.column, '3');
-        assert.equal(byAction.shift.row, '1');
-        assert.ok(
-          byAction.w.y < byAction.s.y && byAction.a.x < byAction.s.x && byAction.s.x < byAction.d.x,
-        );
-      }
-      assert.deepEqual(harness.errors, []);
-    } finally {
-      await harness.close();
-    }
+    const { verifyPortraitMobile } = await import('../scripts/browser-portrait-mobile.mjs');
+    await verifyPortraitMobile({
+      endpoint: process.env.VERSO_BROWSER_CDP,
+      url: process.env.VERSO_BROWSER_URL || 'http://localhost:4197/',
+      out: '.dream-loop/portrait-expansion/responsive-test',
+    });
   },
 );

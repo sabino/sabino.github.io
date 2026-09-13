@@ -1,0 +1,525 @@
+/* Verso's etched metal UI, arranged around two thumbs rather than a desktop hotbar. */
+.v-portrait-controls,
+.v-portrait-gate[hidden] {
+  display: none;
+}
+.v-portrait-gate {
+  position: absolute;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: max(18px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+    max(18px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  background: #102b35f5;
+  color: #eee5c9;
+  text-align: center;
+  overflow: auto;
+}
+.v-portrait-gate h2 {
+  margin: 0;
+  font-size: 23px;
+}
+.v-portrait-gate p {
+  max-width: 480px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.v-portrait-gate .v-portrait-room-note,
+.v-portrait-gate small {
+  color: #b9c9c8;
+  font-size: 12px;
+}
+.v-portrait-gate button {
+  min-height: 44px;
+  padding: 8px 16px;
+}
+.v-portrait-device {
+  width: 38px;
+  height: 58px;
+  border: 3px double #d3bd80;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+}
+.v-touch-preferences {
+  border: 1px solid #637c7c;
+  padding: 12px;
+  margin: 16px 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.v-touch-preferences legend {
+  color: #eddbab;
+  padding: 0 6px;
+}
+.v-touch-preferences label {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0;
+  font-size: 14px;
+}
+.v-touch-preferences select {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+.v-touch-preferences .v-touch-check {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  grid-column: 1 / -1;
+}
+.v-touch-preferences input[type='checkbox'] {
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+}
+.v-touch-preferences p {
+  font-size: 13px;
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@media (max-width: 899px), (pointer: coarse) {
+  #app.portrait-controls-mounted .v-portrait-controls {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  #app.portrait-controls-mounted .v-portrait-controls.is-unavailable,
+  #app.portrait-controls-mounted.satchel-open .v-portrait-controls,
+  #app.portrait-required .v-portrait-controls {
+    visibility: hidden;
+  }
+  #app.portrait-controls-mounted[data-movement-control='joystick'] .s-shell .s-mobile-move {
+    display: none;
+  }
+  #app[data-movement-control='buttons'] .v-joystick {
+    visibility: hidden;
+  }
+  .v-movement-cluster,
+  .v-combat-cluster {
+    position: absolute;
+    bottom: 12px;
+  }
+  .v-movement-cluster {
+    left: 14px;
+    width: 120px;
+    height: 174px;
+  }
+  .v-combat-cluster {
+    right: 14px;
+    width: 142px;
+    height: 174px;
+  }
+  .v-portrait-controls button {
+    pointer-events: auto;
+    touch-action: none;
+    padding: 0;
+    min-width: 44px;
+    min-height: 44px;
+    color: #f5edd3;
+    background: #18333de8;
+    border: 2px solid #98aaa1;
+    box-shadow:
+      inset 0 0 0 2px #112530,
+      0 3px 0 #071820b0;
+    font-family: inherit;
+    position: relative;
+    overflow: hidden;
+  }
+  .v-portrait-controls button:focus-visible {
+    outline: 3px solid #e9d490;
+    outline-offset: 3px;
+  }
+  .v-portrait-controls button.is-held {
+    background: #496354ef;
+    border-color: #efd89b;
+  }
+  .v-portrait-controls button:disabled {
+    opacity: 0.68;
+    color: #d4d8cb;
+  }
+  .v-joystick {
+    position: absolute;
+    bottom: 0;
+    width: 120px;
+    height: 120px;
+  }
+  .v-portrait-controls .v-joystick-surface {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 1px solid #bdc9b78c;
+    background: #142c3568;
+    box-shadow:
+      inset 0 0 0 8px #243e3f40,
+      inset 0 0 0 9px #b8c5af3d;
+    overflow: visible;
+  }
+  .v-joystick-cross::before,
+  .v-joystick-cross::after {
+    content: '';
+    position: absolute;
+    background: #ccd2b443;
+    left: 23px;
+    top: 58px;
+    width: 72px;
+    height: 1px;
+  }
+  .v-joystick-cross::after {
+    transform: rotate(90deg);
+  }
+  .v-joystick-thumb {
+    display: block;
+    position: absolute;
+    width: 46px;
+    height: 46px;
+    left: 36px;
+    top: 36px;
+    border-radius: 50%;
+    border: 2px solid #c4c8a8;
+    background: #5b746bed;
+    box-shadow:
+      inset 0 0 0 3px #263f41,
+      0 2px 0 #081d24;
+  }
+  .v-joystick-surface.is-running .v-joystick-thumb {
+    border-color: #ffe09b;
+    background: #847b46;
+  }
+  #v-joystick-hint {
+    position: absolute;
+    bottom: -4px;
+    left: -4px;
+    right: -4px;
+    text-align: center;
+    font-size: 10px;
+    line-height: 15px;
+    color: #efeedb;
+    text-shadow:
+      0 1px 2px #000,
+      1px 0 2px #000;
+    pointer-events: none;
+  }
+  .v-portrait-controls .v-touch-interact {
+    position: absolute;
+    left: 3px;
+    top: 0;
+    height: 44px;
+    width: 114px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    border-width: 1px;
+    background: #16303ced;
+    border-radius: 5px;
+  }
+  .v-touch-interact > span:first-child {
+    font-size: 20px;
+  }
+  .v-touch-interact .v-control-label {
+    font-size: 11px;
+    max-width: 81px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .v-portrait-controls .v-combat-cluster > button {
+    position: absolute;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+  }
+  .v-combat-cluster > button > span {
+    position: relative;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .v-combat-cluster > button > span:first-child {
+    font-size: 23px;
+    line-height: 25px;
+  }
+  .v-combat-cluster .v-control-label {
+    font-size: 10px;
+    line-height: 13px;
+    max-width: 95%;
+    overflow-wrap: anywhere;
+  }
+  .v-portrait-controls .v-touch-attack {
+    width: 76px;
+    height: 76px;
+    right: 0;
+    bottom: 22px;
+    border-color: #e5ca8f;
+    background: #63513ce8;
+  }
+  .v-combat-cluster .v-touch-attack > .v-attack-glyph {
+    font-size: 34px;
+    line-height: 35px;
+  }
+  .v-combat-cluster .v-touch-attack > .v-control-label {
+    font-size: 12px;
+  }
+  .v-portrait-controls .v-touch-technique {
+    width: 60px;
+    height: 60px;
+    left: 0;
+    bottom: 87px;
+  }
+  .v-portrait-controls .v-technique-second {
+    width: 52px;
+    height: 52px;
+    right: 3px;
+    left: auto;
+    top: 0;
+    bottom: auto;
+  }
+  .v-portrait-controls .v-touch-dodge {
+    width: 54px;
+    height: 54px;
+    left: 1px;
+    bottom: 1px;
+  }
+  .v-control-cooldown {
+    position: absolute;
+    inset: auto 0 0;
+    height: var(--v-cooldown, 0%);
+    background: #020e1bb0;
+    pointer-events: none;
+  }
+  .v-control-charge {
+    position: absolute;
+    inset: auto 5px 6px;
+    height: 3px;
+    width: var(--v-charge, 0%);
+    max-width: calc(100% - 10px);
+    background: #fff1a3;
+    pointer-events: none;
+  }
+  #app.portrait-controls-mounted .s-hotkeys [data-action='attack'],
+  #app.portrait-controls-mounted .s-hotkeys [data-action='interact'],
+  #app.portrait-controls-mounted .s-context {
+    display: none;
+  }
+  #app.portrait-controls-mounted .s-hotkeys [data-action='ward'] {
+    display: flex;
+  }
+  #app.portrait-controls-mounted .s-hotkeys {
+    flex: 1;
+    justify-content: space-evenly;
+  }
+  #app.portrait-controls-mounted .s-hotkeys button {
+    min-width: 48px;
+    width: 48px;
+  }
+  #app.portrait-controls-mounted .s-hotkeys button span {
+    font-size: 10px;
+  }
+  #app.portrait-controls-mounted .s-hotkeys [data-use='rations'] {
+    display: flex;
+  }
+  #app.portrait-controls-mounted .s-toast {
+    bottom: 194px;
+    max-width: calc(100% - 24px);
+  }
+  #app[data-control-hand='left'] .v-movement-cluster {
+    left: auto;
+    right: 14px;
+  }
+  #app[data-control-hand='left'] .v-combat-cluster {
+    right: auto;
+    left: 14px;
+    transform: scaleX(-1);
+  }
+  #app[data-control-hand='left'] .v-combat-cluster button > span {
+    transform: scaleX(-1);
+  }
+  #app[data-control-hand='left'] .s-shell .s-mobile-move {
+    left: auto;
+    right: 10px;
+  }
+  #app[data-movement-control='buttons'] .v-touch-interact {
+    top: 14px;
+  }
+  #app[data-movement-control='buttons'] .s-shell .s-mobile-move {
+    z-index: 11;
+  }
+  /* Sheets expose some of the world while keeping fixed headings and close targets. */
+  #app .s-modal:not(.is-title):not(.is-notebook):not(.is-atlas) {
+    align-items: flex-end;
+    padding: 8px;
+  }
+  #app .s-window.s-bounded-window {
+    max-height: calc(
+      var(--v-viewport-height, 100dvh) - 80px - env(safe-area-inset-top) -
+        env(safe-area-inset-bottom)
+    );
+  }
+  #app .s-window-content {
+    padding: 12px;
+    scroll-padding-block: 12px;
+  }
+  #app .s-dialog-heading {
+    min-height: 52px;
+  }
+  #app .s-dialog-heading h2 {
+    font-size: 22px;
+    line-height: 1.15;
+  }
+  #app .s-dialog-heading button,
+  #app .s-window-content button,
+  #app .s-tabs button,
+  #app .s-pack button {
+    min-height: 44px;
+  }
+  #app .s-window-content button {
+    overflow-wrap: anywhere;
+  }
+  #app .s-window-content input:not([type='range']):not([type='checkbox']):not([type='color']),
+  #app .s-window-content select {
+    font-size: 16px;
+  }
+  #app .v-audio-controls:has(#v-effect-intensity) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #app .v-audio-controls > p {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: 13px;
+  }
+  #app.satchel-open .s-sidebar {
+    top: auto;
+    bottom: calc(62px + env(safe-area-inset-bottom));
+    height: min(
+      480px,
+      calc(
+        var(--v-viewport-height, 100dvh) - 140px - env(safe-area-inset-top) -
+          env(safe-area-inset-bottom)
+      )
+    );
+  }
+  #app.satchel-open .s-sidebar #s-item-detail {
+    min-height: 44px;
+    max-height: 34%;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  #app .s-dialogue {
+    bottom: calc(62px + env(safe-area-inset-bottom));
+  }
+  #app .s-dialogue > section {
+    max-height: min(520px, calc(var(--v-viewport-height, 100dvh) - 150px));
+  }
+  #app .v-quick-phrases button {
+    min-height: 52px;
+    font-size: 14px;
+  }
+  #app .s-window[data-screen='actions'] .s-menu-buttons,
+  #app .s-window[data-screen='pause'] .s-menu-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: none;
+    gap: 8px;
+  }
+  #app .s-window[data-screen='actions'] .s-menu-buttons button,
+  #app .s-window[data-screen='pause'] .s-menu-buttons button {
+    min-height: 58px;
+    padding: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  #app .s-window[data-screen='pause'] #v-pause-resume {
+    grid-column: 1 / -1;
+  }
+  #app .s-window[data-screen='creation'] .v-body-stage {
+    grid-template-columns: 128px minmax(0, 1fr);
+  }
+  #app .s-window[data-screen='creation'] #v-body-preview {
+    width: 128px;
+    max-width: 100%;
+  }
+  #app .s-window[data-screen='creation'] .v-facing {
+    gap: 4px;
+  }
+  #app .s-window[data-screen='creation'] .v-facing button {
+    min-width: 44px;
+  }
+  #app .s-window[data-screen='lost'] .s-window-content {
+    padding-bottom: 24px;
+  }
+  #app.chat-editing .v-movement-cluster {
+    transform: scale(0.85);
+    transform-origin: bottom left;
+  }
+  #app.chat-editing[data-control-hand='left'] .v-movement-cluster {
+    transform-origin: bottom right;
+  }
+  #app.chat-editing .v-combat-cluster {
+    bottom: 3px;
+  }
+  #app.chat-editing .v-technique-second,
+  #app.chat-editing .v-touch-interact {
+    display: none;
+  }
+  #app.chat-editing .v-combat-cluster .v-touch-technique:not(.v-technique-second) {
+    bottom: 58px;
+  }
+  #app.chat-editing .v-combat-cluster .v-touch-attack {
+    bottom: 0;
+  }
+  #app.chat-editing .v-combat-cluster .v-touch-dodge {
+    bottom: 0;
+  }
+  #app.text-editing .s-window.s-bounded-window {
+    max-height: calc(var(--v-viewport-height, 100dvh) - 12px);
+  }
+}
+@media (max-width: 359px) {
+  #app.portrait-controls-mounted .s-hotkeys [data-use='rations'],
+  #app.portrait-controls-mounted .s-hotkeys [data-use='tonic'] {
+    display: none;
+  }
+  .v-movement-cluster {
+    left: 10px;
+  }
+  .v-combat-cluster {
+    right: 10px;
+    width: 134px;
+  }
+  #app[data-control-hand='left'] .v-movement-cluster {
+    right: 10px;
+  }
+  #app[data-control-hand='left'] .v-combat-cluster {
+    left: 10px;
+  }
+  #app .s-window-content {
+    padding: 8px;
+  }
+  #app .s-dialog-heading h2 {
+    font-size: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v-portrait-controls *,
+  .v-portrait-gate * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
