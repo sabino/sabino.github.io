@@ -3,7 +3,7 @@ import type { SystemsCommand, SystemsResult } from './living-systems.ts';
 import type { StationKind } from './property-world.ts';
 import './living-systems-ui.css';
 import { TravelController } from './navigation.ts';
-import { mountTravelUi } from './travel-ui.ts';
+import { mountTravelUi, isPaceShortcut, movementRuns } from './travel-ui.ts';
 import './travel-ui.css';
 import './style.css';
 import './notebook.css';
@@ -499,7 +499,31 @@ const livingUi = createLivingSystemsUi({
     showBlueprint();
   },
 });
+function canUseMovementControls() {
+  return (
+    started &&
+    !paused &&
+    !modal &&
+    !game.dialogue &&
+    !transferStarted &&
+    (!sharedActionPending || combatPending) &&
+    game.phase === 'playing' &&
+    !document.hidden &&
+    !root.classList.contains('satchel-open') &&
+    !root.classList.contains('portrait-required') &&
+    !placingEstate &&
+    !placingProduction &&
+    !isTextEntry(document.activeElement) &&
+    !document.activeElement?.closest('select')
+  );
+}
 const travelUi = mountTravelUi(root, {
+  canAct: canUseMovementControls,
+  openOptions: () => inputSequences.transition(),
+  paceChanged: (run) => {
+    travel.setRun(run);
+    portraitControls.update({ runPace: run });
+  },
   lock: (run) => {
     const input = portraitControls.input;
     const direction =
@@ -514,6 +538,8 @@ const travelUi = mountTravelUi(root, {
   },
   stop: () => {
     cancelBlueprint();
+    portraitControls.release();
+    keys.clear();
     travel.cancel('stop');
     travelTarget = undefined;
     walk = [];
@@ -1483,7 +1509,7 @@ function controls() {
   const touch = matchMedia('(pointer: coarse)').matches || innerWidth < 900;
   openModal(
     'help',
-    `<span class="s-chapter">Living on ${esc(currentPlanet.name)}</span><h2>Explore at your own pace.</h2>${touch ? '<article><h3>Touch controls</h3><p>Drag the movement stick to walk; push to its edge to run. Tap Strike once or hold it for repeated attacks. Release a skill button to prepare its technique, and use Step to evade through clear ground. Tap a person or object to approach, then Interact.</p><p>Satchel opens belongings and recipes. More opens equipment, techniques, journal and saved phrases. Sound and touch settings can swap your movement hand or restore direction buttons. Use chart buttons to zoom.</p></article>' : ''}<details ${touch ? '' : 'open'}><summary>Keyboard and mouse</summary><div class="s-control-list"><p><b>WASD / arrows</b><span>Walk · Shift runs</span></p><p><b>Click ground / person</b><span>Approach the selected place or person</span></p><p><b>E</b><span>Talk, work with a tool, gather, read or open</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor with held equipment</span></p><p><b>R / T / Space</b><span>Weapon techniques / quick step</span></p><p><b>Q / 2</b><span>Release a ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Breath supply · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare / equipment</span></p><p><b>J / M / L / G</b><span>Notebook / world atlas / Life / galaxy</span></p><p><b>Enter / F7–F9</b><span>Chat / send saved phrases</span></p><p><b>Escape</b><span>Close a window, cancel construction or pause</span></p><p><b>Mouse wheel</b><span>Zoom the world or chart under the cursor</span></p></div></details><p>Use actual tools to harvest resources. Learn local needs, earn wages, hire people you trust and build a home. Roads connect settlements; wilderness contains supplies and danger.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
+    `<span class="s-chapter">Living on ${esc(currentPlanet.name)}</span><h2>Explore at your own pace.</h2>${touch ? '<article><h3>Touch controls</h3><p>Choose Walk or Run beside the movement stick, then drag to move. C switches pace; pushing to the edge can temporarily run when enabled. Travel offers automatic movement and Go home; Stop ends a journey. Tap Strike once or hold it for repeated attacks. Release a skill button to prepare its technique, and use Step to evade through clear ground. Tap a person or object to approach, then Interact.</p><p>Satchel opens belongings and recipes. More opens equipment, techniques, journal and saved phrases. Sound and touch settings can swap your movement hand or restore direction buttons. Use chart buttons to zoom.</p></article>' : ''}<details ${touch ? '' : 'open'}><summary>Keyboard and mouse</summary><div class="s-control-list"><p><b>WASD / arrows</b><span>Move at your selected pace · Shift temporarily runs</span></p><p><b>C</b><span>Switch Walk / Run pace without starting movement</span></p><p><b>Click ground / person</b><span>Approach the selected place or person</span></p><p><b>E</b><span>Talk, work with a tool, gather, read or open</span></p><p><b>F / 1 / right mouse</b><span>Attack toward the cursor with held equipment</span></p><p><b>R / T / Space</b><span>Weapon techniques / quick step</span></p><p><b>Q / 2</b><span>Release a ward</span></p><p><b>3 / 4 / 5 / 6</b><span>Breath supply · salve · tonic · food</span></p><p><b>I / B / K</b><span>Satchel / prepare / equipment</span></p><p><b>J / M / L / G</b><span>Notebook / world atlas / Life / galaxy</span></p><p><b>Enter / F7–F9</b><span>Chat / send saved phrases</span></p><p><b>Escape</b><span>Close a window, cancel construction or pause</span></p><p><b>Mouse wheel</b><span>Zoom the world or chart under the cursor</span></p></div></details><p>Use actual tools to harvest resources. Learn local needs, earn wages, hire people you trust and build a home. Roads connect settlements; wilderness contains supplies and danger.</p><button id="s-help-return" class="s-primary">Return to this life</button>`,
   );
   el('s-help-return').onclick = closeModal;
 }
@@ -1986,6 +2012,7 @@ function updateUI() {
       game.player.appearance.weapon === 'none' ? 'staff' : game.player.appearance.weapon,
     );
   portraitControls.update({
+    runPace: travelUi.pace === 'run',
     enabled:
       started &&
       !paused &&
@@ -3784,6 +3811,10 @@ addEventListener('keydown', (e) => {
     toast('Construction cancelled.');
     return;
   }
+  if (k === 'escape' && travelUi.closeOptions(true)) {
+    e.preventDefault();
+    return;
+  }
   if (k === 'escape') {
     e.preventDefault();
     if (modal === 'journal') foldNotebook(true);
@@ -3800,6 +3831,18 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (modal || !started || root.classList.contains('satchel-open')) return;
+  if (
+    isPaceShortcut(
+      e,
+      canUseMovementControls() && !travelUi.optionsOpen,
+      isTextEntry(e.target) ||
+        !!(e.target as HTMLElement).closest('form,select,input,textarea,[contenteditable]'),
+    )
+  ) {
+    e.preventDefault();
+    travelUi.togglePace();
+    return;
+  }
   if (k === 'enter') {
     if ((e.target as HTMLElement).closest('button,a,summary')) return;
     e.preventDefault();
@@ -3930,12 +3973,7 @@ function frame(now: number) {
     );
   travelUi.update(
     travel.feedback,
-    started &&
-      !paused &&
-      !modal &&
-      !game.dialogue &&
-      !transferStarted &&
-      !root.classList.contains('satchel-open'),
+    canUseMovementControls(),
     !!game.livingSystemsFrame?.home || game.progression.homes.length > 0,
   );
   const sharedTime = multiplayer.worldElapsedSeconds;
@@ -3960,6 +3998,8 @@ function frame(now: number) {
         Number(keys.has('s') || keys.has('arrowdown')) -
         Number(keys.has('w') || keys.has('arrowup'));
     const touchInput = portraitControls.input;
+    const run = movementRuns(travelUi.pace, keys.has('shift'), touchInput.run);
+    const movementSpeed = game.player.speed * (run && game.player.stamina > 1 ? 1.55 : 1);
     if (!x && !y) {
       x = touchInput.x;
       y = touchInput.y;
@@ -3990,8 +4030,8 @@ function frame(now: number) {
           void interactShared(door.id, true);
           walkStuck = 0;
         } else {
-          x = (dx / d) * Math.min(1, d / (game.player.speed * Math.max(dt, 0.001)));
-          y = (dy / d) * Math.min(1, d / (game.player.speed * Math.max(dt, 0.001)));
+          x = (dx / d) * Math.min(1, d / (movementSpeed * Math.max(dt, 0.001)));
+          y = (dy / d) * Math.min(1, d / (movementSpeed * Math.max(dt, 0.001)));
         }
       }
       if (Math.hypot(game.player.x - walkLast.x, game.player.y - walkLast.y) < 0.001)
@@ -4004,11 +4044,12 @@ function frame(now: number) {
       }
     }
     const navigationMark = frameProfiler.active ? performance.now() : 0;
+    travel.setRun(run);
     const travelInput = travel.update({
-      speed: game.player.speed * (travel.feedback.run && game.player.stamina > 1 ? 1.55 : 1),
+      speed: movementSpeed,
       position: game.player,
       dt,
-      manual: { x, y, run: keys.has('shift') || touchInput.run },
+      manual: { x, y, run },
       obstructed: travelObstructed,
       danger: game.npcs.some(
         (n) => n.hostile && n.hp > 0 && Math.hypot(n.x - game.player.x, n.y - game.player.y) < 6,
@@ -4189,6 +4230,7 @@ Object.defineProperty(window, 'stichos', {
         framePerformance: frameProfiler.diagnostics,
         groundRaster: renderer.groundDiagnostics,
         travel: travel.feedback,
+        movementPace: travelUi.pace,
         navigation: travel.navigation.diagnostics,
         combatFeedback: renderer.feedbackDiagnostics,
         techniques: game.techniques,

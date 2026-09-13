@@ -1,54 +1,130 @@
+/* Pace stays beside movement. Automatic journeys are a separate deliberate action. */
 .v-travel-controls {
-  position: absolute;
-  z-index: 7;
-  left: 50%;
-  top: 76px;
-  transform: translateX(-50%);
-  max-width: calc(100% - 24px);
+  position: relative;
+  z-index: 12;
+  flex: 0 0 auto;
+  width: 140px;
+  margin-left: auto;
   text-align: center;
-  pointer-events: none;
+  pointer-events: auto;
 }
 .v-travel-controls[hidden],
-.v-travel-controls button[hidden] {
-  display: none;
+.v-travel-controls [hidden] {
+  display: none !important;
 }
 .v-travel-buttons {
   display: flex;
-  justify-content: center;
   gap: 4px;
 }
-.v-travel-buttons button {
+.v-travel-controls .v-travel-buttons button,
+.v-travel-controls .v-travel-options button {
   pointer-events: auto;
+  touch-action: manipulation;
   min-height: 44px;
-  padding: 5px 10px;
-  background: #132d35ed;
+  min-width: 44px;
+  padding: 5px 8px;
+  background: #16303ced;
   border: 1px solid #90afa7;
+  border-radius: 0;
   color: #f0e9cf;
   font-size: 12px;
-  touch-action: manipulation;
+  line-height: 1.2;
+  font-family: inherit;
+  box-shadow: inset 0 0 0 2px #10242e;
 }
-.v-travel-buttons button:focus-visible {
+.v-travel-controls .v-travel-buttons button {
+  flex: 1;
+  position: relative;
+}
+.v-travel-controls [data-travel='pace'][aria-pressed='true'] {
+  border-color: #e9ce87;
+  background: #4d5238;
+  color: #fff0c5;
+}
+.v-travel-controls [data-travel='stop'] {
+  border-color: #e7ad88;
+}
+.v-travel-controls kbd {
+  font-size: 9px;
+  line-height: 1;
+  display: block;
+  color: #b7c8bf;
+  margin-top: 3px;
+}
+.v-travel-controls button:focus-visible {
   outline: 3px solid #efd590;
   outline-offset: 2px;
 }
-.v-travel-buttons button:disabled {
+.v-travel-controls button:disabled {
   opacity: 0.5;
 }
-.v-travel-status:not(:empty) {
-  display: block;
-  padding: 5px 8px;
-  margin-top: 3px;
-  color: #f0e9cf;
-  background: #10232be8;
-  font-size: 12px;
-  max-width: 290px;
+.v-travel-options {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 232px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  border: 3px double #bfaf7c;
+  background: #142b34f5;
+  box-shadow: 0 4px 0 #071820b0;
+  text-align: left;
 }
-@media (pointer: coarse) and (max-width: 899px) {
-  .v-travel-controls {
-    top: 65px;
+.v-travel-options strong {
+  color: #eddbab;
+  font-size: 13px;
+}
+.v-travel-options p {
+  color: #b6c7c4;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+.v-travel-status:not(:empty) {
+  color: #e2d7b5;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.v-travel-active:not(:empty) {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  color: #e7dcae;
+  background: #122833e8;
+  padding: 3px;
+  font-size: 10px;
+  pointer-events: none;
+}
+.s-actionbar:has(.v-travel-controls) .s-walk-help {
+  display: none;
+}
+@media (max-width: 899px), (pointer: coarse) {
+  .v-movement-cluster .v-travel-controls {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 120px;
+    margin: 0;
   }
-  .v-travel-buttons button {
+  .v-movement-cluster .v-travel-controls .v-travel-buttons button {
+    padding: 4px;
     font-size: 11px;
-    padding-inline: 8px;
+    min-height: 44px;
+  }
+  .v-movement-cluster .v-travel-options {
+    left: 0;
+    right: auto;
+    top: calc(100% + 6px);
+    bottom: auto;
+    width: min(232px, calc(100vw - 28px));
+  }
+  #app[data-control-hand='left'] .v-movement-cluster .v-travel-options {
+    left: auto;
+    right: 0;
+  }
+  .v-movement-cluster .v-travel-active {
+    font-size: 9px;
   }
 }

@@ -437,6 +437,12 @@ export class TravelController {
   get active() {
     return ['locked', 'planning', 'walking', 'door'].includes(this.feedback.state);
   }
+  /** Change pace without replanning, losing a destination, or starting movement. */
+  setRun(run: boolean) {
+    this.feedback.run = run;
+    if (this.feedback.state === 'locked')
+      this.feedback.label = run ? 'Run locked · Stop to cancel' : 'Walk locked · Stop to cancel';
+  }
   get route(): readonly Point[] {
     return this.navigation.route.slice(this.cursor);
   }

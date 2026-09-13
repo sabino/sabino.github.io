@@ -117,7 +117,7 @@
   .v-movement-cluster {
     left: 14px;
     width: 120px;
-    height: 174px;
+    height: 222px;
   }
   .v-combat-cluster {
     right: 14px;
@@ -217,7 +217,7 @@
   .v-portrait-controls .v-touch-interact {
     position: absolute;
     left: 3px;
-    top: 0;
+    top: 48px;
     height: 44px;
     width: 114px;
     display: flex;
@@ -356,7 +356,7 @@
     right: 10px;
   }
   #app[data-movement-control='buttons'] .v-touch-interact {
-    top: 14px;
+    top: 62px;
   }
   #app[data-movement-control='buttons'] .s-shell .s-mobile-move {
     z-index: 11;

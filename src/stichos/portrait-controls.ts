@@ -53,6 +53,7 @@ export function joystickVector(dx: number, dy: number, radius = 43, sprintAtEdge
 }
 export interface PortraitControlState {
   enabled?: boolean;
+  runPace?: boolean;
   attackCooldown?: number;
   wardCooldown?: number;
   dodgeCooldown?: number;
@@ -92,6 +93,7 @@ export function mountPortraitControls(
   } catch {}
   let preferences = loadPortraitPreferences(storage);
   let enabled = true;
+  let runPace = false;
   let vector = { x: 0, y: 0, run: false };
   let stickPointer: number | null = null;
   let stickCenter = { x: 0, y: 0 };
@@ -140,18 +142,27 @@ export function mountPortraitControls(
     resetStick();
     for (const action of activeActions.keys()) finish(action, 'cancel');
   };
+  const updateMovementHint = () => {
+    hint.textContent = runPace
+      ? 'Run pace · C to walk'
+      : preferences.sprintAtEdge
+        ? 'Walk · edge runs'
+        : 'Walk pace · C to run';
+    stick.setAttribute(
+      'aria-label',
+      `Move: drag to ${runPace ? 'run' : 'walk'}.${!runPace && preferences.sprintAtEdge ? ' Reach the edge to run.' : ''} C switches pace. Arrow keys also move.`,
+    );
+    stick.classList.toggle(
+      'is-running',
+      Math.hypot(vector.x, vector.y) > 0.01 && (runPace || vector.run),
+    );
+  };
   const applyPreferences = () => {
     release();
     root.dataset.controlHand = preferences.handedness;
     root.dataset.movementControl = preferences.movement;
     root.classList.add('portrait-controls-mounted');
-    hint.textContent = preferences.sprintAtEdge ? 'Walk · push to run' : 'Drag to walk';
-    stick.setAttribute(
-      'aria-label',
-      preferences.sprintAtEdge
-        ? 'Move: drag to walk, reach the edge to run. Arrow keys also move.'
-        : 'Move: drag to walk. Arrow keys also move.',
-    );
+    updateMovementHint();
   };
   const moveStick = (event: PointerEvent) => {
     const dx = event.clientX - stickCenter.x,
@@ -160,7 +171,10 @@ export function mountPortraitControls(
     const distance = Math.hypot(dx, dy),
       ratio = distance > 43 ? 43 / distance : 1;
     thumb.style.transform = `translate(${dx * ratio}px, ${dy * ratio}px)`;
-    stick.classList.toggle('is-running', vector.run);
+    stick.classList.toggle(
+      'is-running',
+      Math.hypot(vector.x, vector.y) > 0.01 && (runPace || vector.run),
+    );
   };
   stick.onpointerdown = (event) => {
     if (event.button !== 0 || stickPointer !== null || !allowed()) return;
@@ -312,6 +326,10 @@ export function mountPortraitControls(
   addEventListener('orientationchange', release);
   document.addEventListener('visibilitychange', visibility);
   const update = (state: PortraitControlState) => {
+    if (state.runPace !== undefined && state.runPace !== runPace) {
+      runPace = state.runPace;
+      updateMovementHint();
+    }
     if (state.enabled !== undefined) {
       enabled = state.enabled;
       pane.classList.toggle('is-unavailable', !enabled);
@@ -357,7 +375,7 @@ export function mountPortraitControls(
         .style.setProperty('--v-charge', `${fraction(state.charge) * 100}%`);
   };
   const settingsHtml = () =>
-    `<fieldset class="v-touch-preferences"><legend>Touch controls</legend><label>Attack hand<select id="v-control-hand"><option value="right"${preferences.handedness === 'right' ? ' selected' : ''}>Right thumb</option><option value="left"${preferences.handedness === 'left' ? ' selected' : ''}>Left thumb</option></select></label><label>Movement<select id="v-control-movement"><option value="joystick"${preferences.movement === 'joystick' ? ' selected' : ''}>Analog stick</option><option value="buttons"${preferences.movement === 'buttons' ? ' selected' : ''}>Direction pad</option></select></label><label class="v-touch-check"><input id="v-control-sprint" type="checkbox"${preferences.sprintAtEdge ? ' checked' : ''}>Run at the stick’s edge</label><p>Drag to walk; push to the edge to run. Hold Strike for follow-ups. Release a skill to use it, or drag away to cancel. Keyboard controls stay available.</p></fieldset>`;
+    `<fieldset class="v-touch-preferences"><legend>Touch controls</legend><label>Attack hand<select id="v-control-hand"><option value="right"${preferences.handedness === 'right' ? ' selected' : ''}>Right thumb</option><option value="left"${preferences.handedness === 'left' ? ' selected' : ''}>Left thumb</option></select></label><label>Movement<select id="v-control-movement"><option value="joystick"${preferences.movement === 'joystick' ? ' selected' : ''}>Analog stick</option><option value="buttons"${preferences.movement === 'buttons' ? ' selected' : ''}>Direction pad</option></select></label><label class="v-touch-check"><input id="v-control-sprint" type="checkbox"${preferences.sprintAtEdge ? ' checked' : ''}>Run at the stick’s edge</label><p>Walk / Run beside movement (C) selects your pace. The stick’s edge can temporarily run when enabled. Hold Strike for follow-ups. Release a skill to use it, or drag away to cancel. Keyboard controls stay available.</p></fieldset>`;
   applyPreferences();
   return {
     get input() {
