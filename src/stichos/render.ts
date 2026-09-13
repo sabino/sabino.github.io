@@ -1,4 +1,7 @@
 import { drawFauna } from './fauna-art.ts';
+import { CombatFeedback, feedbackSettings, legacyCombatCue } from './combat-feedback.ts';
+import type { CombatCue } from './combat-feedback.ts';
+import { drawCombatGround, drawCombatForeground } from './combat-feedback-render.ts';
 import { makeRegionalBuilding } from './architecture.ts';
 import { regionalGroundColor, blendColor } from './biome-art.ts';
 import type { Peer } from './multiplayer-protocol';
@@ -77,6 +80,11 @@ export class StichosRenderer {
   private effectActors = new Map<number, { id: string; kind: HumanoidActionKind }>();
   private actorActions = new Map<string, HumanoidAction>();
   private reducedMotion = false;
+  private combatFeedback = new CombatFeedback();
+  private cameraImpulse: Point = { x: 0, y: 0 };
+  get feedbackDiagnostics() {
+    return this.combatFeedback.diagnostics;
+  }
   constructor(readonly canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
     this.resize(canvas.clientWidth || 1000, canvas.clientHeight || 700);
@@ -102,14 +110,14 @@ export class StichosRenderer {
   }
   worldToScreen(p: Point): Point {
     return {
-      x: this.width / 2 + (p.x - this.camera.x) * this.unit,
-      y: this.height * 0.58 + (p.y - this.camera.y) * this.unit,
+      x: this.width / 2 + (p.x - this.camera.x) * this.unit + this.cameraImpulse.x,
+      y: this.height * 0.58 + (p.y - this.camera.y) * this.unit + this.cameraImpulse.y,
     };
   }
   screenToWorld(p: Point): Point {
     return {
-      x: (p.x - this.width / 2) / this.unit + this.camera.x,
-      y: (p.y - this.height * 0.58) / this.unit + this.camera.y,
+      x: (p.x - this.width / 2 - this.cameraImpulse.x) / this.unit + this.camera.x,
+      y: (p.y - this.height * 0.58 - this.cameraImpulse.y) / this.unit + this.camera.y,
     };
   }
 
@@ -118,6 +126,8 @@ export class StichosRenderer {
     // pointer is an optional destination in world tile coordinates, like player/NPC positions.
     options: {
       reducedMotion?: boolean;
+      effectIntensity?: number;
+      combatCues?: readonly CombatCue[];
       transfer?: number;
       pointer?: Point | null;
       peers?: readonly Peer[];
@@ -158,6 +168,7 @@ export class StichosRenderer {
       this.faunaPrevious.clear();
       this.npcWalking.clear();
       this.effectActors.clear();
+      this.combatFeedback.reset();
     }
     this.actorActions.clear();
     const motionActors = [
@@ -204,6 +215,48 @@ export class StichosRenderer {
     this.playerSite = game.world.tile(game.player.x, game.player.y).site;
     this.camera.x += (game.player.x - this.camera.x) * follow;
     this.camera.y += (game.player.y - this.camera.y) * follow;
+    this.combatFeedback.update(
+      game.time,
+      game.effects,
+      [
+        {
+          id: '$player',
+          bodyId: game.bodyId,
+          x: game.player.x,
+          y: game.player.y,
+          hp: game.player.hp,
+          heading: game.player.heading,
+          weapon: game.player.appearance.weapon,
+          level: game.player.level,
+        },
+        ...(options.peers ?? []).slice(0, 8).map((peer) => ({
+          id: peer.id,
+          bodyId: peer.bodyId,
+          x: peer.x,
+          y: peer.y,
+          hp: 100,
+          heading: peer.heading,
+          weapon: peer.appearance.weapon,
+        })),
+        ...game.npcs
+          .filter(
+            (npc) =>
+              npc.id !== game.occupiedNpcId &&
+              Math.hypot(npc.x - game.player.x, npc.y - game.player.y) < 24,
+          )
+          .slice(0, 119)
+          .map((npc) => ({ id: npc.id, x: npc.x, y: npc.y, hp: npc.hp, heading: npc.heading })),
+      ],
+      {
+        left: this.camera.x - this.width / unit / 2 - 2,
+        right: this.camera.x + this.width / unit / 2 + 2,
+        top: this.camera.y - (this.height * 0.58) / unit - 3,
+        bottom: this.camera.y + (this.height * 0.42) / unit + 2,
+      },
+      feedbackSettings(options.effectIntensity, this.reducedMotion),
+      options.combatCues,
+    );
+    this.cameraImpulse = this.combatFeedback.cameraOffset();
     // Quantized camera preserves crisp pixel clusters without resampling the art.
     this.camera.x = Math.round(this.camera.x * unit) / unit;
     this.camera.y = Math.round(this.camera.y * unit) / unit;
@@ -507,6 +560,7 @@ export class StichosRenderer {
         draw: () => this.remotePerson(peer, options.emotes?.get(peer.id)),
       });
     }
+    drawCombatGround(ctx, this.combatFeedback, (point) => this.worldToScreen(point), unit);
     drawables.sort((a, b) => a.depth - b.depth).forEach((item) => item.draw());
     const time = game.worldTime;
     const interior = game.world.tile(game.player.x, game.player.y).terrain === 'floor';
@@ -566,7 +620,10 @@ export class StichosRenderer {
         rect(ctx, p.x + 3 * scale, p.y - 21 * scale, 2 * scale, scale, '#c2f1d3');
       }
     }
-    for (const effect of game.effects) this.effect(effect);
+    for (const effect of game.effects) {
+      if (!legacyCombatCue(effect)) this.effect(effect);
+    }
+    drawCombatForeground(ctx, this.combatFeedback, (point) => this.worldToScreen(point), unit);
     if (options.pointer && !options.transfer) this.pointer(game, options.pointer);
     this.atmosphere(game, !!options.reducedMotion);
     if (options.transfer) this.transfer(playerScreen, options.transfer);
@@ -1190,19 +1247,24 @@ export class StichosRenderer {
     ctx.ellipse(p.x, p.y, 10 * scale, 5 * scale, 0, 0, TAU);
     ctx.stroke();
     const facing = humanoidDirection(peer.heading);
+    const pose = this.combatFeedback.pose(peer.id);
+    ctx.save();
+    ctx.translate(p.x + pose.x * this.unit, p.y + pose.y * this.unit);
+    ctx.scale(pose.scaleX, pose.scaleY);
     drawHumanoid(
       ctx,
       peer.appearance,
-      p.x,
-      p.y,
+      0,
+      0,
       scale,
       facing.face,
       peer.phase,
       walking,
-      0,
+      pose.attack,
       false,
       facing.weaponBehindBody,
     );
+    ctx.restore();
     const label = emote && emote.until > time ? `${peer.name} · ${emote.text}` : peer.name;
     ctx.font = '11px Georgia,serif';
     ctx.textAlign = 'center';
@@ -1218,6 +1280,30 @@ export class StichosRenderer {
     const p = this.worldToScreen(person),
       s = (this.unit / 32) * 1.35,
       ctx = this.ctx;
+    const pose = this.combatFeedback.pose(player ? '$player' : (person as Npc).id);
+    if (person.hp <= 0 && pose.death !== null && pose.death < 0.9 && !this.reducedMotion) {
+      const fall = Math.min(1, pose.death / 0.7);
+      const facing = humanoidDirection(person.heading);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(-fall * 1.25);
+      ctx.globalAlpha = 1 - fall * 0.4;
+      drawHumanoid(
+        ctx,
+        person.appearance,
+        0,
+        0,
+        s * (1 - fall * 0.12),
+        facing.face,
+        person.phase,
+        false,
+        0,
+        player,
+        facing.weaponBehindBody,
+      );
+      ctx.restore();
+      return;
+    }
     if (person.hp <= 0) {
       ctx.save();
       ctx.translate(p.x, p.y);
@@ -1239,18 +1325,21 @@ export class StichosRenderer {
       ? !!this.previousPlayer &&
         Math.hypot(person.x - this.previousPlayer.x, person.y - this.previousPlayer.y) > 0.002
       : (this.npcWalking.get((person as Npc).id) ?? false);
-    const cooldown = player ? game.player.attackCooldown : (person as Npc).cooldown;
     const action = this.actorActions.get(player ? '$player' : (person as Npc).id) ?? null;
-    const attack = action ? 0 : cooldown > 0.25 ? clamp((cooldown - 0.25) / 0.4, 0, 1) : 0;
+    // Only accepted releases / actual windups animate a weapon; a timer alone is not a swing.
+    const attack = action ? 0 : pose.attack;
     const facing = humanoidDirection(person.heading);
     const appearance = player
       ? person.appearance
       : game.appearanceForBody(person.appearance, (person as Npc).id);
+    ctx.save();
+    ctx.translate(p.x + pose.x * this.unit, p.y + pose.y * this.unit);
+    ctx.scale(pose.scaleX, pose.scaleY);
     drawHumanoid(
       ctx,
       appearance,
-      p.x,
-      p.y,
+      0,
+      0,
       s,
       facing.face,
       person.phase,
@@ -1260,6 +1349,13 @@ export class StichosRenderer {
       facing.weaponBehindBody,
       action,
     );
+    if (pose.flash > 0) {
+      ctx.globalAlpha = pose.flash;
+      ctx.fillStyle = '#fff0cf';
+      rect(ctx, -4 * s, -25 * s, 8 * s, 13 * s, '#fff0cf');
+      rect(ctx, -3 * s, -35 * s, 6 * s, 7 * s, '#fff0cf');
+    }
+    ctx.restore();
     const near = Math.hypot(person.x - game.player.x, person.y - game.player.y) < 4;
     if (player || near || (person as Npc).hostile) {
       const label = person.name.split(' ')[0];
