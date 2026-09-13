@@ -173,16 +173,14 @@ export function createAnnouncementInbox(
     return `<details class="v-news-entry"${index === 0 ? ' open' : ''}><summary>${heading}</summary><div class="v-news-entry-body"><p class="v-news-version">${escape(entry.status === 'development' ? buildLabel() : entry.version)}</p>${entry.artwork ? `<img class="v-news-art" src="${escape(entry.artwork.src)}" alt="${escape(entry.artwork.alt)}" loading="lazy" decoding="async"/>` : ''}<ul>${entry.changes.map((change) => `<li><span class="v-news-category" data-category="${change.category.toLowerCase()}">${change.category}</span><p>${escape(change.description)}</p></li>`).join('')}</ul></div></details>`;
   }
   function html() {
-    return `<h2>What’s new in Verso</h2><div class="v-news"><div class="v-news-intro"><span class="v-news-kicker">The traveler’s bulletin</span><p>New paths, better tools, a world worth returning to.</p><p class="v-news-installed">This build <code>${escape(buildLabel())}</code></p></div><p class="v-news-read-status" role="status" aria-live="polite">${unread().length ? `${unread().length} unread entries. Opening this bulletin marks them as read on this browser.` : 'You’re up to date with this bundle.'}</p><div class="v-news-entries">${entries.length ? entries.map(entryHtml).join('') : '<p>No release notes are available in this bundle.</p>'}</div><p class="v-news-footnote">Saved with the game for offline reading. Opening this bulletin does not change your life, world or room.</p></div><button type="button" id="v-news-return">Return</button>`;
+    return `<h2>What’s new in Verso</h2><div class="v-news"><div class="v-news-intro"><span class="v-news-kicker">The traveler’s bulletin</span><p class="v-news-installed">This build <code>${escape(buildLabel())}</code></p></div><p class="v-news-read-status" role="status" aria-live="polite">${unread().length ? `${unread().length} unread entries. Opening this bulletin marks them as read on this browser.` : 'You’re up to date with this bundle.'}</p><div class="v-news-entries">${entries.length ? entries.map(entryHtml).join('') : '<p>No release notes are available in this bundle.</p>'}</div><p class="v-news-footnote">Saved with the game for offline reading. Opening this bulletin does not change your life, world or room.</p></div><button type="button" id="v-news-return">Return</button>`;
   }
   function mount(container: HTMLElement, handlers: { onClose: () => void; onRead?: () => void }) {
     const close = container.querySelector<HTMLButtonElement>('#v-news-return');
     if (!close) return () => {};
     markRead();
     const status = container.querySelector<HTMLElement>('.v-news-read-status');
-    if (status)
-      status.textContent =
-        'You’re up to date with this bundle. Read status is saved on this browser when storage is available.';
+    if (status) status.textContent = 'You’re up to date in this browser.';
     container.querySelectorAll('.v-news-new').forEach((node) => node.remove());
     handlers.onRead?.();
     close.addEventListener('click', handlers.onClose);

@@ -168,3 +168,24 @@
     min-width: 62px;
   }
 }
+
+/* Let a short phone show the newest entry immediately, before explanatory copy. */
+@media (max-width: 600px) {
+  .v-news-intro {
+    margin: 0 0 6px;
+    padding-block: 0;
+  }
+  .s-window .v-news-intro p {
+    font-size: 12px;
+    line-height: 1.4;
+    margin: 4px 0;
+  }
+  .s-window .v-news-read-status {
+    font-size: 12px;
+    line-height: 1.4;
+    margin: 6px 0 10px;
+  }
+  .v-news-kicker {
+    font-size: 10px;
+  }
+}
