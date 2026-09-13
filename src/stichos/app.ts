@@ -1,3 +1,10 @@
+import { createLivingSystemsUi } from './living-systems-ui.ts';
+import type { SystemsCommand, SystemsResult } from './living-systems.ts';
+import type { StationKind } from './property-world.ts';
+import './living-systems-ui.css';
+import { TravelController } from './navigation.ts';
+import { mountTravelUi } from './travel-ui.ts';
+import './travel-ui.css';
 import './style.css';
 import './notebook.css';
 import './life.css';
@@ -14,6 +21,8 @@ import type { Attunement } from './expeditions.ts';
 import { mountMobileViewport, isTextEntry } from './mobile-viewport.ts';
 import { createWorldExperience } from './experience.ts';
 import { mountVoiceUi } from './voice-ui.ts';
+import { mountInteractionSequences } from './interaction-sequence.ts';
+import { FrameProfiler } from './frame-profiler.ts';
 import aiCompanionGuide from '../../docs/stichos/AI-COMPANION.md?url';
 import { drawProduction } from './production-art';
 import { creationHtml, mountCreation } from './creation';
@@ -47,7 +56,8 @@ import { notebookHtml, notebookLeafCount } from './notebook';
 import type { NotebookSection, NotebookView } from './notebook';
 import { INTRO_BEATS, JOURNAL_ENTRIES, PLANT_NOTES } from './lore';
 import { Stichos, ITEMS, RECIPES } from './session';
-import { StichosRenderer } from './render';
+import { StichosRenderer, drawSurfaceMapSigns } from './render';
+import { drawUnderworldMap } from './underworld-map.ts';
 import { drawPortrait } from './portrait';
 import { weaponIcon } from './equipment';
 import { artifactIcon } from './artifact-art';
@@ -180,6 +190,11 @@ try {
     );
 } catch {}
 const atlasPainter = new AtlasPainter();
+const drawAtlas = atlasPainter.draw.bind(atlasPainter);
+atlasPainter.draw = (target, source, view, labels = true) => {
+  drawAtlas(target, source, view, labels);
+  if (game.spaceId === 'surface') drawSurfaceMapSigns(target, game, view);
+};
 function trackedQuest() {
   if (trackedExpedition && (!game.usesSharedCombat || multiplayer.actionExpansion)) {
     const plan = game.expeditions.find((p) => p.id === trackedExpedition);
@@ -257,7 +272,43 @@ let fps = 60,
   frameSeconds = 0;
 
 const experience = createWorldExperience(() => game, multiplayer, audio);
+const frameProfiler = new FrameProfiler();
+game.world.onGenerationWork = (ms) => frameProfiler.record('generation', ms);
+if (new URLSearchParams(location.search).has('profile')) frameProfiler.start();
+const travel = new TravelController({
+  cell: (x, y) => {
+    if (game.spaceId !== 'surface')
+      return { kind: game.navigationBlocked(x, y) ? 'blocked' : 'open' };
+    const door = game.world.propsAround(x, y, 0).find((p) => p.kind === 'door');
+    if (door)
+      return {
+        kind: 'door',
+        id: door.id,
+        allowed: game.fieldDoorAccess(door)?.allowed ?? true,
+        open: game.removed.has(door.id),
+      };
+    return { kind: game.navigationBlocked(x, y, true) ? 'blocked' : 'open' };
+  },
+});
+let travelTarget: string | undefined;
+let travelObstructed = false;
+const releaseDirectionPointers = new Set<() => void>();
+const inputSequences = mountInteractionSequences(root, {
+  onTransition: () => {
+    travel.cancel(game.dialogue ? 'dialogue' : 'menu');
+    travelTarget = undefined;
+    heldAttack = false;
+    heldTechnique = null;
+    keys.clear();
+    walk = [];
+    walkTarget = undefined;
+    for (const release of releaseDirectionPointers) release();
+    portraitControls.release();
+    voiceUi.release();
+  },
+});
 const voiceUi = mountVoiceUi({
+  sequences: inputSequences,
   voice: experience.voice,
   container: el('v-voice-mount'),
   peers: () => multiplayer.peers,
@@ -279,6 +330,7 @@ function applyAppMode() {
 addEventListener('verso-app-mode-change', applyAppMode);
 applyAppMode();
 const portraitControls = mountPortraitControls(root, {
+  sequences: inputSequences,
   canAct: () =>
     started &&
     !paused &&
@@ -289,6 +341,8 @@ const portraitControls = mountPortraitControls(root, {
     !root.classList.contains('satchel-open') &&
     game.phase === 'playing',
   onMoveStart: () => {
+    travel.cancel('manual');
+    travelTarget = undefined;
     walk = [];
     pointer = null;
     touchAiming = true;
@@ -305,6 +359,10 @@ const portraitControls = mountPortraitControls(root, {
       else {
         heldTechnique = null;
         if (phase === 'release') {
+          if (game.underworldFrame) {
+            void dungeonAttack(index === 0 ? 'guard' : 'melee');
+            return;
+          }
           const t = game.techniques[index];
           if (t) void useTechnique(t.id);
         }
@@ -312,16 +370,173 @@ const portraitControls = mountPortraitControls(root, {
     } else if (phase === 'press') {
       if (action === 'dodge') {
         const input = portraitControls.input;
-        game.dodge(
+        void stepPlayer(
           Math.hypot(input.x, input.y) > 0.1 ? Math.atan2(input.y, input.x) : game.player.heading,
         );
       } else act(action);
     }
   },
 });
+let placingEstate: { propertyId: string; station: StationKind; point?: Point } | null = null;
+const estatePlacementControls = document.createElement('section');
+estatePlacementControls.className = 'v-estate-placement';
+estatePlacementControls.hidden = true;
+estatePlacementControls.setAttribute('aria-label', 'Place construction');
+estatePlacementControls.innerHTML =
+  '<p role="status">Tap the ground to preview a footprint.</p><button data-estate-confirm disabled>Build here</button><button data-estate-cancel>Cancel</button>';
+(root.querySelector('.s-shell') ?? root).append(estatePlacementControls);
+function cancelBlueprint() {
+  placingEstate = null;
+  estatePlacementControls.hidden = true;
+}
+function showBlueprint() {
+  estatePlacementControls.hidden = !placingEstate;
+  estatePlacementControls.querySelector<HTMLButtonElement>('[data-estate-confirm]')!.disabled =
+    !placingEstate?.point;
+  estatePlacementControls.querySelector('p')!.textContent = placingEstate?.point
+    ? `Preview: ${placingEstate.point.x}, ${placingEstate.point.y} · checked on build`
+    : 'Tap the ground to preview a footprint.';
+}
+estatePlacementControls.querySelector<HTMLButtonElement>('[data-estate-cancel]')!.onclick = () => {
+  cancelBlueprint();
+  canvas.focus();
+};
+estatePlacementControls.querySelector<HTMLButtonElement>('[data-estate-confirm]')!.onclick =
+  async () => {
+    const plan = placingEstate;
+    if (!plan?.point) return;
+    const button =
+      estatePlacementControls.querySelector<HTMLButtonElement>('[data-estate-confirm]')!;
+    button.disabled = true;
+    const result = await fieldAction({
+      kind: 'property',
+      command: {
+        kind: 'build',
+        propertyId: plan.propertyId,
+        station: plan.station,
+        at: { spaceId: 'surface', ...plan.point },
+      },
+    });
+    if (placingEstate !== plan) return;
+    if (result.ok) {
+      cancelBlueprint();
+      toast(result.message);
+    } else showBlueprint();
+    canvas.focus();
+  };
+async function fieldAction(command: SystemsCommand): Promise<SystemsResult> {
+  if (sharedActionPending) return { ok: false, message: 'Finish the current action first.' };
+  const availability = game.fieldEffectAvailability(
+    command,
+    multiplayer.status === 'offline'
+      ? undefined
+      : { scope: `room:${multiplayer.room}:${multiplayer.peerId}`, actorId: multiplayer.peerId },
+  );
+  if (!availability.ok) {
+    toast(availability.message);
+    return availability;
+  }
+  sharedActionPending = true;
+  try {
+    let result: SystemsResult;
+    if (multiplayer.status === 'offline') result = game.fieldCommand(command);
+    else {
+      const receivingGame = game,
+        origin = {
+          scope: `room:${multiplayer.room}:${multiplayer.peerId}`,
+          actorId: multiplayer.peerId,
+        };
+      sendCombatPose(
+        true,
+        command.kind === 'underworld-attack' ||
+          command.kind === 'person-attack' ||
+          command.kind === 'hunt',
+      );
+      result = await multiplayer.systems(command);
+      if (
+        game !== receivingGame ||
+        origin.scope !== `room:${multiplayer.room}:${multiplayer.peerId}`
+      )
+        return { ok: false, message: 'That action belongs to the previous life or room.' };
+      const accepted = game.commitFieldResult(result, origin);
+      if (result.ok && result.recovery && game.phase === 'lost' && !accepted)
+        return {
+          ok: false,
+          message:
+            'This recovery receipt was not accepted for the current life. Reconnect to reconcile it.',
+        };
+    }
+    if (result.ok && result.transition) inputSequences.transition();
+    if (result.ok) {
+      save();
+      updateUI();
+    } else toast(result.message);
+    return result;
+  } finally {
+    sharedActionPending = false;
+  }
+}
+const livingUi = createLivingSystemsUi({
+  openModal: (html, mount) => {
+    openModal('living-systems', html, true);
+    mount(el('s-modal'));
+  },
+  closeModal,
+  frame: () =>
+    multiplayer.status === 'offline' ? game.livingSystemsFrame : multiplayer.systemsFrame,
+  command: fieldAction,
+  onTravel: (destination, label) => {
+    if (destination.spaceId !== game.spaceId) {
+      toast('Return through the stairs before beginning this journey.');
+      return;
+    }
+    closeModal();
+    travel.travel(game.player, destination, { label });
+  },
+  onPlace: (propertyId, station) => {
+    closeModal();
+    placingEstate = { propertyId, station };
+    showBlueprint();
+  },
+});
+const travelUi = mountTravelUi(root, {
+  lock: (run) => {
+    const input = portraitControls.input;
+    const direction =
+      Math.hypot(input.x, input.y) > 0.1
+        ? input
+        : { x: Math.cos(game.player.heading), y: Math.sin(game.player.heading) };
+    portraitControls.release();
+    keys.clear();
+    walk = [];
+    travelTarget = undefined;
+    travel.lock(direction, run);
+  },
+  stop: () => {
+    cancelBlueprint();
+    travel.cancel('stop');
+    travelTarget = undefined;
+    walk = [];
+  },
+  home: () => {
+    if (game.spaceId !== 'surface') {
+      toast('Return through the marked stairs before traveling home.');
+      return;
+    }
+    const home = game.livingSystemsFrame?.home ?? game.progression.homes[0];
+    if (!home) {
+      toast('Acquire a home to make it your travel destination.');
+      return;
+    }
+    walk = [];
+    travelTarget = undefined;
+    travel.travel(game.player, home, { label: 'name' in home ? String(home.name) : 'Your home' });
+  },
+});
 const mobileViewport = mountMobileViewport(root, () => resize(), {
   installed: () => appMode().installedWindow,
   onPortraitBlocked: () => {
+    inputSequences.transition();
     portraitControls.release();
     heldAttack = false;
     heldTechnique = null;
@@ -371,6 +586,7 @@ function toast(message: string, duration = 4500) {
 let ownsLifeTab = false;
 function save() {
   if (!started || !ownsLifeTab) return false;
+  const profileStart = frameProfiler.active ? performance.now() : 0;
   try {
     stored = JSON.stringify(game.save());
     localStorage.setItem(storageKey, stored);
@@ -387,6 +603,8 @@ function save() {
       'This browser could not store your progress. Free some browser storage before leaving this life.',
     );
     return false;
+  } finally {
+    if (frameProfiler.active) frameProfiler.record('save', performance.now() - profileStart);
   }
 }
 function activate(next: Stichos) {
@@ -397,6 +615,9 @@ function activate(next: Stichos) {
   el('v-chat-log').replaceChildren();
   setChatCollapsed(innerWidth < 900);
   game = next;
+  game.enableLivingSystems(getBrowserPlayerId());
+  travel.cancel('world-change');
+  game.world.onGenerationWork = (ms) => frameProfiler.record('generation', ms);
   roomName = next.player.name;
   currentPlanet = planetAt(next.world.seed, next.world.generation);
   void import('./store')
@@ -428,7 +649,9 @@ function setInert(value: boolean) {
     .forEach((n) => (n.inert = value));
 }
 let modalInvoker: HTMLElement | null = null;
-function openModal(kind: string, html: string) {
+function openModal(kind: string, html: string, completeWindow = false) {
+  cancelBlueprint();
+  inputSequences.transition();
   heldAttack = false;
   heldTechnique = null;
   portraitControls.release();
@@ -450,8 +673,14 @@ function openModal(kind: string, html: string) {
   const container = el('s-modal');
   container.hidden = false;
   container.className = `s-modal ${kind === 'title' ? 'is-title' : kind === 'map' ? 'is-atlas' : kind === 'journal' ? 'is-notebook' : ''}`;
-  container.innerHTML = `<section class="s-window" role="dialog" aria-modal="true" data-screen="${kind}">${html}</section>`;
-  if (!['title', 'journal', 'map'].includes(kind)) {
+  container.innerHTML = completeWindow
+    ? html
+    : `<section class="s-window" role="dialog" aria-modal="true" data-screen="${kind}">${html}</section>`;
+  const dialog = container.querySelector<HTMLElement>('.s-window')!;
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.dataset.screen = kind;
+  if (!completeWindow && !['title', 'journal', 'map'].includes(kind)) {
     const frame = container.querySelector<HTMLElement>('.s-window')!;
     frame.classList.add('s-bounded-window');
     const header = document.createElement('header');
@@ -507,8 +736,8 @@ function openModal(kind: string, html: string) {
   }
   const heading = container.querySelector('h2');
   if (heading) {
-    heading.id = 's-modal-heading';
-    container.querySelector('section')!.setAttribute('aria-labelledby', heading.id);
+    if (!heading.id) heading.id = 's-modal-heading';
+    dialog.setAttribute('aria-labelledby', heading.id);
   }
   // Opening a phone dialog must not summon the keyboard before the player asks to type.
   container
@@ -519,6 +748,7 @@ function openModal(kind: string, html: string) {
   container.scrollTop = 0;
 }
 function closeModal() {
+  inputSequences.transition();
   disposeSpecial?.();
   disposeSpecial = null;
   modalRevision++;
@@ -857,6 +1087,7 @@ const recovering = [
   ],
 ];
 function transfer(kind: 'opening' | 'arrival' | 'return' | 'clinic', after?: () => void) {
+  inputSequences.transition();
   voiceUi.release();
   closeModal();
   paused = true;
@@ -1070,9 +1301,11 @@ function soundSettings() {
     .querySelector('.v-audio-controls')!
     .insertAdjacentHTML(
       'afterend',
-      `<div class="v-audio-controls"><label>Combat effect intensity<output id="v-effect-value">${Math.round(effectIntensity * 100)}%</output><input id="v-effect-intensity" aria-label="Combat effect intensity" type="range" min="0" max="1" step="0.05" value="${effectIntensity}"></label><p>Lower intensity keeps warnings visible and reduces flashes, particles and camera motion. Your device’s reduced-motion preference is always respected.</p></div>${portraitControls.settingsHtml()}`,
+      `<div class="v-audio-controls"><label>Combat effect intensity<output id="v-effect-value">${Math.round(effectIntensity * 100)}%</output><input id="v-effect-intensity" aria-label="Combat effect intensity" type="range" min="0" max="1" step="0.05" value="${effectIntensity}"></label><p>Lower intensity keeps warnings visible and reduces flashes, particles and camera motion. Your device’s reduced-motion preference is always respected.</p></div><label><input id="v-audio-reduced" type="checkbox" ${settings.reducedSensory ? 'checked' : ''}> Gentler sound dynamics and fewer activity calls</label>${portraitControls.settingsHtml()}`,
     );
   portraitControls.bindSettings(settingsPanel);
+  el<HTMLInputElement>('v-audio-reduced').onchange = (e) =>
+    audio.setSettings({ reducedSensory: (e.target as HTMLInputElement).checked });
   el<HTMLInputElement>('v-effect-intensity').oninput = (event) => {
     effectIntensity = Number((event.target as HTMLInputElement).value);
     el('v-effect-value').textContent = `${Math.round(effectIntensity * 100)}%`;
@@ -1164,6 +1397,12 @@ function pauseMenu() {
     '<button id="v-menu-expeditions">Field expeditions</button>',
   );
   el('v-menu-expeditions').onclick = () => expeditionMenu();
+  el('v-menu-expeditions').insertAdjacentHTML(
+    'afterend',
+    '<button id="v-menu-field">Field supplies & crafting</button><button id="v-menu-charters">Guilds & local reputation</button><button id="v-menu-estates">Estates, workers & production</button><button id="v-menu-signs">Read local signs & laws</button>',
+  );
+  for (const section of ['field', 'charters', 'estates', 'signs'] as const)
+    el(`v-menu-${section}`).onclick = () => livingUi.open(section);
   el('s-pause-life').onclick = () => lifeMenu();
   el('s-pause-together').onclick = togetherMenu;
   el('v-sound-settings').onclick = soundSettings;
@@ -1253,6 +1492,12 @@ function moreActions() {
     'actions',
     `<h2>Actions</h2><div class="s-menu-buttons"><button id="v-more-gear">Equipment</button><button id="v-more-ward">Release a ward</button><button id="v-more-journal">Notebook</button><button id="v-more-life">Life, home and work</button><button id="v-more-warm">Use warming tonic · ${game.inventory.tonic ?? 0}</button><button id="v-more-eat">Eat food · ${game.inventory.rations ?? 0}</button><button id="v-more-phrases">Words and shortcuts</button><button id="v-more-atlas">World atlas</button><button id="v-more-galaxy">Galaxy</button><button id="v-more-work">Construct & automate</button><button id="v-more-observe">Observe wildlife</button><button id="v-more-sound">Sound, voice & app settings</button></div>`,
   );
+  el('v-more-gear').insertAdjacentHTML(
+    'beforebegin',
+    '<button id="v-more-field">Field satchel, guilds & estates</button><button id="v-more-signs">Read nearby signs & laws</button>',
+  );
+  el('v-more-field').onclick = () => livingUi.open();
+  el('v-more-signs').onclick = () => livingUi.open('signs');
   el('v-more-gear').onclick = equipmentMenu;
   el('v-more-gear').insertAdjacentHTML(
     'afterend',
@@ -1428,6 +1673,10 @@ function atlasSource(): AtlasSource {
   };
 }
 function mapModal() {
+  if (game.underworldFrame) {
+    livingUi.open('field');
+    return;
+  }
   const places = game.discoveredSites;
   openModal(
     'map',
@@ -1526,19 +1775,37 @@ function mapModal() {
 }
 
 function lost() {
-  const anotherMind = game.transferReady && !!game.transferCandidate;
+  const shared = game.usesSharedLivingSystems,
+    underground = game.spaceId !== 'surface';
+  const anotherMind = !shared && game.transferReady && !!game.transferCandidate;
   openModal(
     'lost',
-    `<span class="s-chapter">The breath stops</span><h2>${anotherMind ? 'Your mind is still here.' : 'A voice pulls you back.'}</h2><p>${anotherMind ? 'The restored signal can hold your consciousness while another body wakes. Your choices remain in this world.' : 'The clinic knows this face. Somewhere beyond the cold, someone is still trying to reach you.'}</p><button id="s-return-life" class="s-primary">${anotherMind ? 'Follow the other heartbeat' : 'Wake at the clinic'}</button>`,
+    `<span class="s-chapter">The breath stops</span><h2>${anotherMind ? 'Your mind is still here.' : 'A voice pulls you back.'}</h2><p>${shared ? 'The rescue signal can restore this body at its admitted refuge. Your identity and possessions remain bound to this life.' : anotherMind ? 'The restored signal can hold your consciousness while another body wakes. Your choices remain in this world.' : 'The clinic knows this face. Somewhere beyond the cold, someone is still trying to reach you.'}</p>${underground || shared ? `<p>The rescue signal returns this body to ${underground ? 'the expedition entrance' : 'its established surface anchor'}. One fifth of carried field coins funds the recall, with a thirty-second recovery between rescues.</p>` : ''}<button id="s-return-life" class="s-primary">${underground ? 'Recall the expedition' : shared ? 'Request a surface rescue' : anotherMind ? 'Follow the other heartbeat' : 'Wake at the clinic'}</button>`,
   );
-  el('s-return-life').onclick = () =>
+  el('s-return-life').onclick = async () => {
+    const recoveringGame = game;
+    if (underground || shared) {
+      const button = el('s-return-life') as HTMLButtonElement;
+      button.disabled = true;
+      const result = await fieldAction({
+        kind: underground ? 'underworld-recover' : 'surface-recover',
+      });
+      if (!result.ok || game !== recoveringGame) {
+        if (button.isConnected) button.disabled = false;
+        return;
+      }
+    }
     transfer(anotherMind ? 'return' : 'clinic', () => {
-      game.reincarnate();
+      if (game !== recoveringGame) return;
+      if (underground || shared) game.finishExpeditionRecovery();
+      else game.reincarnate();
       lastPhase = game.phase;
     });
+  };
 }
 el('v-pack-close').onclick = () => setSatchel(false);
 function setSatchel(open: boolean) {
+  if (root.classList.contains('satchel-open') !== open) inputSequences.transition();
   keys.clear();
   walk = [];
   voiceUi.release();
@@ -1624,6 +1891,7 @@ function updateDialogue() {
   el('s-dialogue').hidden = !d;
   const signature = JSON.stringify(d);
   if (signature === dialogueSignature) return;
+  inputSequences.transition();
   dialogueSignature = signature;
   if (!d) return;
   keys.clear();
@@ -1649,7 +1917,7 @@ function updateDialogue() {
       : undefined;
     const item = selected && !stock ? (selected.id.split(':')[1] as ItemId) : null;
     el('s-dialogue').innerHTML =
-      `<section role="dialog" aria-label="Trade with ${esc(d.speaker)}"><div class="s-dialogue-heading"><div><small>Merchant · ${game.player.coins} coins</small><h2>${esc(d.speaker)}</h2></div><button id="s-dialogue-close" aria-label="Finish trading">×</button></div><div class="s-trade-tabs"><button data-trade-tab="buy" aria-pressed="${tradeTab === 'buy'}">Buy</button><button data-trade-tab="sell" aria-pressed="${tradeTab === 'sell'}">Sell</button></div><div class="s-trade-workspace"><div class="s-trade-list">${choices.map((c) => `<button data-trade-select="${esc(c.id)}" aria-pressed="${c.id === selected?.id}">${esc(c.label)}</button>`).join('') || '<p>No items to sell.</p>'}</div><article class="s-trade-detail">${selected ? `${stock ? weaponIcon(stock.seed, stock.kind, 112) : item && ITEMS[item] ? itemIcon(item, 112) : ''}<h3>${esc(stock?.profile.name ?? (item ? game.itemName(item) : selected.label))}</h3><p>${stock ? `${stock.profile.damage} strength · ${stock.profile.range.toFixed(2)} reach · ${stock.profile.cooldown.toFixed(2)}s recovery` : item ? esc(ITEMS[item].description) : ''}</p>${stock ? `<p>${esc(stock.profile.construction)}</p><p>${esc(stock.profile.effectDescription)}</p>` : `<label>Quantity<select id="v-trade-quantity"><option value="1">1</option><option value="5">5</option><option value="10">10</option></select></label>`}<button id="v-trade-confirm" ${selected.disabled ? 'disabled' : ''}>${esc(selected.label)}</button>${selected.disabled ? '<small>More coins or space are needed.</small>' : ''}` : '<p>Choose something to inspect.</p>'}</article></div></section>`;
+      `<section role="dialog" aria-label="Trade with ${esc(d.speaker)}"><div class="s-dialogue-heading"><div><small>Merchant · ${game.player.coins} coins</small><h2>${esc(d.speaker)}</h2></div><button id="s-dialogue-close" aria-label="Finish trading">×</button></div><p class="v-trade-reaction">${esc(d.text)}</p><div class="s-trade-tabs"><button data-trade-tab="buy" aria-pressed="${tradeTab === 'buy'}">Buy</button><button data-trade-tab="sell" aria-pressed="${tradeTab === 'sell'}">Sell</button></div><div class="s-trade-workspace"><div class="s-trade-list">${choices.map((c) => `<button data-trade-select="${esc(c.id)}" aria-pressed="${c.id === selected?.id}">${esc(c.label)}</button>`).join('') || '<p>No items to sell.</p>'}</div><article class="s-trade-detail">${selected ? `${stock ? weaponIcon(stock.seed, stock.kind, 112) : item && ITEMS[item] ? itemIcon(item, 112) : ''}<h3>${esc(stock?.profile.name ?? (item ? game.itemName(item) : selected.label))}</h3><p>${stock ? `${stock.profile.damage} strength · ${stock.profile.range.toFixed(2)} reach · ${stock.profile.cooldown.toFixed(2)}s recovery` : item ? esc(ITEMS[item].description) : ''}</p>${stock ? `<p>${esc(stock.profile.construction)}</p><p>${esc(stock.profile.effectDescription)}</p>` : `<label>Quantity<select id="v-trade-quantity"><option value="1">1</option><option value="5">5</option><option value="10">10</option></select></label>`}<button id="v-trade-confirm" ${selected.disabled ? 'disabled' : ''}>${esc(selected.label)}</button>${selected.disabled ? '<small>More coins or space are needed.</small>' : ''}` : '<p>Choose something to inspect.</p>'}</article></div></section>`;
     const refresh = () => {
       dialogueSignature = '';
       updateDialogue();
@@ -1710,6 +1978,7 @@ function updateDialogue() {
   };
 }
 function updateUI() {
+  if (modal === 'living-systems') livingUi.update();
   const techniquePair = game.techniques;
   const cooldownProfile =
     game.activeArtifact?.properties ??
@@ -1731,29 +2000,42 @@ function updateUI() {
     wardCooldown: game.player.wardCooldown / 8,
     dodgeCooldown: game.dodgeCooldown / STEP_RULES.cooldown,
     charge: heldTechnique ? Math.min(1, (performance.now() - heldTechnique.start) / 650) : 0,
-    techniques: [0, 1].map((i) => ({
-      label: techniquePair[i]?.name ?? (i ? 'Level 4' : 'Equip'),
-      shortLabel: techniquePair[i]
-        ? (
-            {
-              crescent: 'Reap',
-              faultline: 'Seam',
-              fan: 'Split',
-              thread: 'Needle',
-              pulse: 'Root',
-              bloom: 'Bloom',
-            } as const
-          )[techniquePair[i].id]
-        : 'Equip',
-      lockedReason: !techniquePair[i]
-        ? 'Equip a weapon'
-        : !techniquePair[i].unlocked
-          ? 'Unlocks at level 4'
-          : 'This room needs the action expansion',
-      cooldown: techniquePair[i] ? techniquePair[i].remaining / techniquePair[i].cooldown : 0,
-      unlocked:
-        !!techniquePair[i]?.unlocked && (!game.usesSharedCombat || multiplayer.actionExpansion),
-    })) as NonNullable<PortraitControlState['techniques']>,
+    techniques: [0, 1].map((i) =>
+      game.underworldFrame
+        ? {
+            label: i
+              ? 'Close strike · third linked hit has extra force'
+              : 'Guard · absorb a timed attack',
+            shortLabel: i ? 'Close' : 'Guard',
+            lockedReason: '',
+            cooldown: game.player.attackCooldown,
+            unlocked: true,
+          }
+        : {
+            label: techniquePair[i]?.name ?? (i ? 'Level 4' : 'Equip'),
+            shortLabel: techniquePair[i]
+              ? (
+                  {
+                    crescent: 'Reap',
+                    faultline: 'Seam',
+                    fan: 'Split',
+                    thread: 'Needle',
+                    pulse: 'Root',
+                    bloom: 'Bloom',
+                  } as const
+                )[techniquePair[i].id]
+              : 'Equip',
+            lockedReason: !techniquePair[i]
+              ? 'Equip a weapon'
+              : !techniquePair[i].unlocked
+                ? 'Unlocks at level 4'
+                : 'This room needs the action expansion',
+            cooldown: techniquePair[i] ? techniquePair[i].remaining / techniquePair[i].cooldown : 0,
+            unlocked:
+              !!techniquePair[i]?.unlocked &&
+              (!game.usesSharedCombat || multiplayer.actionExpansion),
+          },
+    ) as NonNullable<PortraitControlState['techniques']>,
   });
   const soundMuted = audio.getSettings().muted;
   el('s-sound').textContent = soundMuted ? '♩' : '♫';
@@ -1834,7 +2116,15 @@ function updateUI() {
   el('s-quest-title').textContent = q?.title ?? 'An unfinished life';
   el('s-quest-objective').textContent =
     q?.objective ?? 'Follow the roads. Find the people whose lives touch yours.';
-  const target = q?.target;
+  if (game.livingSystemsFrame?.underground) {
+    const floor = game.livingSystemsFrame.underground;
+    el('s-place').textContent = floor.name;
+    el('s-map-label').textContent = `Underworks · depth ${floor.depth + 1}`;
+    el('s-weather').textContent = `${game.worldTime.label} · ${floor.biome} · sheltered`;
+    el('s-quest-title').textContent = 'The buried works';
+    el('s-quest-objective').textContent = floor.objective;
+  }
+  const target = game.underworldFrame ? undefined : q?.target;
   if (target) {
     const dx = target.x - p.x,
       dy = target.y - p.y;
@@ -1934,6 +2224,10 @@ function updateUI() {
   updateDialogue();
 }
 function drawMap(target = el<HTMLCanvasElement>('s-map'), scale = 5) {
+  if (game.underworldFrame) {
+    drawUnderworldMap(target, game.underworldFrame, game.player);
+    return;
+  }
   atlasPainter.draw(target, atlasSource(), { x: game.player.x, y: game.player.y, scale }, false);
 }
 
@@ -2644,6 +2938,18 @@ el('v-map-more').onclick = () => renderer.setZoom(renderer.zoom + 0.15);
 document
   .querySelectorAll<HTMLElement>('[data-phrase-send]')
   .forEach((n) => (n.onclick = () => void say(phraseShortcuts[Number(n.dataset.phraseSend)])));
+multiplayer.onSystemEvents = (events) => game.acceptSystemEvents(events);
+multiplayer.onSystems = (frame) => {
+  const space = game.spaceId;
+  game.applySystemsFrame(frame, multiplayer.peerId, multiplayer.room);
+  if (space !== game.spaceId) inputSequences.transition();
+  if (modal === 'living-systems') livingUi.update();
+};
+multiplayer.onSystemsCorrection = (point, reason) => {
+  inputSequences.transition();
+  game.correctSystemsPosition(point);
+  toast(reason);
+};
 multiplayer.onLiving = (frame) => game.applyLivingWorldFrame(frame);
 multiplayer.onChange = () => {
   if (multiplayer.status !== 'online') game.clearLivingWorldAuthority();
@@ -2651,6 +2957,7 @@ multiplayer.onChange = () => {
   if (multiplayer.status === 'online') roomError = '';
   if (multiplayer.status !== 'online') registeredProduction.clear();
   game.setSharedWorld(multiplayer.status !== 'offline');
+  if (multiplayer.status === 'offline' && started) game.enableLivingSystems(getBrowserPlayerId());
   game.setSharedCombat(multiplayer.status !== 'offline', `${game.world.seed}:${multiplayer.room}`);
   el('s-together').textContent =
     multiplayer.status === 'online'
@@ -2743,10 +3050,61 @@ multiplayer.onWorld = (change) => {
 };
 async function interactShared(id?: string, keepRoute = false) {
   if (sharedActionPending || game.phase !== 'playing') return;
+  const fieldDrop = game.livingSystemsFrame?.economy.drops.find(
+    (d) => (!id || d.id === id) && Math.hypot(d.x - game.player.x, d.y - game.player.y) < 2.2,
+  );
+  if (fieldDrop) {
+    const result = await fieldAction({ kind: 'claim', targetId: fieldDrop.id });
+    toast(result.message);
+    return;
+  }
+  if (game.spaceId !== 'surface') {
+    const feature = game.livingSystemsFrame?.underground?.features
+      .filter(
+        (f) => (!id || f.id === id) && Math.hypot(f.x - game.player.x, f.y - game.player.y) <= 2.2,
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - game.player.x, a.y - game.player.y) -
+          Math.hypot(b.x - game.player.x, b.y - game.player.y),
+      )[0];
+    if (feature) {
+      const result = await fieldAction({ kind: 'underworld-interact', targetId: feature.id });
+      toast(result.message);
+    } else livingUi.open('field');
+    return;
+  }
+  const entrance = game.livingSystemsFrame?.entrances.find(
+    (e) =>
+      (!id || id === `entrance:${e.settlementId}`) &&
+      Math.hypot(e.x - game.player.x, e.y - game.player.y) <= 1.6,
+  );
+  if (entrance) {
+    const result = await fieldAction({
+      kind: 'underworld-enter',
+      settlementId: entrance.settlementId,
+    });
+    toast(result.message);
+    return;
+  }
   const target = id
     ? (game.world.propsAround(game.player.x, game.player.y, 2.2).find((p) => p.id === id) ??
       game.npcs.find((n) => n.id === id))
     : game.nearby();
+  if (
+    target &&
+    !('role' in target) &&
+    target.kind === 'door' &&
+    !game.removed.has(target.id) &&
+    multiplayer.status === 'offline'
+  ) {
+    const access = game.fieldDoorAccess(target);
+    if (access && !access.allowed) {
+      toast(access.label);
+      livingUi.open('signs', `sign:${target.id}`);
+      return;
+    }
+  }
   if (
     !target ||
     'role' in target ||
@@ -2831,6 +3189,62 @@ async function interactShared(id?: string, keepRoute = false) {
 }
 async function combatShared(kind: 'attack' | 'ward') {
   if (sharedActionPending || game.phase !== 'playing') return;
+  if (game.underworldFrame) {
+    const attack =
+      kind === 'ward'
+        ? 'guard'
+        : game.livingSystemsFrame?.equipment.kind === 'bow'
+          ? 'ranged'
+          : game.livingSystemsFrame?.equipment.kind === 'staff'
+            ? 'spell'
+            : 'melee';
+    await dungeonAttack(attack);
+    return;
+  }
+  if (kind === 'attack' && game.usesLivingSystems && game.player.attackCooldown <= 0) {
+    const aim = touchAiming ? game.aimAssist() : pointer;
+    const person = game.livingSystemsFrame?.actors
+      .filter((a) => a.hp > 0 && (a.hostile || (aim && Math.hypot(a.x - aim.x, a.y - aim.y) < 0.8)))
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - game.player.x, a.y - game.player.y) -
+          Math.hypot(b.x - game.player.x, b.y - game.player.y),
+      )[0];
+    if (person && Math.hypot(person.x - game.player.x, person.y - game.player.y) < 8) {
+      const heading = Math.atan2(person.y - game.player.y, person.x - game.player.x);
+      const result = await fieldAction({ kind: 'person-attack', targetId: person.id, heading });
+      if (result.ok) game.showSystemAttack('melee', heading);
+      return;
+    }
+    const animal = game.fauna
+      .filter(
+        (a) =>
+          Math.hypot(a.x - game.player.x, a.y - game.player.y) < 2.8 &&
+          (a.dangerous || (aim && Math.hypot(a.x - aim.x, a.y - aim.y) < 1)),
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.x - game.player.x, a.y - game.player.y) -
+          Math.hypot(b.x - game.player.x, b.y - game.player.y),
+      )[0];
+    if (animal) {
+      const result = await fieldAction({ kind: 'hunt', targetId: animal.id });
+      if (result.ok) {
+        game.showSystemAttack(
+          'melee',
+          Math.atan2(animal.y - game.player.y, animal.x - game.player.x),
+        );
+        audio.playWorldEvent({
+          kind: animal.kind === 'bird' ? 'bird' : animal.dangerous ? 'predator' : 'grazer',
+          species: animal.kind,
+          state: result.killed ? 'death' : 'hurt',
+          id: animal.id,
+          distance: Math.hypot(animal.x - game.player.x, animal.y - game.player.y),
+        });
+      }
+      return;
+    }
+  }
   if (multiplayer.status === 'offline') {
     if (kind === 'attack') game.attack(touchAiming ? game.aimAssist() : (pointer ?? undefined));
     else game.ward();
@@ -2866,9 +3280,38 @@ async function combatShared(kind: 'attack' | 'ward') {
     if (document.hidden && !modal && !transferStarted) pauseMenu();
   }
 }
+async function dungeonAttack(attack: 'melee' | 'ranged' | 'spell' | 'guard') {
+  if (sharedActionPending || game.player.attackCooldown > 0) return;
+  const enemy = game.underworldFrame?.state.enemies
+    .filter((e) => e.hp > 0)
+    .sort(
+      (a, b) =>
+        Math.hypot(a.x - game.player.x, a.y - game.player.y) -
+        Math.hypot(b.x - game.player.x, b.y - game.player.y),
+    )[0];
+  const target = touchAiming ? enemy : pointer;
+  const heading = target
+    ? Math.atan2(target.y - game.player.y, target.x - game.player.x)
+    : game.player.heading;
+  const result = await fieldAction({ kind: 'underworld-attack', attack, heading });
+  if (result.ok) game.showSystemAttack(attack, heading);
+  else game.player.attackCooldown = 0.15;
+}
+async function stepPlayer(heading = game.player.heading) {
+  if (game.spaceId !== 'surface') {
+    if (sharedActionPending || game.dodgeCooldown > 0) return;
+    const result = await fieldAction({ kind: 'underworld-attack', attack: 'dodge', heading });
+    if (!result.ok) return;
+  }
+  game.dodge(heading);
+}
 async function useTechnique(id: TechniqueId) {
   if (!started || paused || modal || sharedActionPending || transferStarted || game.dialogue)
     return;
+  if (game.underworldFrame) {
+    await dungeonAttack(id === game.techniques[0]?.id ? 'guard' : 'melee');
+    return;
+  }
   const target = touchAiming ? game.aimAssist() : (pointer ?? undefined);
   if (!game.usesSharedCombat) {
     const result = game.technique(id, target);
@@ -2932,6 +3375,10 @@ async function parleyShared() {
   }
 }
 function act(command: string) {
+  if (travel.active) {
+    travel.cancel(command === 'interact' ? 'interaction' : 'danger');
+    travelTarget = undefined;
+  }
   if (
     !started ||
     paused ||
@@ -2970,16 +3417,14 @@ function approach(target: Prop | Npc) {
     updateUI();
     return;
   }
-  const route = findWalkingPath(game.player, options, (x, y) =>
-    game.world.blocked(x, y, game.removed, true),
-  );
-  if (route.length) {
-    walk = route;
-    walkTarget = target.id;
-    walkStuck = 0;
+  const destination = options.find((p) => !game.world.blocked(p.x, p.y, game.removed, true));
+  if (destination) {
+    walk = [];
+    travelTarget = target.id;
+    travel.travel(game.player, destination, { label: target.name });
     return;
   }
-  toast('There is no clear route from here. Try the road around it.');
+  toast('There is no clear approach to this place.');
 }
 function identify(point: Point): Prop | Npc | null {
   const candidates: [Prop | Npc, number][] = [];
@@ -3029,6 +3474,11 @@ canvas.addEventListener('pointerdown', (event) => {
     root.classList.contains('satchel-open')
   )
     return;
+  if (event.button !== 0 && event.button !== 2) return;
+  if (!inputSequences.claim(event, canvas)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  canvas.setPointerCapture(event.pointerId);
   void audio.start(game.world.seed);
   canvas.focus();
   const bounds = canvas.getBoundingClientRect();
@@ -3042,6 +3492,81 @@ canvas.addEventListener('pointerdown', (event) => {
     return;
   }
   if (event.button !== 0) return;
+  if (placingEstate) {
+    placingEstate.point = { x: Math.round(ground.x), y: Math.round(ground.y) };
+    showBlueprint();
+    return;
+  }
+  const drop = game.livingSystemsFrame?.economy.drops.find(
+    (d) => Math.hypot(d.x - ground.x, d.y - ground.y) < 0.7,
+  );
+  if (drop) {
+    if (Math.hypot(drop.x - game.player.x, drop.y - game.player.y) < 2.2)
+      void fieldAction({ kind: 'claim', targetId: drop.id });
+    else {
+      travelTarget = drop.id;
+      travel.travel(game.player, drop, { label: drop.name });
+    }
+    return;
+  }
+  if (game.underworldFrame) {
+    const floor = game.underworldFrame;
+    const enemy = floor.state.enemies.find(
+      (e) => e.hp > 0 && Math.hypot(e.x - ground.x, e.y - ground.y) < 1,
+    );
+    if (enemy) {
+      pointer = enemy;
+      touchAiming = false;
+      void combatShared('attack');
+      return;
+    }
+    const feature = floor.plan.features.find(
+      (f) => Math.hypot(f.x - ground.x, f.y - ground.y) < 0.8,
+    );
+    if (feature && Math.hypot(feature.x - game.player.x, feature.y - game.player.y) <= 2.2) {
+      void interactShared(feature.id);
+      return;
+    }
+    const destination = feature
+      ? [
+          [0, 1],
+          [1, 0],
+          [0, -1],
+          [-1, 0],
+        ]
+          .map(([dx, dy]) => ({ x: feature.x + dx, y: feature.y + dy }))
+          .filter((p) => !game.navigationBlocked(p.x, p.y))
+          .sort(
+            (a, b) =>
+              Math.hypot(a.x - game.player.x, a.y - game.player.y) -
+              Math.hypot(b.x - game.player.x, b.y - game.player.y),
+          )[0]
+      : ground;
+    if (destination) {
+      travelTarget = feature?.id;
+      travel.travel(game.player, destination, { label: feature?.name ?? 'Selected ground' });
+    }
+    return;
+  }
+  const sign = game.livingSystemsFrame?.signs.find(
+    (s) => Math.hypot(s.x + 0.4 - ground.x, s.y - 0.8 - ground.y) < 0.65,
+  );
+  if (sign) {
+    livingUi.open('signs', sign.id);
+    return;
+  }
+  const entrance = game.livingSystemsFrame?.entrances.find(
+    (e) => Math.hypot(e.x - ground.x, e.y - ground.y) < 0.8,
+  );
+  if (entrance) {
+    if (Math.hypot(entrance.x - game.player.x, entrance.y - game.player.y) <= 2.2)
+      void fieldAction({ kind: 'underworld-enter', settlementId: entrance.settlementId });
+    else {
+      travelTarget = `entrance:${entrance.settlementId}`;
+      travel.travel(game.player, entrance, { label: entrance.name });
+    }
+    return;
+  }
   if (placingProduction) {
     const preview = game.productionPreview(placingProduction, ground);
     if (!preview.ok) {
@@ -3066,10 +3591,9 @@ canvas.addEventListener('pointerdown', (event) => {
   const target = identify(ground);
   if (target) approach(target);
   else {
-    walk = pathTo(ground);
-    walkTarget = undefined;
-    walkStuck = 0;
-    if (!walk.length) toast('That ground is blocked. Follow a clear path.');
+    walk = [];
+    travelTarget = undefined;
+    travel.travel(game.player, ground);
   }
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -3159,16 +3683,37 @@ el('v-mobile-more').onclick = moreActions;
 el('s-mobile-pack').onclick = () => setSatchel(!root.classList.contains('satchel-open'));
 el('s-sound').onclick = soundSettings;
 document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((button) => {
+  let owner: number | null = null;
+  releaseDirectionPointers.add(() => {
+    const previous = owner;
+    owner = null;
+    keys.delete(button.dataset.move!);
+    if (previous !== null && button.hasPointerCapture(previous))
+      button.releasePointerCapture(previous);
+  });
   button.onpointerdown = (e) => {
     e.preventDefault();
-    if (paused || game.dialogue || transferStarted || root.classList.contains('satchel-open'))
+    e.stopPropagation();
+    if (
+      owner !== null ||
+      paused ||
+      game.dialogue ||
+      transferStarted ||
+      root.classList.contains('satchel-open')
+    )
       return;
+    if (!inputSequences.claim(e, button)) return;
+    owner = e.pointerId;
     if (isTextEntry(document.activeElement)) (document.activeElement as HTMLElement).blur();
     button.setPointerCapture(e.pointerId);
     keys.add(button.dataset.move!);
     walk = [];
   };
-  const release = () => keys.delete(button.dataset.move!);
+  const release = (event: PointerEvent) => {
+    if (event.pointerId !== owner) return;
+    owner = null;
+    keys.delete(button.dataset.move!);
+  };
   button.onpointerup = release;
   button.onpointercancel = release;
   button.onlostpointercapture = release;
@@ -3208,6 +3753,11 @@ addEventListener('keydown', (e) => {
   )
     return;
   const k = e.key.toLowerCase();
+  if (
+    (k === ' ' || k === 'enter') &&
+    (e.target as HTMLElement).closest('button,a,summary,[role=button]')
+  )
+    return;
   if (transferStarted) {
     if (k === 'enter' && (e.target as HTMLElement).closest('button')) return;
     if (['escape', 'enter', 'arrowright', 'arrowleft'].includes(k)) {
@@ -3220,6 +3770,12 @@ addEventListener('keydown', (e) => {
   if (k === 'escape' && root.classList.contains('satchel-open') && !modal) {
     e.preventDefault();
     setSatchel(false);
+    return;
+  }
+  if (k === 'escape' && placingEstate) {
+    e.preventDefault();
+    cancelBlueprint();
+    toast('Blueprint cancelled.');
     return;
   }
   if (k === 'escape' && placingProduction) {
@@ -3305,7 +3861,7 @@ addEventListener('keydown', (e) => {
   }
   if (k === ' ') {
     e.preventDefault();
-    game.dodge();
+    void stepPlayer();
   }
   if (k === 'q' || k === '2') act('ward');
   const item = (
@@ -3341,6 +3897,8 @@ addEventListener('beforeunload', save);
 function frame(now: number) {
   const elapsed = Math.max(0, (now - frameLast) / 1000),
     dt = Math.min(0.05, elapsed);
+  frameProfiler.begin(performance.now(), elapsed * 1000);
+  let profileMark = frameProfiler.active ? performance.now() : 0;
   frameLast = now;
   frames++;
   frameSeconds += elapsed;
@@ -3351,9 +3909,42 @@ function frame(now: number) {
   }
   updateTransfer(now);
   if (transferStarted || game.dialogue) voiceUi.release();
+  if (
+    travel.active &&
+    (!started ||
+      paused ||
+      modal ||
+      game.dialogue ||
+      transferStarted ||
+      game.phase !== 'playing' ||
+      document.hidden)
+  )
+    travel.cancel(
+      document.hidden
+        ? 'background'
+        : game.phase !== 'playing'
+          ? 'death'
+          : game.dialogue
+            ? 'dialogue'
+            : 'menu',
+    );
+  travelUi.update(
+    travel.feedback,
+    started &&
+      !paused &&
+      !modal &&
+      !game.dialogue &&
+      !transferStarted &&
+      !root.classList.contains('satchel-open'),
+    !!game.livingSystemsFrame?.home || game.progression.homes.length > 0,
+  );
   const sharedTime = multiplayer.worldElapsedSeconds;
   if (sharedTime !== null) game.applyWorldClock(sharedTime);
   experience.update(now);
+  if (frameProfiler.active) {
+    frameProfiler.record('audio', performance.now() - profileMark);
+    profileMark = performance.now();
+  }
   if (
     started &&
     !paused &&
@@ -3412,16 +4003,49 @@ function frame(now: number) {
         toast('The path is blocked. Choose another way around.');
       }
     }
-    if (!sharedActionPending || combatPending)
-      game.update(dt, { x, y, run: keys.has('shift') || touchInput.run });
+    const navigationMark = frameProfiler.active ? performance.now() : 0;
+    const travelInput = travel.update({
+      speed: game.player.speed * (travel.feedback.run && game.player.stamina > 1 ? 1.55 : 1),
+      position: game.player,
+      dt,
+      manual: { x, y, run: keys.has('shift') || touchInput.run },
+      obstructed: travelObstructed,
+      danger: game.npcs.some(
+        (n) => n.hostile && n.hp > 0 && Math.hypot(n.x - game.player.x, n.y - game.player.y) < 6,
+      ),
+      crowd: game.npcs.filter((n) => n.hp > 0 && n.id !== game.occupiedNpcId),
+    });
+    travelObstructed = false;
+    if (travelInput.doorId && !sharedActionPending) void interactShared(travelInput.doorId, true);
+    if (travel.feedback.state === 'arrived' && travelTarget) {
+      const target = travelTarget;
+      travelTarget = undefined;
+      void interactShared(target);
+    }
+    if (frameProfiler.active)
+      frameProfiler.record('navigation', performance.now() - navigationMark);
+    if (!sharedActionPending || combatPending) {
+      profileMark = frameProfiler.active ? performance.now() : 0;
+      const beforeX = game.player.x,
+        beforeY = game.player.y;
+      game.update(dt, travelInput);
+      travelObstructed =
+        travel.active &&
+        Math.hypot(travelInput.x, travelInput.y) > 0.1 &&
+        Math.hypot(game.player.x - beforeX, game.player.y - beforeY) < 0.001;
+      if (frameProfiler.active) frameProfiler.record('simulation', performance.now() - profileMark);
+    }
     if (game.phase !== lastPhase) {
       lastPhase = game.phase;
       if (game.phase === 'lost') lost();
     }
     audio.setIntensity(
-      game.npcs.some(
-        (n) => n.hostile && n.hp > 0 && Math.hypot(n.x - game.player.x, n.y - game.player.y) < 6,
-      )
+      game.underworldFrame?.state.enemies.some(
+        (e) => e.hp > 0 && Math.hypot(e.x - game.player.x, e.y - game.player.y) < 8,
+      ) ||
+        game.npcs.some(
+          (n) => n.hostile && n.hp > 0 && Math.hypot(n.x - game.player.x, n.y - game.player.y) < 6,
+        )
         ? 0.7
         : game.player.breath < 25
           ? 0.4
@@ -3432,6 +4056,7 @@ function frame(now: number) {
       breathLast = now;
     }
   }
+  profileMark = frameProfiler.active ? performance.now() : 0;
   for (const event of game.drainEvents()) {
     if (event.kind === 'transfer' && ignoreNextTransfer) {
       ignoreNextTransfer = false;
@@ -3458,8 +4083,12 @@ function frame(now: number) {
     }
     if (event.kind === 'transfer' && !transferStarted) transfer('return');
   }
+  if (frameProfiler.active) frameProfiler.record('audio', performance.now() - profileMark);
+  profileMark = frameProfiler.active ? performance.now() : 0;
   sendCombatPose();
   void syncProduction(now);
+  if (frameProfiler.active) frameProfiler.record('network', performance.now() - profileMark);
+  profileMark = frameProfiler.active ? performance.now() : 0;
   renderer.draw(game, {
     peers: multiplayer.peers,
     voice: {
@@ -3477,6 +4106,13 @@ function frame(now: number) {
             valid: game.productionPreview(placingProduction, pointer).ok,
           }
         : undefined,
+    estatePlacement: placingEstate?.point
+      ? {
+          kind: placingEstate.station,
+          worldX: placingEstate.point.x,
+          worldY: placingEstate.point.y,
+        }
+      : undefined,
     playerAppearance: game.displayAppearance,
     emotes: peerEmotes,
     reducedMotion: reducedMotion.matches,
@@ -3495,6 +4131,8 @@ function frame(now: number) {
       : 0,
     pointer: walk[0] ?? null,
   });
+  if (frameProfiler.active) frameProfiler.record('render', performance.now() - profileMark);
+  profileMark = frameProfiler.active ? performance.now() : 0;
   if (now - uiLast > 160) {
     updateUI();
     renderRoster();
@@ -3504,15 +4142,25 @@ function frame(now: number) {
     drawMap();
     mapLast = now;
   }
+  if (frameProfiler.active) frameProfiler.record('ui', performance.now() - profileMark);
   if (now - saveLast > 8000 && started && !transferStarted) {
     save();
     saveLast = now;
   }
   if (now > toastUntil) el('s-toast').classList.remove('visible');
+  frameProfiler.end(performance.now());
   requestAnimationFrame(frame);
 }
 Object.defineProperty(window, 'stichos', {
   value: Object.freeze({
+    startProfile: () => frameProfiler.start(),
+    stopProfile: () => frameProfiler.stop(),
+    get performanceTrace() {
+      return frameProfiler.snapshot();
+    },
+    get audioProfile() {
+      return audio.getProfile();
+    },
     get state() {
       return structuredClone({
         seed: game.world.seed,
@@ -3535,6 +4183,13 @@ Object.defineProperty(window, 'stichos', {
         viewport: mobileViewport.diagnostics,
         portraitControls: portraitControls.diagnostics,
         touchControls: portraitControls.diagnostics,
+        inputSequences: inputSequences.diagnostics,
+        livingSystems: game.livingSystemsFrame,
+        actorLedger: game.actorDiagnostics,
+        framePerformance: frameProfiler.diagnostics,
+        groundRaster: renderer.groundDiagnostics,
+        travel: travel.feedback,
+        navigation: travel.navigation.diagnostics,
         combatFeedback: renderer.feedbackDiagnostics,
         techniques: game.techniques,
         expeditions: game.expeditions,

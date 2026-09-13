@@ -26,7 +26,7 @@ export function footstepMaterial(tile: Tile): FoleyEvent['material'] {
     case 'water':
       return 'water';
     case 'mud':
-      return 'dirt';
+      return 'mud';
     default:
       return 'grass';
   }

@@ -351,12 +351,17 @@ export class VoiceRelay {
         !p.closing &&
         this.current(p.game) &&
         p.game.room === c.game.room &&
+        (p.game.member.spaceId ?? 'surface') === (c.game.member.spaceId ?? 'surface') &&
         !p.blocked.has(c.game.member.id) &&
         !p.muted.has(c.game.member.id) &&
         !c.blocked.has(p.game.member.id) &&
         Math.hypot(p.game.member.x - c.game.member.x, p.game.member.y - c.game.member.y) <=
           this.ranges[c.mode],
     );
+  }
+  stopForTransition(game) {
+    for (const connection of this.connections)
+      if (connection.game === game) this.stop(connection, true);
   }
   stop(c, grace = false) {
     if (!c.active) return;

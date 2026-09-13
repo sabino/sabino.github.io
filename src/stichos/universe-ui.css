@@ -1390,9 +1390,9 @@ select:focus-visible {
 }
 .v-pack-management button {
   flex: 1;
-  padding: 5px !important;
-  font-size: 10px !important;
-  min-height: 0 !important;
+  padding: 8px !important;
+  font-size: 12px !important;
+  min-height: 44px !important;
 }
 .s-sidebar .s-pocketbook {
   padding: 5px;

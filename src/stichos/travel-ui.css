@@ -1,0 +1,54 @@
+.v-travel-controls {
+  position: absolute;
+  z-index: 7;
+  left: 50%;
+  top: 76px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  text-align: center;
+  pointer-events: none;
+}
+.v-travel-controls[hidden],
+.v-travel-controls button[hidden] {
+  display: none;
+}
+.v-travel-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+.v-travel-buttons button {
+  pointer-events: auto;
+  min-height: 44px;
+  padding: 5px 10px;
+  background: #132d35ed;
+  border: 1px solid #90afa7;
+  color: #f0e9cf;
+  font-size: 12px;
+  touch-action: manipulation;
+}
+.v-travel-buttons button:focus-visible {
+  outline: 3px solid #efd590;
+  outline-offset: 2px;
+}
+.v-travel-buttons button:disabled {
+  opacity: 0.5;
+}
+.v-travel-status:not(:empty) {
+  display: block;
+  padding: 5px 8px;
+  margin-top: 3px;
+  color: #f0e9cf;
+  background: #10232be8;
+  font-size: 12px;
+  max-width: 290px;
+}
+@media (pointer: coarse) and (max-width: 899px) {
+  .v-travel-controls {
+    top: 65px;
+  }
+  .v-travel-buttons button {
+    font-size: 11px;
+    padding-inline: 8px;
+  }
+}

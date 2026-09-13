@@ -1,13 +1,22 @@
+import { drawSignSymbol } from './world-signs.ts';
+import { ESTATE_STATIONS } from './property-world.ts';
+import {
+  drawEstateStation,
+  drawEstatePlacement,
+  type EstatePlacementPreview,
+} from './estate-art.ts';
+import { GroundRaster } from './ground-raster.ts';
 import { drawFauna } from './fauna-art.ts';
 import { CombatFeedback, feedbackSettings, legacyCombatCue } from './combat-feedback.ts';
 import type { CombatCue } from './combat-feedback.ts';
 import { drawCombatGround, drawCombatForeground } from './combat-feedback-render.ts';
+import { drawUnderworld } from './underworld-art.ts';
 import { makeRegionalBuilding } from './architecture.ts';
 import { regionalGroundColor, blendColor } from './biome-art.ts';
 import type { Peer } from './multiplayer-protocol';
 import type { ProductionMachine } from './multiplayer-protocol';
 import type { ProductionKind } from './production';
-import { drawProduction } from './production-art';
+import { drawProduction } from './production-art.ts';
 import type { Stichos } from './session.ts';
 import type { Effect, Npc, Point, Prop, Tile, ArchitecturalCulture } from './types.ts';
 import { random, deriveSeed } from '../procedural/random.ts';
@@ -67,7 +76,10 @@ export class StichosRenderer {
   private lightSprites = new Map<string, HTMLCanvasElement>();
   private atmosphereLayer: HTMLCanvasElement | null = null;
   private contactTexture: HTMLCanvasElement | null = null;
-  private grounds = new Map<string, HTMLCanvasElement>();
+  private grounds = new GroundRaster();
+  get groundDiagnostics() {
+    return this.grounds.diagnostics;
+  }
   private worldSeed = -1;
   private worldGeneration = -1;
   private lastTime = -1;
@@ -86,7 +98,9 @@ export class StichosRenderer {
   get feedbackDiagnostics() {
     return this.combatFeedback.diagnostics;
   }
-  constructor(readonly canvas: HTMLCanvasElement) {
+  readonly canvas: HTMLCanvasElement;
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
     this.resize(canvas.clientWidth || 1000, canvas.clientHeight || 700);
   }
@@ -134,6 +148,7 @@ export class StichosRenderer {
       peers?: readonly Peer[];
       machines?: readonly ProductionMachine[];
       placement?: { kind: ProductionKind; point: Point; valid: boolean };
+      estatePlacement?: EstatePlacementPreview;
       playerAppearance?: Stichos['player']['appearance'];
       emotes?: ReadonlyMap<string, { text: string; until: number }>;
       voice?: {
@@ -162,7 +177,7 @@ export class StichosRenderer {
       this.siteWalls.clear();
       this.siteTopology.clear();
       this.art = new StichosArt();
-      this.grounds.clear();
+      this.grounds.reset();
       this.footsteps = [];
       this.previousPlayer = null;
       this.npcPrevious.clear();
@@ -288,6 +303,49 @@ export class StichosRenderer {
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#b8cada';
     ctx.fillRect(0, 0, this.width, this.height);
+    const underground = game.underworldFrame;
+    if (underground) {
+      // Match the surface camera's portrait framing, including its low player anchor.
+      drawUnderworld(ctx, underground, {
+        width: this.width,
+        height: this.height,
+        x: this.camera.x - this.cameraImpulse.x / unit,
+        y: this.camera.y - (this.height * 0.08) / unit - this.cameraImpulse.y / unit,
+        tileSize: unit,
+        time: game.time,
+        reducedMotion: this.reducedMotion,
+        intensity: options.effectIntensity,
+      });
+      drawCombatGround(ctx, this.combatFeedback, (p) => this.worldToScreen(p), unit);
+      const bodies = [
+        { depth: game.player.y, draw: () => this.person(game, game.player, true) },
+        ...(options.peers ?? [])
+          .filter((p) => (p.spaceId ?? 'surface') === game.spaceId)
+          .map((p) => ({
+            depth: p.y,
+            draw: () => this.remotePerson(p, options.emotes?.get(p.id)),
+          })),
+      ];
+      bodies.sort((a, b) => a.depth - b.depth).forEach((p) => p.draw());
+      for (const drop of game.livingSystemsFrame?.economy.drops ?? [])
+        if (drop.spaceId === game.spaceId) {
+          const p = this.worldToScreen(drop);
+          rect(
+            ctx,
+            p.x - 5 * scale,
+            p.y - 8 * scale,
+            10 * scale,
+            8 * scale,
+            drop.rarity === 'exceptional' ? '#edc577' : '#b19ad1',
+          );
+          rect(ctx, p.x - scale, p.y - 8 * scale, 2 * scale, 8 * scale, '#eee1ae');
+        }
+      for (const effect of game.effects) if (!legacyCombatCue(effect)) this.effect(effect);
+      drawCombatForeground(ctx, this.combatFeedback, (p) => this.worldToScreen(p), unit);
+      if (options.pointer) this.pointer(game, options.pointer);
+      this.previousPlayer = { x: game.player.x, y: game.player.y };
+      return;
+    }
     const left = Math.floor(this.camera.x - this.width / unit / 2) - 2,
       right = Math.ceil(this.camera.x + this.width / unit / 2) + 2;
     const top = Math.floor(this.camera.y - (this.height * 0.58) / unit) - 8,
@@ -576,14 +634,118 @@ export class StichosRenderer {
         ),
     });
     for (const peer of options.peers ?? []) {
+      if ((peer.spaceId ?? 'surface') !== game.spaceId) continue;
       if (Math.hypot(peer.x - game.player.x, peer.y - game.player.y) > radius) continue;
       drawables.push({
         depth: peer.y,
         draw: () => this.remotePerson(peer, options.emotes?.get(peer.id)),
       });
     }
+    const systems = game.livingSystemsFrame;
+    if (systems) {
+      for (const drop of systems.economy.drops) {
+        if (drop.spaceId !== 'surface') continue;
+        const p = this.worldToScreen(drop);
+        if (p.x < -30 || p.x > this.width + 30 || p.y < -30 || p.y > this.height + 30) continue;
+        const tint =
+          drop.rarity === 'exceptional'
+            ? '#efcc78'
+            : drop.rarity === 'rare'
+              ? '#b19cda'
+              : drop.rarity === 'uncommon'
+                ? '#8bd0aa'
+                : '#c1c9b4';
+        drawables.push({
+          depth: drop.y - 0.1,
+          draw: () => {
+            rect(ctx, p.x - 9 * scale, p.y, 18 * scale, 5 * scale, '#1b2f35');
+            if (drop.harvest) {
+              rect(ctx, p.x - 9 * scale, p.y - 4 * scale, 17 * scale, 6 * scale, '#795b4c');
+              rect(ctx, p.x - 5 * scale, p.y - 7 * scale, 10 * scale, 6 * scale, '#aa8162');
+            } else {
+              rect(ctx, p.x - 6 * scale, p.y - 9 * scale, 12 * scale, 10 * scale, '#8e7654');
+              rect(ctx, p.x - 6 * scale, p.y - 9 * scale, 12 * scale, 2 * scale, tint);
+              rect(ctx, p.x - 1 * scale, p.y - 7 * scale, 2 * scale, 7 * scale, '#dfc485');
+            }
+            if (drop.rarity !== 'common') this.glow(p.x, p.y - 4 * scale, 18 * scale, tint, 0.1);
+          },
+        });
+      }
+      for (const estate of systems.property.estates)
+        for (const station of estate.stations) {
+          if (station.spaceId !== 'surface') continue;
+          const footprint = ESTATE_STATIONS[station.kind];
+          const p = this.worldToScreen({
+            x: station.x + (footprint.width - 1) / 2,
+            y: station.y + (footprint.height - 1) / 2,
+          });
+          if (p.x < -60 || p.x > this.width + 60 || p.y < -60 || p.y > this.height + 60) continue;
+          drawables.push({
+            depth: station.y + footprint.height - 1,
+            draw: () =>
+              drawEstateStation(
+                ctx,
+                station.kind,
+                p.x,
+                p.y,
+                scale,
+                game.time,
+                /working|processing/i.test(station.status),
+                this.reducedMotion,
+              ),
+          });
+        }
+    }
     drawCombatGround(ctx, this.combatFeedback, (point) => this.worldToScreen(point), unit);
     drawables.sort((a, b) => a.depth - b.depth).forEach((item) => item.draw());
+    if (systems)
+      for (const sign of systems.signs) {
+        if (
+          sign.spaceId !== 'surface' ||
+          Math.hypot(sign.x - game.player.x, sign.y - game.player.y) > 10
+        )
+          continue;
+        const p = this.worldToScreen(sign);
+        const size = 18 * scale;
+        rect(ctx, p.x + 14 * scale, p.y - 26 * scale, 2 * scale, 24 * scale, '#685f4b');
+        drawSignSymbol(
+          ctx,
+          sign.symbol,
+          p.x + 6 * scale,
+          p.y - 40 * scale,
+          size,
+          sign.heraldry?.color ?? '#f1ddb0',
+        );
+      }
+    for (const entry of systems?.entrances ?? []) {
+      const p = this.worldToScreen(entry);
+      if (p.x < -40 || p.x > this.width + 40 || p.y < -40 || p.y > this.height + 40) continue;
+      rect(ctx, p.x - 14 * scale, p.y - 8 * scale, 28 * scale, 14 * scale, '#28373c');
+      for (let i = 0; i < 4; i++)
+        rect(
+          ctx,
+          p.x - (12 - i * 2) * scale,
+          p.y + (-6 + i * 3) * scale,
+          (24 - i * 4) * scale,
+          2 * scale,
+          i % 2 ? '#4b666e' : '#82959a',
+        );
+      drawSignSymbol(ctx, 'dungeon', p.x + 12 * scale, p.y - 30 * scale, 18 * scale, '#e4c787');
+    }
+    for (const contact of systems?.contacts ?? []) {
+      const npc = game.npcs.find((n) => n.id === contact.npcId),
+        faction = systems?.factions.find((f) => f.id === contact.factionId);
+      if (!npc || !faction) continue;
+      const p = this.worldToScreen(npc);
+      drawSignSymbol(
+        ctx,
+        'guild',
+        p.x + 12 * scale,
+        p.y - 45 * scale,
+        12 * scale,
+        faction.heraldry.color,
+      );
+    }
     const time = game.worldTime;
     const interior = game.world.tile(game.player.x, game.player.y).terrain === 'floor';
     if (time.nightness > 0) {
@@ -648,6 +810,8 @@ export class StichosRenderer {
     drawCombatForeground(ctx, this.combatFeedback, (point) => this.worldToScreen(point), unit);
     if (options.pointer && !options.transfer) this.pointer(game, options.pointer);
     this.atmosphere(game, !!options.reducedMotion);
+    if (options.estatePlacement && !options.transfer)
+      drawEstatePlacement(ctx, options.estatePlacement, (p) => this.worldToScreen(p), unit);
     if (options.transfer) this.transfer(playerScreen, options.transfer);
     this.previousPlayer = { x: game.player.x, y: game.player.y };
     if (this.npcPrevious.size > 256) {
@@ -666,39 +830,12 @@ export class StichosRenderer {
       maxX = Math.floor((this.camera.x + this.width / u / 2 + 1) / 16);
     const minY = Math.floor((this.camera.y - (this.height * 0.58) / u - 1) / 16),
       maxY = Math.floor((this.camera.y + (this.height * 0.42) / u + 1) / 16);
+    this.grounds.beginFrame();
+    const tileAt = (x: number, y: number) => game.world.tile(x, y);
     for (let cy = minY; cy <= maxY; cy++)
       for (let cx = minX; cx <= maxX; cx++) {
-        const key = `${cx},${cy}`;
-        let canvas = this.grounds.get(key);
-        if (!canvas) {
-          canvas = document.createElement('canvas');
-          canvas.width = canvas.height = 512;
-          const ctx = canvas.getContext('2d', { alpha: false })!,
-            tiles: Tile[] = [];
-          ctx.imageSmoothingEnabled = false;
-          for (let dy = -1; dy <= 16; dy++)
-            for (let dx = -1; dx <= 16; dx++) {
-              const tile = game.world.tile(cx * 16 + dx, cy * 16 + dy);
-              tiles.push(tile);
-              ctx.drawImage(this.art.ground(tile).image, dx * 32, dy * 32);
-            }
-          for (const tile of tiles) {
-            const p = { x: (tile.x - cx * 16) * 32 + 16, y: (tile.y - cy * 16) * 32 + 16 };
-            this.transition(game, tile, ctx, 32, p);
-            if (tile.landscape) this.landscapedGround(tile, ctx, p);
-            if (
-              tile.terrain === 'grass' &&
-              tile.biome === 'settlement' &&
-              (game.world.generation < 4 || tile.cultivated)
-            )
-              this.garden(game, tile, ctx, 32, p);
-          }
-          this.grounds.set(key, canvas);
-          while (this.grounds.size > 64) this.grounds.delete(this.grounds.keys().next().value!);
-        } else {
-          this.grounds.delete(key);
-          this.grounds.set(key, canvas);
-        }
+        const canvas = this.grounds.request(cx, cy, tileAt);
+        if (!canvas) continue;
         const p = this.worldToScreen({ x: cx * 16 - 0.5, y: cy * 16 - 0.5 });
         this.ctx.drawImage(
           canvas,
@@ -708,6 +845,21 @@ export class StichosRenderer {
           Math.ceil(u * 16),
         );
       }
+    this.grounds.work((tile, ctx, cx, cy) => {
+      const p = { x: (tile.x - cx * 16) * 32 + 16, y: (tile.y - cy * 16) * 32 + 16 };
+      this.transition(game, tile, ctx, 32, p);
+      if (tile.landscape) this.landscapedGround(tile, ctx, p);
+      if (
+        tile.terrain === 'grass' &&
+        tile.biome === 'settlement' &&
+        (game.world.generation < 4 || tile.cultivated)
+      )
+        this.garden(game, tile, ctx, 32, p);
+    });
+    // Warm the ring around the viewport. Visible chunks always receive admission first.
+    for (let cy = minY - 1; cy <= maxY + 1; cy++)
+      for (let cx = minX - 1; cx <= maxX + 1; cx++)
+        if (cx < minX || cx > maxX || cy < minY || cy > maxY) this.grounds.request(cx, cy, tileAt);
   }
 
   /** Maintained planting parcels come from world generation; these low leaves never impersonate a resource. */
@@ -1354,7 +1506,14 @@ export class StichosRenderer {
     const attack = action ? 0 : pose.attack;
     const facing = humanoidDirection(person.heading);
     const appearance = player
-      ? person.appearance
+      ? game.authoritativeKit
+        ? {
+            ...person.appearance,
+            weapon: game.authoritativeKit.kind,
+            weaponSeed: game.authoritativeKit.seed,
+            artifactDesign: undefined,
+          }
+        : person.appearance
       : game.appearanceForBody(person.appearance, (person as Npc).id);
     ctx.save();
     ctx.translate(p.x + pose.x * this.unit, p.y + pose.y * this.unit);
@@ -2759,11 +2918,11 @@ export class StichosRenderer {
 
   private pointer(game: Stichos, pointer: Point) {
     const world = pointer,
-      tile = game.world.tile(world.x, world.y),
+      tile = { x: Math.round(world.x), y: Math.round(world.y) },
       p = this.worldToScreen(tile),
       u = this.unit;
     if (Math.hypot(world.x - game.player.x, world.y - game.player.y) > 18) return;
-    const blocked = game.world.blocked(tile.x, tile.y, game.removed);
+    const blocked = game.navigationBlocked(tile.x, tile.y);
     const ctx = this.ctx;
     ctx.save();
     ctx.globalAlpha = 0.45;
@@ -2875,3 +3034,5 @@ export class StichosRenderer {
     ctx.restore();
   }
 }
+
+export { drawSurfaceMapSigns } from './map-signs.ts';

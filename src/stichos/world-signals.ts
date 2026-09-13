@@ -8,12 +8,13 @@ import type {
   Tile,
   TileEcology,
 } from './types.ts';
+import type { UnderworldPlan } from './underworld.ts';
 export interface SignalWorld {
   tile(x: number, y: number): Tile;
   propsAround(x: number, y: number, radius: number): Prop[];
 }
 export interface WorldLocationSignal {
-  biome: Biome;
+  biome: Biome | 'underground';
   terrain: Terrain;
   interior: boolean;
   buildingKind?: BuildingKind;
@@ -24,8 +25,53 @@ export interface WorldLocationSignal {
   settlement: boolean;
   /** Tile distances, Infinity when outside the bounded sampling area. */
   featureDistances: { water: number; trees: number; fire: number };
-  /** The world has no dynamic weather simulation yet. Never invent a storm. */
-  weather: 'clear';
+  /** Only an actual weather simulation may supply a non-clear state. */
+  weather: 'clear' | 'rain' | 'storm' | 'snow';
+  rainIntensity?: number;
+  /** Semantic activity supplied by the simulation, never guessed from a music zone. */
+  audioContext?: {
+    population: number;
+    crowdDistance?: number;
+    crowdPan?: number;
+    dungeonDepth?: number;
+    specialNight?: boolean;
+    reputation?: 'trusted' | 'feared' | 'wanted' | 'unknown';
+    factionId?: string;
+    home?: boolean;
+    production?: number;
+    victory?: boolean;
+  };
+}
+
+/** Underground coordinates are a separate space, never coordinates on the surface.
+ * Water recordings contain outdoor detail, so cistern water is represented by its
+ * actual foot-contact material until a dedicated indoor water emitter is available.
+ * No weather, population or temperature simulation is invented for these floors.
+ */
+export function underworldLocationAt(
+  plan: Pick<UnderworldPlan, 'depth' | 'features'> | undefined,
+  point: Point,
+): WorldLocationSignal {
+  let fire = Infinity;
+  for (const feature of plan?.features ?? [])
+    if (feature.kind === 'rest')
+      fire = Math.min(fire, Math.hypot(feature.x - point.x, feature.y - point.y));
+  return {
+    biome: 'underground',
+    terrain: 'floor',
+    interior: true,
+    temperature: 0,
+    settlement: false,
+    featureDistances: { water: Infinity, trees: Infinity, fire },
+    weather: 'clear',
+    audioContext: {
+      population: 0,
+      // The world uses zero-based floors; the composer's depth signal is one-based.
+      dungeonDepth: plan ? plan.depth + 1 : undefined,
+      home: false,
+      production: 0,
+    },
+  };
 }
 /** Bounded 7x7 local probes + props within 8 tiles. Cache at the consumer, not per frame. */
 export function worldLocationAt(

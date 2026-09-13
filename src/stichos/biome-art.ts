@@ -148,121 +148,123 @@ function mineralSurface(c: Ctx, tile: Tile, base: string, basalt: boolean) {
 }
 
 export function makeRegionalGround(tile: Tile): Sprite {
+  return sprite(32, 32, 16, 16, (c) => paintRegionalGround(c, tile));
+}
+
+/** Identical pixel painter for the main-thread fallback and isolated raster worker. */
+export function paintRegionalGround(c: Ctx, tile: Tile): void {
   const r = random(deriveSeed(tile.seed % 32, 'ground-v4', tile.terrain)),
     base = regionalGroundColor(tile);
-  return sprite(32, 32, 16, 16, (c) => {
-    rect(c, 0, 0, 32, 32, base);
-    if (['grass', 'sand', 'mud', 'snow'].includes(tile.terrain)) {
-      for (let y = 0; y < 32; y += 2)
-        for (let x = 0; x < 32; x += 2) {
-          const wx = tile.x * 32 + x,
-            wy = tile.y * 32 + y;
-          const broad = surfaceField(wx, wy, 126, 593);
-          const fold = surfaceField(wx, wy, 37, 229);
-          let tone = (broad - 0.5) * 36 + (fold - 0.5) * 11;
-          if (tile.terrain === 'sand') {
-            const wave = Math.sin(wx / 53 + wy / 24 + broad * 3.2);
-            tone += Math.max(0, wave) * 9 - Math.max(0, -wave) * 5;
-          }
-          rect(c, x, y, 2, 2, shade(base, tone));
+  rect(c, 0, 0, 32, 32, base);
+  if (['grass', 'sand', 'mud', 'snow'].includes(tile.terrain)) {
+    for (let y = 0; y < 32; y += 2)
+      for (let x = 0; x < 32; x += 2) {
+        const wx = tile.x * 32 + x,
+          wy = tile.y * 32 + y;
+        const broad = surfaceField(wx, wy, 126, 593);
+        const fold = surfaceField(wx, wy, 37, 229);
+        let tone = (broad - 0.5) * 36 + (fold - 0.5) * 11;
+        if (tile.terrain === 'sand') {
+          const wave = Math.sin(wx / 53 + wy / 24 + broad * 3.2);
+          tone += Math.max(0, wave) * 9 - Math.max(0, -wave) * 5;
         }
+        rect(c, x, y, 2, 2, shade(base, tone));
+      }
+  }
+  if (['road', 'floor', 'wall'].includes(tile.terrain)) {
+    const wood = tile.architecture?.wallMaterial === 'timber' && !!tile.building;
+    if (
+      !wood &&
+      (tile.architecture?.technology ?? 0) > 0.62 &&
+      ['metal', 'glass', 'composite'].includes(tile.architecture?.wallMaterial ?? '')
+    ) {
+      const dark = shade(base, -18);
+      rect(c, 0, 0, 32, 32, shade(base, (tile.seed % 7) - 3));
+      rect(c, 0, 0, 32, 1, dark);
+      rect(c, 0, 0, 1, 32, dark);
+      rect(c, 2, 2, 28, 1, shade(base, 12));
+      rect(c, 2, 3, 1, 27, shade(base, 7));
+      if (tile.building) {
+        for (const x of [4, 27]) for (const y of [4, 27]) rect(c, x, y, 1, 1, shade(base, -26));
+      }
+      for (let n = 0; n < 15; n++) rect(c, r() * 32, r() * 32, 1, 1, shade(base, r() * 12 - 6));
+      return;
     }
-    if (['road', 'floor', 'wall'].includes(tile.terrain)) {
-      const wood = tile.architecture?.wallMaterial === 'timber' && !!tile.building;
-      if (
-        !wood &&
-        (tile.architecture?.technology ?? 0) > 0.62 &&
-        ['metal', 'glass', 'composite'].includes(tile.architecture?.wallMaterial ?? '')
-      ) {
-        const dark = shade(base, -18);
-        rect(c, 0, 0, 32, 32, shade(base, (tile.seed % 7) - 3));
-        rect(c, 0, 0, 32, 1, dark);
-        rect(c, 0, 0, 1, 32, dark);
-        rect(c, 2, 2, 28, 1, shade(base, 12));
-        rect(c, 2, 3, 1, 27, shade(base, 7));
-        if (tile.building) {
-          for (const x of [4, 27]) for (const y of [4, 27]) rect(c, x, y, 1, 1, shade(base, -26));
-        }
-        for (let n = 0; n < 15; n++) rect(c, r() * 32, r() * 32, 1, 1, shade(base, r() * 12 - 6));
-        return;
-      }
-      if (!wood) {
-        mineralSurface(c, tile, base, false);
-        return;
-      }
-      for (let y = -1, row = 0; y < 32; y += wood ? 5 : 7, row++)
-        for (let x = -10; x < 32; x += wood ? 34 : 11) {
-          const xx = x + (row % 2) * 5,
-            tone = shade(base, r() * 16 - 8);
-          rect(c, xx + 1, y + 1, wood ? 33 : 10, wood ? 4 : 6, tone);
-          rect(c, xx + 2, y + 1, wood ? 30 : 8, 1, shade(tone, 11));
-        }
-    } else if (tile.terrain === 'sand') {
-      // Wind combs long shared dune contours, rather than restarting a stripe on each square.
-      for (let y = 0; y < 32; y++)
-        for (let x = 0; x < 32; x += 2) {
-          const wx = tile.x * 32 + x,
-            wy = tile.y * 32 + y;
-          const contour = wy + Math.sin(wx / 47) * 5 + Math.sin(wx / 101) * 9;
-          if (((contour % 19) + 19) % 19 < 0.85) rect(c, x, y, 2, 1, shade(base, 9));
-        }
-      if (r() > 0.75)
-        for (let n = 0; n < 5; n++) {
-          const x = 8 + r() * 15,
-            y = 10 + r() * 12;
-          rect(c, x, y, 2 + r() * 2, 1, shade(base, -15));
-          rect(c, x, y - 1, 2, 1, shade(base, 12));
-        }
-    } else if (tile.terrain === 'basalt') {
-      mineralSurface(c, tile, base, true);
-    } else if (tile.terrain === 'water' || tile.terrain === 'ice') {
-      for (let i = 0; i < 8; i++)
-        rect(c, r() * 32, r() * 32, 3 + r() * 10, 1, shade(base, r() * 24 - 5));
-      if (tile.terrain === 'ice') line(c, 5, 0, 14, 20, shade(base, 24));
-    } else if (tile.terrain === 'bridge') {
-      for (let y = 0; y < 32; y += 6) {
-        rect(c, 0, y, 32, 5, shade(base, r() * 14 - 7));
-        rect(c, 2, y + 1, 28, 1, shade(base, 12));
-      }
-      for (const x of [3, 27]) for (let y = 2; y < 32; y += 6) rect(c, x, y, 1, 1, '#38474a');
-    } else {
-      for (let i = 0; i < 18; i++)
-        rect(c, r() * 32, r() * 32, 1 + r() * 3, 1, shade(base, r() * 24 - 12));
-      if (tile.terrain === 'grass') {
-        // Overlapping moss and low foliage clusters read as ground cover, with breathing space for paths.
-        const cover = tile.ecology?.groundCover ?? 0.5;
-        for (let patch = 0; patch < 2 + cover * 4; patch++) {
-          const px = r() * 32,
-            py = r() * 32,
-            span = 3 + r() * 6,
-            tone = shade(base, r() * 20 - 14);
-          for (let n = 0; n < 14; n++) {
-            const dx = (r() - 0.5) * span * 2,
-              dy = (r() - 0.5) * span;
-            if ((dx * dx) / span ** 2 + (dy * dy) / (span * 0.6) ** 2 > 1) continue;
-            rect(c, px + dx, py + dy, 2 + r() * 3, 1 + r() * 2, tone);
-            if (r() > 0.6) rect(c, px + dx, py + dy - 1, 2, 1, shade(tone, 25));
-          }
-        }
-        for (let i = 0; i < 5 + cover * 8; i++) {
-          const x = r() * 32,
-            y = r() * 32;
-          line(c, x, y, x - 1, y - 2, shade(base, -14));
-          rect(c, x + 1, y - 3, 1, 2, shade(base, 23));
-          if (
-            (tile.biome === 'meadow' || tile.biome === 'woodland' || tile.biome === 'settlement') &&
-            tile.temperature > 4 &&
-            r() > 0.72
-          )
-            rect(c, x, y - 3, 2, 1, r() > 0.5 ? '#dacb95' : '#af95af');
-        }
-      }
-      if (tile.terrain === 'mud')
-        for (let i = 0; i < 3; i++) rect(c, r() * 32, r() * 32, 4 + r() * 6, 2, '#63837a');
+    if (!wood) {
+      mineralSurface(c, tile, base, false);
+      return;
     }
-    for (let i = 0; i < 12; i++)
-      rect(c, r() * 32, r() * 32, 1, 1, shade(base, r() > 0.5 ? 18 : -15));
-  });
+    for (let y = -1, row = 0; y < 32; y += wood ? 5 : 7, row++)
+      for (let x = -10; x < 32; x += wood ? 34 : 11) {
+        const xx = x + (row % 2) * 5,
+          tone = shade(base, r() * 16 - 8);
+        rect(c, xx + 1, y + 1, wood ? 33 : 10, wood ? 4 : 6, tone);
+        rect(c, xx + 2, y + 1, wood ? 30 : 8, 1, shade(tone, 11));
+      }
+  } else if (tile.terrain === 'sand') {
+    // Wind combs long shared dune contours, rather than restarting a stripe on each square.
+    for (let y = 0; y < 32; y++)
+      for (let x = 0; x < 32; x += 2) {
+        const wx = tile.x * 32 + x,
+          wy = tile.y * 32 + y;
+        const contour = wy + Math.sin(wx / 47) * 5 + Math.sin(wx / 101) * 9;
+        if (((contour % 19) + 19) % 19 < 0.85) rect(c, x, y, 2, 1, shade(base, 9));
+      }
+    if (r() > 0.75)
+      for (let n = 0; n < 5; n++) {
+        const x = 8 + r() * 15,
+          y = 10 + r() * 12;
+        rect(c, x, y, 2 + r() * 2, 1, shade(base, -15));
+        rect(c, x, y - 1, 2, 1, shade(base, 12));
+      }
+  } else if (tile.terrain === 'basalt') {
+    mineralSurface(c, tile, base, true);
+  } else if (tile.terrain === 'water' || tile.terrain === 'ice') {
+    for (let i = 0; i < 8; i++)
+      rect(c, r() * 32, r() * 32, 3 + r() * 10, 1, shade(base, r() * 24 - 5));
+    if (tile.terrain === 'ice') line(c, 5, 0, 14, 20, shade(base, 24));
+  } else if (tile.terrain === 'bridge') {
+    for (let y = 0; y < 32; y += 6) {
+      rect(c, 0, y, 32, 5, shade(base, r() * 14 - 7));
+      rect(c, 2, y + 1, 28, 1, shade(base, 12));
+    }
+    for (const x of [3, 27]) for (let y = 2; y < 32; y += 6) rect(c, x, y, 1, 1, '#38474a');
+  } else {
+    for (let i = 0; i < 18; i++)
+      rect(c, r() * 32, r() * 32, 1 + r() * 3, 1, shade(base, r() * 24 - 12));
+    if (tile.terrain === 'grass') {
+      // Overlapping moss and low foliage clusters read as ground cover, with breathing space for paths.
+      const cover = tile.ecology?.groundCover ?? 0.5;
+      for (let patch = 0; patch < 2 + cover * 4; patch++) {
+        const px = r() * 32,
+          py = r() * 32,
+          span = 3 + r() * 6,
+          tone = shade(base, r() * 20 - 14);
+        for (let n = 0; n < 14; n++) {
+          const dx = (r() - 0.5) * span * 2,
+            dy = (r() - 0.5) * span;
+          if ((dx * dx) / span ** 2 + (dy * dy) / (span * 0.6) ** 2 > 1) continue;
+          rect(c, px + dx, py + dy, 2 + r() * 3, 1 + r() * 2, tone);
+          if (r() > 0.6) rect(c, px + dx, py + dy - 1, 2, 1, shade(tone, 25));
+        }
+      }
+      for (let i = 0; i < 5 + cover * 8; i++) {
+        const x = r() * 32,
+          y = r() * 32;
+        line(c, x, y, x - 1, y - 2, shade(base, -14));
+        rect(c, x + 1, y - 3, 1, 2, shade(base, 23));
+        if (
+          (tile.biome === 'meadow' || tile.biome === 'woodland' || tile.biome === 'settlement') &&
+          tile.temperature > 4 &&
+          r() > 0.72
+        )
+          rect(c, x, y - 3, 2, 1, r() > 0.5 ? '#dacb95' : '#af95af');
+      }
+    }
+    if (tile.terrain === 'mud')
+      for (let i = 0; i < 3; i++) rect(c, r() * 32, r() * 32, 4 + r() * 6, 2, '#63837a');
+  }
+  for (let i = 0; i < 12; i++) rect(c, r() * 32, r() * 32, 1, 1, shade(base, r() > 0.5 ? 18 : -15));
 }
 
 export interface TreeConstruction {

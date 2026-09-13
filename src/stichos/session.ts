@@ -1,3 +1,20 @@
+import { audibleSystemEvents, type SystemSoundEvent } from './system-events.ts';
+import {
+  SystemsReceiptLedger,
+  validSystemsReceiptSnapshot,
+  validateSystemResult,
+  SYSTEMS_RECEIPT_RULES,
+} from './systems-receipts.ts';
+import {
+  LivingSystems,
+  validLivingSystemsSave,
+  type LivingSystemsFrame,
+  type LivingSystemsSave,
+  type SystemsCommand,
+  type SystemsResult,
+} from './living-systems.ts';
+import { ActorLedger, validActorLedgerSave } from './actor-ledger.ts';
+import { validPersistentNpc } from './persistent-npc.ts';
 import { findWalkingPath } from './pathfinding.ts';
 import {
   techniqueById,
@@ -30,10 +47,14 @@ import {
   type EncounterPattern,
 } from './encounter-patterns.ts';
 import { footstepMaterial, physicalSound, resourceMaterial } from './foley-events.ts';
+import { UnderworldViewCache, underworldViewBlocked } from './underworld-view.ts';
+import { ESTATE_STATIONS } from './property-world.ts';
+import type { ActorAddress } from './actor-ledger.ts';
 import { worldTimeAt, type WorldTimeSignal } from './world-time.ts';
 import {
   LivingWorld,
   faunaContacts,
+  validFaunaLedger,
   validFaunaFrame,
   type FaunaActor,
   type FaunaFrame,
@@ -431,7 +452,365 @@ export class Stichos {
   events: GameEvent[] = [];
   time = 0;
   private calendarSeconds = 0;
-  private livingWorld = new LivingWorld({ maxNewCells: 2 });
+  private livingWorld = new LivingWorld({ maxNewCells: 2, persistent: true });
+  private actors = new ActorLedger<Npc>();
+  private localSystems?: LivingSystems;
+  private pendingSystemsSave?: LivingSystemsSave;
+  private fieldFrame: LivingSystemsFrame | null = null;
+  private fieldOwner = '';
+  private sharedSystems = false;
+  private activeFieldScope = '';
+  private recoveryAuthorization?: { scope: string; actorId: string; bodyId: string };
+  private fieldRefresh = 0;
+  private fieldSerial = 0;
+  private fieldReceipts = new SystemsReceiptLedger();
+  private fieldEquipment?: { kind: Weapon; seed: number };
+  private currentSpace = 'surface';
+  private dungeonViewCache = new UnderworldViewCache();
+  get spaceId() {
+    return this.currentSpace;
+  }
+  get authoritativeKit() {
+    return this.sharedSystems || this.currentSpace !== 'surface'
+      ? this.fieldFrame?.equipment
+      : undefined;
+  }
+  get combatAppearance() {
+    const kit = this.authoritativeKit;
+    return kit
+      ? {
+          ...this.player.appearance,
+          weapon: kit.kind,
+          weaponSeed: kit.seed,
+          artifactDesign: undefined,
+        }
+      : this.player.appearance;
+  }
+  get underworldFrame() {
+    const compact = this.fieldFrame?.underground;
+    return compact ? this.dungeonViewCache.frame(this.world.seed, compact) : null;
+  }
+  navigationBlocked(x: number, y: number, doorsOpen = false) {
+    const underground = this.underworldFrame;
+    if (underground) return underworldViewBlocked(underground, x, y);
+    return (
+      this.world.blocked(x, y, this.removed, doorsOpen) ||
+      !!this.fieldFrame?.property.estates.some((e) =>
+        e.stations.some(
+          (s) =>
+            Math.round(x) >= s.x &&
+            Math.round(y) >= s.y &&
+            Math.round(x) < s.x + ESTATE_STATIONS[s.kind].width &&
+            Math.round(y) < s.y + ESTATE_STATIONS[s.kind].height,
+        ),
+      )
+    );
+  }
+  private acceptSystemLocation(location: ActorAddress | undefined, force = false) {
+    if (!location) return;
+    if (force || location.spaceId !== this.currentSpace) {
+      this.currentSpace = location.spaceId;
+      this.player.x = location.x;
+      this.player.y = location.y;
+      this.arrows = [];
+      this.effects = [];
+      this.preparing = null;
+      this.stepping = null;
+      this.dialogue = null;
+      this.npcs = [];
+      this.residentPaths.clear();
+      this.residentRoutines.clear();
+    }
+  }
+  get livingSystemsFrame() {
+    return this.fieldFrame;
+  }
+  get usesSharedLivingSystems() {
+    return this.sharedSystems;
+  }
+  get usesLivingSystems() {
+    return !!this.localSystems || this.sharedSystems;
+  }
+  enableLivingSystems(ownerId: string) {
+    this.fieldOwner = ownerId;
+    this.activeFieldScope = this.soloFieldScope;
+    this.sharedSystems = false;
+    this.fieldEquipment ??= {
+      kind: this.player.appearance.weapon === 'none' ? 'sword' : this.player.appearance.weapon,
+      seed: deriveSeed(this.world.seed, ownerId, 'expedition-kit'),
+    };
+    this.localSystems ??= new LivingSystems(
+      this.world,
+      this.removed,
+      {
+        mode: 'solo',
+        fauna: () => this.livingFrame.actors,
+        woundFauna: (id, attacker, response) => {
+          this.livingWorld.wound(id, attacker, response);
+        },
+        defeatFauna: (id) => {
+          this.livingWorld.defeat(id);
+          this.livingFrame.actors = this.livingFrame.actors.filter((a) => a.id !== id);
+        },
+        legacyHome: () => this.progression.homes[0]?.buildingId,
+      },
+      this.pendingSystemsSave,
+    );
+    this.pendingSystemsSave = undefined;
+    this.fieldSerial = Math.max(this.fieldSerial, this.localSystems.nextSequence(ownerId) - 1);
+    this.acceptSystemLocation(this.localSystems.underworld.location(ownerId));
+    for (const npc of this.npcMemory.values()) {
+      this.localSystems.actors.register(
+        npc,
+        npc.hostile ? 'enemy' : npc.role === 'guard' ? 'guard' : 'npc',
+        this.worldTime.elapsedSeconds,
+        { home: { spaceId: 'surface', ...npc.home }, speed: npc.speed },
+      );
+      if (npc.hp <= 0 || this.removed.has(npc.id)) this.localSystems.actors.markDead(npc.id);
+    }
+    this.refreshSystems();
+  }
+  applySystemsFrame(frame: LivingSystemsFrame, ownerId: string, roomId = '') {
+    this.activeFieldScope = `room:${roomId}:${ownerId}`;
+    this.acceptSystemLocation(frame.location, !this.sharedSystems);
+    this.sharedSystems = true;
+    this.fieldOwner = ownerId;
+    this.fieldFrame = frame;
+    this.refreshNpcs();
+  }
+  private refreshSystems() {
+    if (!this.localSystems || this.sharedWorld || this.sharedSystems) return;
+    const peer = this.fieldPeer();
+    this.localSystems.setPeers([peer], this.worldTime.elapsedSeconds);
+    this.localSystems.tick(this.worldTime.elapsedSeconds);
+    for (const hit of this.localSystems.drainCombatEvents())
+      if (hit.targetId === this.fieldOwner && hit.spaceId === this.spaceId) this.hurt(hit.damage);
+    this.fieldFrame = this.localSystems.frame(peer);
+    this.acceptSystemEvents(this.localSystems.drainEvents());
+  }
+  acceptSystemEvents(events: readonly SystemSoundEvent[]) {
+    for (const event of audibleSystemEvents(events, {
+      spaceId: this.spaceId,
+      x: this.player.x,
+      y: this.player.y,
+    })) {
+      const sounds: Record<string, NonNullable<GameEvent['foley']>['kind']> = {
+        'guard-warning': 'guard',
+        'crime-witnessed': 'crime',
+        'construction-complete': 'construction',
+        'machine-cycle': 'machine',
+        'tool-impact': 'hit',
+        'door-open': 'door',
+        swing: 'swing',
+        spell: 'spell',
+        'loot-claim': 'pickup',
+        'store-sale': 'pickup',
+        'production-delivered': 'pickup',
+        harvest: 'harvest',
+        'animal-harvest': 'harvest',
+        heal: 'equip',
+        ui: 'ui',
+      };
+      const kind = sounds[event.kind];
+      if (kind && distance(event, this.player) < 18)
+        this.event(
+          'foley',
+          event.text,
+          physicalSound(
+            kind,
+            kind === 'hit' ? 'flesh' : kind === 'construction' ? 'wood' : 'metal',
+            event,
+            this.player,
+            event.actorId ?? event.kind,
+            this.world.seed,
+            0.45,
+          ),
+        );
+      else if (event.text) this.event('dialogue', event.text);
+    }
+  }
+  private fieldPeer() {
+    return {
+      id: this.fieldOwner,
+      spaceId: this.currentSpace,
+      x: this.player.x,
+      y: this.player.y,
+      heading: this.player.heading,
+      active: this.phase === 'playing',
+      combatActive: this.phase === 'playing' && !this.dialogue,
+      occupiedBodyId: this.occupiedNpcId ?? undefined,
+      weaponSeed: this.fieldEquipment?.seed ?? this.world.seed,
+      weaponKind: this.fieldEquipment?.kind ?? ('sword' as const),
+    };
+  }
+  private footContact(running: boolean): NonNullable<GameEvent['foley']> {
+    const underground = this.underworldFrame,
+      tile = underground ? undefined : this.world.tile(this.player.x, this.player.y);
+    const code =
+      underground?.plan.cells[
+        Math.round(this.player.y) * underground.plan.width + Math.round(this.player.x)
+      ];
+    return {
+      kind: 'footstep',
+      material: underground
+        ? code === 2
+          ? 'water'
+          : code === 3
+            ? 'wet-earth'
+            : code === 4
+              ? 'metal'
+              : 'stone'
+        : footstepMaterial(tile!),
+      footwear: 'boot',
+      weight: Math.min(
+        1,
+        0.25 + (this.carried / this.capacity) * 0.5 + (this.player.appearance.build - 0.8) * 0.2,
+      ),
+      moisture: underground
+        ? code === 2
+          ? 1
+          : code === 3
+            ? 0.7
+            : 0
+        : Math.max(
+            tile!.terrain === 'water' ? 1 : tile!.terrain === 'mud' ? 0.85 : 0,
+            (tile!.ecology?.moisture ?? 0) * 0.35,
+          ),
+      interior: !!underground || tile!.terrain === 'floor',
+      intensity: running ? 0.9 : 0.56,
+      speed: running ? 1 : 0,
+      actorId: this.bodyId,
+      variantSeed: Math.floor(this.distanceTraveled / 0.85) + this.world.seed,
+    };
+  }
+  correctSystemsPosition(location: ActorAddress) {
+    this.acceptSystemLocation(location, true);
+  }
+  showSystemAttack(kind: 'melee' | 'ranged' | 'spell' | 'guard', heading: number) {
+    const kit = this.fieldFrame?.equipment;
+    const profile = generatedWeaponProfile(kit?.seed ?? this.world.seed, kit?.kind ?? 'sword', 1);
+    this.player.heading = heading;
+    this.player.attackCooldown = kind === 'guard' ? 0.55 : Math.max(0.35, profile.cooldown);
+    const e = this.effect(
+      kind === 'guard' ? 'ward' : kind === 'ranged' ? 'arrow' : 'slash',
+      this.player,
+      kind === 'spell' ? '#a5d9d9' : profile.color,
+      kind === 'guard' ? 0.7 : 0.3,
+      heading,
+    );
+    e.actorId = this.bodyId;
+    this.event('foley', undefined, {
+      kind: kind === 'guard' ? 'equip' : kind === 'spell' ? 'spell' : 'swing',
+      material: kind === 'ranged' ? 'wood' : 'metal',
+      actorId: this.bodyId,
+      intensity: 0.7,
+      variantSeed: kit?.seed,
+    });
+  }
+
+  fieldEffectAvailability(command: SystemsCommand, origin?: { scope: string; actorId: string }) {
+    const recovering =
+      this.phase === 'lost' &&
+      (command.kind === 'underworld-recover' || command.kind === 'surface-recover');
+    if (
+      !recovering &&
+      command.kind !== 'consume' &&
+      !(command.kind === 'property' && command.command.kind === 'rest')
+    )
+      return { ok: true, message: '' };
+    if (!recovering && (this.phase !== 'playing' || this.player.hp <= 0))
+      return { ok: false, message: 'This body cannot use restorative supplies now.' };
+    const scope = origin?.scope ?? this.soloFieldScope,
+      actorId = origin?.actorId ?? this.fieldOwner;
+    if (origin && (scope !== this.activeFieldScope || actorId !== this.fieldOwner))
+      return { ok: false, message: 'Wait for this life to reconnect before using supplies.' };
+    const slots = this.fieldReceipts.snapshot().scopes;
+    return slots.some((s) => s.scope === scope && s.actorId === actorId) ||
+      slots.length < SYSTEMS_RECEIPT_RULES.maxScopes
+      ? { ok: true, message: '' }
+      : {
+          ok: false,
+          message:
+            'This save has reached its remembered-world effect limit. Supplies were not spent; continue an already remembered world.',
+        };
+  }
+  fieldCommand(command: SystemsCommand): SystemsResult {
+    if (!this.localSystems || this.sharedWorld || this.sharedSystems)
+      return { ok: false, message: 'Reconnect to the shared authority before changing this life.' };
+    const availability = this.fieldEffectAvailability(command);
+    if (!availability.ok) return availability;
+    this.refreshSystems();
+    const peer = this.fieldPeer();
+    const result = this.localSystems.command(
+      peer,
+      command,
+      `solo:${this.fieldOwner}:${++this.fieldSerial}`,
+    );
+    if (result.ok)
+      result.receipt = {
+        scope: this.soloFieldScope,
+        sequence: this.fieldSerial,
+        actorId: this.fieldOwner,
+        targetBodyId: this.bodyId,
+      };
+    this.commitFieldResult(result);
+    this.refreshSystems();
+    return result;
+  }
+  private get soloFieldScope() {
+    return `solo:${this.seed}:${this.world.generation}:${this.fieldOwner}`;
+  }
+  commitFieldResult(result: SystemsResult, origin?: { scope: string; actorId: string }): boolean {
+    if (!validateSystemResult(result) || !result.ok) return false;
+    if (origin && (origin.scope !== this.activeFieldScope || origin.actorId !== this.fieldOwner))
+      return false;
+    const accepted = this.fieldReceipts.accept(result, {
+      scope: origin?.scope ?? this.soloFieldScope,
+      actorId: origin?.actorId ?? this.fieldOwner,
+      bodyId: this.bodyId,
+      allowEffects:
+        (this.phase === 'playing' && this.player.hp > 0) ||
+        (!!result.recovery && this.phase === 'lost'),
+    });
+    if (!accepted) return false;
+    if (result.recovery && this.phase === 'lost')
+      this.recoveryAuthorization = {
+        scope: origin?.scope ?? this.soloFieldScope,
+        actorId: this.fieldOwner,
+        bodyId: this.bodyId,
+      };
+    // Shared location comes from the fresh authority frame, never a cached result.
+    if (!origin && result.transition) this.acceptSystemLocation(result.transition.to, true);
+
+    for (const id of result.removed ?? []) this.removed.add(id);
+    for (const id of result.opened ?? []) this.opened.add(id);
+    if (result.rest) {
+      this.player.hp = Math.min(
+        this.player.maxHp,
+        this.player.hp + this.player.maxHp * result.rest.hpFraction,
+      );
+      this.player.stamina = clamp(this.player.stamina + 100 * result.rest.staminaFraction);
+    }
+    if (result.targetId && result.damage) {
+      const target = this.fauna.find((a) => a.id === result.targetId);
+      if (target) this.effect('hurt', target, '#e7b77a', 0.35);
+    }
+    this.event('foley', result.message, {
+      kind: result.killed ? 'harvest' : result.damage ? 'hit' : 'pickup',
+      material: result.damage ? 'flesh' : 'cloth',
+      intensity: 0.6,
+    });
+    return true;
+  }
+  fieldDoorAccess(door: Prop) {
+    return this.localSystems && !this.sharedSystems
+      ? this.localSystems.doorAccess(this.fieldPeer(), door)
+      : undefined;
+  }
+
+  get actorDiagnostics() {
+    return { ...this.actors.diagnostics, size: this.actors.size };
+  }
   private livingFrame: FaunaFrame = { version: 1, elapsedSeconds: 0, actors: [] };
   private livingAuthority = false;
   private livingObservers: LivingObserver[] = [];
@@ -668,10 +1047,10 @@ export class Stichos {
   private stepping: { heading: number; remaining: number } | null = null;
 
   get techniques() {
-    return techniquesFor(this.player.appearance.weapon, this.activeArtifact?.delivery).map((t) => ({
+    return techniquesFor(this.combatAppearance.weapon, this.activeArtifact?.delivery).map((t) => ({
       ...t,
       remaining: this.techniqueRecovery.get(t.id) ?? 0,
-      unlocked: this.player.level >= t.level,
+      unlocked: (this.authoritativeKit ? 1 : this.player.level) >= t.level,
     }));
   }
   get dodgeCooldown() {
@@ -912,13 +1291,7 @@ export class Stichos {
       color: '#b2c4c0',
       actorId: this.bodyId,
     });
-    this.event('foley', undefined, {
-      kind: 'footstep',
-      material: footstepMaterial(this.world.tile(this.player.x, this.player.y)),
-      intensity: 0.9,
-      speed: 1,
-      actorId: this.bodyId,
-    });
+    this.event('foley', undefined, this.footContact(true));
     return true;
   }
 
@@ -1827,7 +2200,7 @@ export class Stichos {
     return [...this.correspondenceJobs.values()].map((job) => clone(job));
   }
   get transferCandidates(): Npc[] {
-    if (!this.transferReady) return [];
+    if (this.sharedSystems || this.spaceId !== 'surface' || !this.transferReady) return [];
     const center = this.phase === 'lost' ? this.restAnchor : this.player;
     const candidates = new Map<string, Npc>();
     for (const original of this.world.npcsAround(center.x, center.y, 14)) {
@@ -2560,7 +2933,7 @@ export class Stichos {
     this.refreshNpcs();
   }
   sharedCombatPreview(kind: 'attack' | 'ward', target?: Point) {
-    const p = this.player,
+    const p = { ...this.player, appearance: this.combatAppearance },
       bodyId = this.bodyId;
     const heading =
       target && finite(target.x) && finite(target.y) && distance(target, p) > 0.01
@@ -2625,7 +2998,7 @@ export class Stichos {
       this.event('ward');
     } else {
       const artifact = this.activeArtifact,
-        weapon = p.appearance.weapon === 'none' ? 'staff' : p.appearance.weapon,
+        weapon = this.combatAppearance.weapon === 'none' ? 'staff' : this.combatAppearance.weapon,
         profile = this.weaponProfile(weapon);
       const delivery = artifact?.delivery ?? (weapon === 'bow' ? 'projectile' : 'contact');
       this.payAcceptedAction(8);
@@ -2901,7 +3274,7 @@ export class Stichos {
         this.recordFreeLife('watch', death.npcId, 1);
         grantPractice(this.progression, 'combat', 6);
         this.awardXp(16);
-        if (death.killerId === localPeerId) {
+        if (!this.usesLivingSystems && death.killerId === localPeerId) {
           const defeated = this.npcMemory.get(death.npcId);
           if (
             defeated &&
@@ -3105,6 +3478,7 @@ export class Stichos {
     }));
   }
   get activeArtifact(): ArtifactGenome | null {
+    if (this.authoritativeKit) return null;
     const design = this.artifactPacks.get(this.bodyId)?.equipped;
     return design ? generateArtifact(design) : null;
   }
@@ -3501,6 +3875,7 @@ export class Stichos {
     );
   }
   get nearbyHomes(): HomeAddress[] {
+    if (this.spaceId !== 'surface') return [];
     const homes = new Map<string, HomeAddress>();
     for (const prop of this.world.propsAround(this.player.x, this.player.y, 12)) {
       if (prop.kind !== 'door') continue;
@@ -3536,6 +3911,7 @@ export class Stichos {
     return [...homes.values()].sort((a, b) => distance(a, this.player) - distance(b, this.player));
   }
   private nearHome() {
+    if (this.spaceId !== 'surface') return undefined;
     return this.progression.homes.find((home) => distance(home, this.player) <= 10);
   }
   private progressionContext() {
@@ -3591,6 +3967,7 @@ export class Stichos {
     return result;
   }
   restAtHome(homeId: string) {
+    if (this.spaceId !== 'surface') return false;
     const home = this.progression.homes.find((h) => h.id === homeId);
     if (
       this.phase !== 'playing' ||
@@ -3621,6 +3998,8 @@ export class Stichos {
   }
 
   weaponProfile(kind: Weapon): WeaponProfile {
+    const kit = this.authoritativeKit;
+    if (kit) return generatedWeaponProfile(kit.seed, kit.kind, 1);
     return this.profileWithBonuses(
       generatedWeaponProfile(this.weaponSeed(kind), kind, this.player.level),
       kind,
@@ -3706,23 +4085,19 @@ export class Stichos {
       this.stepClock += moved;
       if (this.stepClock >= 0.85) {
         this.stepClock -= 0.85;
-        this.event('step', undefined, {
-          kind: 'footstep',
-          material: footstepMaterial(this.world.tile(p.x, p.y)),
-          intensity: running ? 0.9 : 0.56,
-          speed: running ? 1 : 0,
-          actorId: this.bodyId,
-          variantSeed: Math.floor(this.distanceTraveled / 0.85) + this.world.seed,
-        });
+        this.event('step', undefined, this.footContact(running));
       }
     }
     const recovery = running ? 0 : Math.min(this.actionDebt, 18 * dt);
     this.actionDebt -= recovery;
     p.stamina = clamp(p.stamina + (running ? -15 : 18) * dt - recovery);
-    const tile = this.world.tile(p.x, p.y);
-    const sheltered = tile.terrain === 'floor';
-    if (this.universeLife) {
-      const exposure = exposureAt(tile, this.world.civilization?.axes, p.cequinTime > 0, running);
+    const tile = this.spaceId === 'surface' ? this.world.tile(p.x, p.y) : undefined;
+    const sheltered = !tile || tile.terrain === 'floor';
+    if (this.spaceId !== 'surface') {
+      p.breath = clamp(p.breath + 0.25 * dt);
+      p.warmth = clamp(p.warmth + 0.25 * dt);
+    } else if (this.universeLife) {
+      const exposure = exposureAt(tile!, this.world.civilization?.axes, p.cequinTime > 0, running);
       p.breath = clamp(p.breath + exposure.breathRate * dt);
       p.warmth = clamp(p.warmth + exposure.warmthRate * dt);
     } else {
@@ -3734,16 +4109,37 @@ export class Stichos {
     if (this.refreshClock <= 0) {
       this.refreshClock = 0.6;
       this.refreshNpcs();
-      this.visit();
-      observeExpeditions(this.expeditionState, this.expeditions, {
-        player: p,
-        time: this.worldTime,
-      });
+      if (this.spaceId === 'surface') this.visit();
+      if (this.spaceId === 'surface')
+        observeExpeditions(this.expeditionState, this.expeditions, {
+          player: p,
+          time: this.worldTime,
+        });
     }
     this.updateLivingWorld(dt, length > 0);
+    this.fieldRefresh -= dt;
+    if (this.fieldRefresh <= 0) {
+      this.fieldRefresh = 0.1;
+      this.refreshSystems();
+    }
+    if (!this.sharedWorld)
+      this.actors.advance(
+        this.worldTime.elapsedSeconds,
+        () => ({
+          cell: (x, y) => {
+            const door = this.world.propsAround(x, y, 0).find((p) => p.kind === 'door');
+            if (door)
+              return { kind: 'door', id: door.id, allowed: false, open: this.removed.has(door.id) };
+            return { kind: this.world.blocked(x, y, this.removed, true) ? 'blocked' : 'open' };
+          },
+        }),
+        { active: new Set(this.npcs.map((n) => n.id)) },
+      );
     this.updateNpcs(dt);
-    this.updateLabor(dt);
-    this.updateProduction(dt);
+    if (this.spaceId === 'surface') {
+      this.updateLabor(dt);
+      this.updateProduction(dt);
+    }
     this.updateArrows(dt);
     this.updateSharedProjectiles(dt);
     for (const effect of this.effects) effect.age += dt;
@@ -3751,6 +4147,10 @@ export class Stichos {
   }
 
   private updateLivingWorld(dt: number, moving: boolean) {
+    if (this.spaceId !== 'surface') {
+      this.livingFrame.actors = [];
+      return;
+    }
     this.livingRefresh -= dt;
     if (this.livingRefresh > 0) return;
     this.livingRefresh = 0.5;
@@ -3851,7 +4251,7 @@ export class Stichos {
       [r, -r],
       [-r, r],
       [r, r],
-    ].every(([x, y]) => !this.world.blocked(point.x + x, point.y + y, this.removed));
+    ].every(([x, y]) => !this.navigationBlocked(point.x + x, point.y + y));
   }
 
   private move(point: Point, dx: number, dy: number) {
@@ -3865,39 +4265,73 @@ export class Stichos {
   }
 
   private refreshNpcs() {
+    if (this.spaceId !== 'surface') {
+      this.npcs = [];
+      return;
+    }
+    const time = this.worldTime.elapsedSeconds;
     for (const npc of this.npcs) {
       this.rememberNpc(npc);
-      this.npcRuntime.delete(npc.id);
-      this.npcRuntime.set(npc.id, clone(npc));
+      if (!this.sharedCombat || npc.role !== 'raider') {
+        this.actors.register(
+          npc,
+          npc.role === 'guard' ? 'guard' : npc.hostile ? 'enemy' : 'npc',
+          time,
+          { home: { spaceId: 'surface', ...npc.home }, speed: npc.speed },
+        );
+        this.actors.update(npc, time);
+        if (npc.hp <= 0 || this.removed.has(npc.id)) this.actors.markDead(npc.id);
+      }
     }
-    while (this.npcRuntime.size > 128) this.npcRuntime.delete(this.npcRuntime.keys().next().value!);
     const generated = [
       ...this.world.npcsAround(this.player.x, this.player.y, 15),
       ...this.expeditionCatalog.enemiesAround(this.player.x, this.player.y, 15),
     ];
-    const candidates = new Map<string, Npc>();
-    for (const npc of generated) {
-      const saved = this.npcMemory.get(npc.id) ?? this.npcRuntime.get(npc.id);
-      if (this.sharedCombat && npc.role === 'raider') continue;
-      const actor = saved ? clone(saved) : clone(npc);
-      if (
-        actor.id !== this.occupiedNpcId &&
-        actor.hp > 0 &&
-        !this.removed.has(actor.id) &&
-        distance(actor, this.player) <= 18
-      )
-        candidates.set(actor.id, actor);
+    for (const original of generated) {
+      if (this.sharedCombat && original.role === 'raider') continue;
+      const npc = this.npcMemory.get(original.id) ?? original;
+      if (!this.actors.has(npc.id)) {
+        this.actors.register(
+          npc,
+          npc.role === 'guard' ? 'guard' : npc.hostile ? 'enemy' : 'npc',
+          time,
+          { home: { spaceId: 'surface', ...npc.home }, speed: npc.speed },
+        );
+        if (npc.hp <= 0 || this.removed.has(npc.id)) this.actors.markDead(npc.id);
+      }
     }
-    for (const npc of this.npcMemory.values())
+    const candidates = new Map<string, Npc>();
+    for (const actor of this.actors.query({ spaceId: 'surface', ...this.player }, 18, 128)) {
+      const npc = actor.body;
       if (
-        !(this.sharedCombat && npc.role === 'raider') &&
         npc.id !== this.occupiedNpcId &&
         npc.hp > 0 &&
         !this.removed.has(npc.id) &&
-        distance(npc, this.player) <= 17 &&
-        !candidates.has(npc.id)
+        !(this.sharedCombat && npc.role === 'raider')
       )
-        candidates.set(npc.id, clone(npc));
+        candidates.set(npc.id, npc);
+    }
+    // Consequential legacy bodies migrate without returning to their procedural birthplace.
+    for (const npc of this.npcMemory.values())
+      if (!this.actors.has(npc.id)) {
+        this.actors.register(npc, npc.hostile ? 'enemy' : 'npc', time, {
+          home: { spaceId: 'surface', ...npc.home },
+          speed: npc.speed,
+        });
+        if (npc.hp <= 0 || this.removed.has(npc.id)) this.actors.markDead(npc.id);
+        else if (
+          npc.id !== this.occupiedNpcId &&
+          distance(npc, this.player) <= 18 &&
+          !(this.sharedCombat && npc.role === 'raider')
+        )
+          candidates.set(npc.id, clone(npc));
+      }
+    if (this.fieldFrame) {
+      for (const [id, npc] of candidates) if (npc.role !== 'raider') candidates.delete(id);
+      for (const npc of this.fieldFrame.actors)
+        if (npc.id !== this.occupiedNpcId && npc.hp > 0 && !this.removed.has(npc.id))
+          candidates.set(npc.id, clone(npc));
+    }
     if (this.sharedCombat)
       for (const npc of this.sharedEnemies.values())
         if (npc.hp > 0 && distance(npc, this.player) <= 18) candidates.set(npc.id, clone(npc));
@@ -3909,6 +4343,10 @@ export class Stichos {
   }
 
   private rememberNpc(npc: Npc) {
+    if (this.actors.has(npc.id)) {
+      this.actors.update(npc, this.worldTime.elapsedSeconds);
+      if (npc.hp <= 0 || this.removed.has(npc.id)) this.actors.markDead(npc.id);
+    }
     // Only consequences belong in the permanent save, not every streamed resident.
     if (
       this.npcMemory.has(npc.id) ||
@@ -3932,6 +4370,7 @@ export class Stichos {
     for (const npc of this.npcs) {
       if (npc.hp <= 0 || this.phase !== 'playing') continue;
       if (this.sharedCombat && npc.role === 'raider') continue;
+      if (this.fieldFrame?.actors.some((a) => a.id === npc.id)) continue;
       if (
         !npc.hostile &&
         !this.sharedWorld &&
@@ -3953,7 +4392,11 @@ export class Stichos {
       while (route?.points.length && distance(npc, route.points[0]) < 0.15) route.points.shift();
       const routineTarget =
         route?.points[0] ?? (routine && this.clear(routine.target) ? routine.target : npc.home);
-      const target = npc.hostile && range < 8 ? this.player : routineTarget;
+      const remembered = this.actors.destination(npc.id);
+      const seen = npc.hostile && range < 8 && this.lineOfSight(npc, this.player);
+      const target = seen ? this.player : npc.hostile && remembered ? remembered : routineTarget;
+      if (seen || !npc.hostile)
+        this.actors.setDestination(npc.id, { spaceId: 'surface', x: target.x, y: target.y });
       const targetDistance = distance(npc, target);
       const special = encounterPattern(npc.id, npc.seed, npc.hp, npc.maxHp, this.worldTime);
       if (special && npc.hostile) {
@@ -4206,6 +4649,7 @@ export class Stichos {
   }
 
   nearby(): Prop | Npc | null {
+    if (this.spaceId !== 'surface') return null;
     const props = this.world
       .propsAround(this.player.x, this.player.y, 2.2)
       .filter((p) => !this.removed.has(p.id) || p.kind === 'door');
@@ -5316,7 +5760,19 @@ export class Stichos {
   }
 
   private talk(npc: Npc) {
+    const reaction = this.fieldFrame?.reactions?.find((r) => r.npcId === npc.id);
+    if (reaction?.hostile || reaction?.fear) {
+      this.dialogue = {
+        speaker: npc.name,
+        role: 'resident',
+        npcId: npc.id,
+        text: `${reaction.summary} ${reaction.hostile ? 'I will not trade or work with you while this stands. Speak to the local charter about making amends.' : 'Keep your distance. I need time and credible reasons to feel safe around you again.'}`,
+        choices: [],
+      };
+      return;
+    }
     this.talkBase(npc);
+    if (this.dialogue?.npcId === npc.id && reaction) this.dialogue.text += `\n${reaction.summary}`;
     if (!this.dialogue || this.dialogue.npcId !== npc.id) return;
     this.society.converse(npc);
     this.dialogue.choices.push(
@@ -5564,6 +6020,13 @@ export class Stichos {
         this.clear(npc)
       )
         this.deliverDispatch(job, dispatchChoice[1] as 'deliver' | 'reveal' | 'withhold');
+      return;
+    }
+    if (
+      npc &&
+      this.fieldFrame?.reactions?.some((r) => r.npcId === npc.id && (r.hostile || r.fear))
+    ) {
+      this.talk(npc);
       return;
     }
     if (choiceId.startsWith('buy:') || choiceId.startsWith('sell:')) {
@@ -6261,6 +6724,25 @@ export class Stichos {
 
   private damageNpc(npc: Npc, amount: number, enchantment?: WeaponProfile['effect']) {
     if (this.sharedCombat) return;
+    if (this.localSystems && this.fieldFrame?.actors.some((a) => a.id === npc.id)) {
+      const result = this.fieldCommand({
+        kind: 'person-attack',
+        targetId: npc.id,
+        heading: this.player.heading,
+      });
+      if (result.ok) {
+        npc.hp = result.health ?? npc.hp;
+        this.effect('hurt', npc, '#ec8277', 0.4);
+        if (result.killed) this.showDefeat(npc);
+      }
+      return;
+    }
+    if (
+      this.localSystems &&
+      amount >= npc.hp &&
+      !this.localSystems.economy.canAdmitDeath(npc.id, this.worldTime.elapsedSeconds)
+    )
+      return;
     const interrupted = this.enemyIntents.get(npc.id);
     if (interrupted) {
       interrupted.warning.age = interrupted.warning.duration;
@@ -6305,8 +6787,22 @@ export class Stichos {
       if (npc.role === 'raider') {
         this.recordFreeLife('watch', npc.id, 1);
         grantPractice(this.progression, 'combat', 6);
-        this.player.coins += 4;
-        if (npc.appearance.weapon !== 'none') {
+        if (!this.localSystems) this.player.coins += 4;
+        else
+          this.localSystems.death({
+            actorId: npc.id,
+            kind: 'enemy',
+            spaceId: 'surface',
+            x: npc.x,
+            y: npc.y,
+            role: npc.role,
+            difficulty: Math.max(1, Math.round(npc.maxHp / 35)),
+            contributors: [this.fieldOwner],
+            time: this.worldTime.elapsedSeconds,
+            biome: this.world.tile(npc.x, npc.y).biome,
+            night: this.worldTime.nightness > 0.5,
+          });
+        if (!this.localSystems && npc.appearance.weapon !== 'none') {
           const kind = npc.appearance.weapon,
             seed = npc.appearance.weaponSeed ?? npc.appearance.seed;
           if (this.storeOrdinary({ version: 2, kind, seed, source: 'loot', sourceId: npc.id }))
@@ -6466,6 +6962,26 @@ export class Stichos {
   }
 
   reincarnate(targetId?: string) {
+    if (this.sharedSystems) {
+      this.event(
+        'dialogue',
+        this.phase === 'lost'
+          ? 'Request a rescue from the world authority before this body wakes.'
+          : 'Shared lives remain bound to their admitted body. Changing hosts is not supported in this room yet.',
+      );
+      return;
+    }
+    if (this.spaceId !== 'surface') {
+      if (this.phase === 'lost' && !this.sharedSystems && !this.sharedWorld) {
+        const result = this.fieldCommand({ kind: 'underworld-recover' });
+        if (result.ok && this.spaceId === 'surface') {
+          this.finishExpeditionRecovery();
+          return;
+        }
+      }
+      this.event('dialogue', 'Recall your expedition through the rescue signal first.');
+      return;
+    }
     const lost = this.phase === 'lost';
     if (!lost && (!this.transferReady || !this.nearProp('shrine'))) {
       this.event(
@@ -6490,7 +7006,23 @@ export class Stichos {
     }
     this.enterBody(target, lost);
   }
-  private enterBody(target: Npc | undefined, lost: boolean) {
+  finishExpeditionRecovery() {
+    const permission = this.recoveryAuthorization;
+    this.recoveryAuthorization = undefined;
+    if (
+      this.phase !== 'lost' ||
+      this.spaceId !== 'surface' ||
+      !permission ||
+      permission.scope !== this.activeFieldScope ||
+      permission.actorId !== this.fieldOwner ||
+      permission.bodyId !== this.bodyId
+    )
+      return false;
+    this.restAnchor = { x: this.player.x, y: this.player.y };
+    this.enterBody(undefined, true, true);
+    return true;
+  }
+  private enterBody(target: Npc | undefined, lost: boolean, fieldRescuePaid = false) {
     const previousPosition = { x: this.player.x, y: this.player.y };
     if (target) {
       const previous: Npc = this.occupiedBody
@@ -6531,6 +7063,14 @@ export class Stichos {
       });
       this.npcMemory.set(previous.id, previous);
       this.npcRuntime.set(previous.id, clone(previous));
+      this.actors.register(
+        previous,
+        previous.hostile ? 'enemy' : 'npc',
+        this.worldTime.elapsedSeconds,
+        { home: { spaceId: 'surface', ...previous.home }, speed: previous.speed },
+      );
+      this.actors.update(previous, this.worldTime.elapsedSeconds);
+      this.actors.setDestination(previous.id, { spaceId: 'surface', ...previous.home });
       if (previous.hp <= 0) this.removed.add(previous.id);
       this.bodyPossessions.set(previous.id, {
         npcId: previous.id,
@@ -6576,7 +7116,8 @@ export class Stichos {
       this.player.y = this.restAnchor.y;
       this.player.hp = this.player.maxHp;
     }
-    if (lost && !target) this.player.coins = Math.floor(this.player.coins * 0.8);
+    if (lost && !target && !fieldRescuePaid)
+      this.player.coins = Math.floor(this.player.coins * 0.8);
     this.player.breath = 100;
     this.player.warmth = 100;
     this.player.stamina = 100;
@@ -6644,6 +7185,7 @@ export class Stichos {
     return true;
   }
   private nearProp(kind: Prop['kind']) {
+    if (this.spaceId !== 'surface') return undefined;
     return this.world
       .propsAround(this.player.x, this.player.y, 2.2)
       .find((p) => p.kind === kind && distance(p, this.player) <= 1.8);
@@ -6858,6 +7400,22 @@ export class Stichos {
     if (this.campaignState.ending)
       for (const npc of this.npcs) if (distance(npc, this.player) < 6) this.rememberIdentity(npc);
     for (const npc of this.npcs) this.rememberNpc(npc);
+    // Legacy consequence records and the persistent identity ledger describe one
+    // body. Capture its latest offscreen journey before serializing either view.
+    for (const id of this.npcMemory.keys()) {
+      const record = this.actors.get(id);
+      if (record) this.npcMemory.set(id, clone(record.body));
+      else {
+        const npc = this.npcMemory.get(id)!;
+        this.actors.register(
+          npc,
+          npc.hostile ? 'enemy' : npc.role === 'guard' ? 'guard' : 'npc',
+          this.worldTime.elapsedSeconds,
+          { home: { spaceId: 'surface', ...npc.home }, speed: npc.speed },
+        );
+        if (npc.hp <= 0 || this.removed.has(id)) this.actors.markDead(id);
+      }
+    }
     return clone({
       version: 1,
       terrainRevision: 3,
@@ -6925,6 +7483,12 @@ export class Stichos {
       worldElapsed: this.calendarSeconds,
       society: this.society.save(),
       wildlifeNotes: [...this.wildlifeNotes],
+      actorLedger: this.actors.snapshot(),
+      livingSystems: this.localSystems?.save() ?? this.pendingSystemsSave,
+      fieldSerial: this.fieldSerial,
+      fieldReceipts: this.fieldReceipts.snapshot(),
+      fieldEquipment: this.fieldEquipment,
+      faunaLedger: this.livingWorld.save(),
       distanceTraveled: this.distanceTraveled,
       visited: [...this.visited],
       exploration: this.explorationSave(),
@@ -7036,11 +7600,27 @@ export class Stichos {
     game.weapons.clear();
     for (const weapon of data.weapons) game.weapons.add(weapon);
     game.npcMemory = new Map(data.npcs.map((n) => [n.id, clone(n)]));
+    game.pendingSystemsSave = data.livingSystems;
+    game.fieldSerial = data.fieldSerial ?? 0;
+    if (data.fieldReceipts) game.fieldReceipts.restore(data.fieldReceipts);
+    game.fieldEquipment = data.fieldEquipment;
+    if (data.actorLedger) game.actors = new ActorLedger(data.actorLedger, validPersistentNpc);
+    game.livingWorld = new LivingWorld({
+      maxNewCells: 2,
+      persistent: true,
+      save: data.faunaLedger,
+    });
     game.npcs = [];
     game.quests = clone(data.quests);
     game.journal = clone(data.journal);
     game.time = data.time;
     game.calendarSeconds = data.worldElapsed ?? data.time;
+    // Consequence-bearing legacy NPC records remain authoritative during migration;
+    // a body edited/moved by an older save must not be rewound by its streamed cache.
+    for (const npc of data.npcs) {
+      game.actors.update(npc, game.actors.get(npc.id)?.simulatedAt ?? game.calendarSeconds);
+      if (npc.hp <= 0 || game.removed.has(npc.id)) game.actors.markDead(npc.id);
+    }
     game.society = new NpcSociety(data.society);
     game.wildlifeNotes = new Set(data.wildlifeNotes ?? []);
     game.distanceTraveled = data.distanceTraveled;
@@ -7427,6 +8007,29 @@ function validateSave(value: unknown): SaveData {
       return fail();
   }
   if (value.society !== undefined && !validSocietySave(value.society)) return fail();
+  if (value.livingSystems !== undefined && !validLivingSystemsSave(value.livingSystems))
+    return fail();
+  if (value.fieldReceipts !== undefined && !validSystemsReceiptSnapshot(value.fieldReceipts))
+    return fail();
+  if (
+    value.fieldSerial !== undefined &&
+    !number(value.fieldSerial, 0, Number.MAX_SAFE_INTEGER, true)
+  )
+    return fail();
+  if (
+    value.fieldEquipment !== undefined &&
+    (!object(value.fieldEquipment) ||
+      !['sword', 'staff', 'bow'].includes(value.fieldEquipment.kind as string) ||
+      !number(value.fieldEquipment.seed, 0, 0xffffffff, true) ||
+      Object.keys(value.fieldEquipment).some((k) => !['kind', 'seed'].includes(k)))
+  )
+    return fail();
+  if (
+    value.actorLedger !== undefined &&
+    !validActorLedgerSave(value.actorLedger, validPersistentNpc)
+  )
+    return fail();
+  if (value.faunaLedger !== undefined && !validFaunaLedger(value.faunaLedger)) return fail();
   if (
     value.wildlifeNotes !== undefined &&
     (!Array.isArray(value.wildlifeNotes) ||

@@ -136,6 +136,8 @@ export class InfiniteWorld {
   private noiseCorners = new Map<string, { ix: number; iy: number; values: number[] }>();
   private townCache = new Map<string, TownLayout>();
   private vaultCache = new Map<string, PlacedVault>();
+  /** Optional transient measurement hook. It never affects generation or serialization. */
+  onGenerationWork?: (milliseconds: number) => void;
   constructor(seed: number, generation: WorldGeneration = 3) {
     if (generation !== 1 && generation !== 2 && generation !== 3 && generation !== 4)
       throw new RangeError('Unsupported world generation');
@@ -1007,6 +1009,7 @@ export class InfiniteWorld {
       this.cache.set(cacheKey, cached);
       return cached;
     }
+    const profileStart = this.onGenerationWork ? performance.now() : 0;
     const x0 = cx * CHUNK_SIZE,
       y0 = cy * CHUNK_SIZE,
       layouts = this.layouts(x0 + 7.5, y0 + 7.5, 12),
@@ -1404,6 +1407,7 @@ export class InfiniteWorld {
     }
     this.cache.set(cacheKey, chunk);
     while (this.cache.size > CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value!);
+    if (this.onGenerationWork) this.onGenerationWork(performance.now() - profileStart);
     return chunk;
   }
   tile(x: number, y: number): Tile {

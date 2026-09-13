@@ -1,3 +1,4 @@
+import type { InteractionSequences } from './interaction-sequence.ts';
 /** Client input only. Simulation, stamina, cooldowns and targeting remain in the session. */
 export type PortraitAction =
   | 'attack'
@@ -82,6 +83,7 @@ export function mountPortraitControls(
     canAct: () => boolean;
     onAction: (action: PortraitAction, phase: PortraitActionPhase, heldMs: number) => void;
     onMoveStart: () => void;
+    sequences?: InteractionSequences;
   },
 ) {
   let storage: Storage | null = null;
@@ -162,7 +164,9 @@ export function mountPortraitControls(
   };
   stick.onpointerdown = (event) => {
     if (event.button !== 0 || stickPointer !== null || !allowed()) return;
+    if (options.sequences && !options.sequences.claim(event, stick)) return;
     event.preventDefault();
+    event.stopPropagation();
     blurText();
     options.onMoveStart();
     const bounds = stick.getBoundingClientRect();
@@ -179,7 +183,10 @@ export function mountPortraitControls(
     else moveStick(event);
   };
   const stickEnd = (event: PointerEvent) => {
-    if (event.pointerId === stickPointer) resetStick();
+    if (event.pointerId === stickPointer) {
+      event.stopPropagation();
+      resetStick();
+    }
   };
   stick.onpointerup = stickEnd;
   stick.onpointercancel = stickEnd;
@@ -245,7 +252,9 @@ export function mountPortraitControls(
   for (const [action, button] of actionButtons) {
     button.onpointerdown = (event) => {
       if (event.button !== 0 || activeActions.has(action) || !allowed() || button.disabled) return;
+      if (options.sequences && !options.sequences.claim(event, button)) return;
       event.preventDefault();
+      event.stopPropagation();
       blurText();
       button.setPointerCapture(event.pointerId);
       activeActions.set(action, { pointer: event.pointerId, start: performance.now() });
@@ -254,6 +263,7 @@ export function mountPortraitControls(
     };
     button.onpointerup = (event) => {
       if (activeActions.get(action)?.pointer === event.pointerId) {
+        event.stopPropagation();
         const bounds = button.getBoundingClientRect();
         const inside =
           event.clientX >= bounds.left - 20 &&

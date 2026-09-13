@@ -1,3 +1,11 @@
+import { validSystemSoundEvents, type SystemSoundEvent } from './system-events.ts';
+import { validateSystemResult } from './systems-receipts.ts';
+import {
+  validLivingSystemsFrame,
+  type SystemsCommand,
+  type SystemsResult,
+  type LivingSystemsFrame,
+} from './living-systems.ts';
 import { validFaunaFrame, type FaunaFrame } from './living-world.ts';
 import type { VoiceCapability, VoiceTicket } from './voice-protocol.ts';
 import type { RoomTransport } from './peer-transport';
@@ -45,6 +53,14 @@ export interface RoomIdentity {
 }
 export class MultiplayerConnection {
   actionExpansion = false;
+  livingSystems = false;
+  systemsFrame: LivingSystemsFrame | null = null;
+  onSystemEvents: (events: SystemSoundEvent[]) => void = () => {};
+  onSystems: (frame: LivingSystemsFrame) => void = () => {};
+  onSystemsCorrection: (
+    location: { spaceId: string; x: number; y: number },
+    reason: string,
+  ) => void = () => {};
   private socket: RoomTransport | WebSocket | null = null;
   voiceCapability: VoiceCapability | null = null;
   onVoiceSessionChange: () => void = () => {};
@@ -79,6 +95,8 @@ export class MultiplayerConnection {
   }
   private clearVoiceSession() {
     this.actionExpansion = false;
+    this.livingSystems = false;
+    this.systemsFrame = null;
     this.voiceCapability = null;
     this.livingClock = null;
     for (const r of this.voiceRequests.values()) {
@@ -96,7 +114,12 @@ export class MultiplayerConnection {
   private pending = new Map<
     string,
     {
-      resolve: (value: { ok: boolean; reason?: string }) => void;
+      resolve: (value: {
+        ok: boolean;
+        reason?: string;
+        result?: SystemsResult;
+        frame?: unknown;
+      }) => void;
       timer: ReturnType<typeof setTimeout>;
     }
   >();
@@ -235,6 +258,7 @@ export class MultiplayerConnection {
         this.send({
           type: 'join',
           livingWorld: 1,
+          livingSystems: 1,
           actionExpansion: ACTION_EXPANSION,
           protocol: MULTIPLAYER_PROTOCOL,
           ...identity,
@@ -285,6 +309,7 @@ export class MultiplayerConnection {
               : null;
           this.room = message.room;
           this.actionExpansion = message.actionExpansion === ACTION_EXPANSION;
+          this.livingSystems = message.livingSystems === 1;
           this.peerId = message.peerId;
           this.resumeToken = message.resumeToken;
           this.persistCredential();
@@ -303,6 +328,7 @@ export class MultiplayerConnection {
           this.onChange();
           this.onCombat(message.combat);
           if (message.living) this.receiveLiving(message.living);
+          if (message.systems) this.receiveSystems(message.systems);
           this.onVoiceSessionChange();
           resolve();
         } else if (message.type === 'voice_ticket') {
@@ -316,6 +342,18 @@ export class MultiplayerConnection {
             this.voiceRequests.delete(message.requestId);
             pending.resolve({ ticket: message.ticket, expiresAt: message.expiresAt });
           }
+        } else if (message.type === 'systems_correction') {
+          const p = message.location;
+          if (
+            this.livingSystems &&
+            p &&
+            typeof p.spaceId === 'string' &&
+            p.spaceId.length <= 160 &&
+            Number.isFinite(p.x) &&
+            Number.isFinite(p.y) &&
+            typeof message.reason === 'string'
+          )
+            this.onSystemsCorrection(p, message.reason);
         } else if (message.type === 'peerJoined' || message.type === 'pose') {
           this.peerRecords.set(message.peer.id, message.peer);
           this.onChange();
@@ -349,16 +387,24 @@ export class MultiplayerConnection {
             void saveRoomReplica(message.checkpoint).then((ok) => {
               if (ok && epoch === this.epoch) this.onCheckpoint(message.checkpoint);
             });
+        } else if (message.type === 'systems_events') {
+          if (this.livingSystems && validSystemSoundEvents(message.events))
+            this.onSystemEvents(message.events);
+        } else if (message.type === 'systems_frame') {
+          this.receiveSystems(message.frame);
         } else if (message.type === 'living_frame') {
           this.receiveLiving(message.frame);
         } else if (message.type === 'combat_frame') {
           this.onCombat(message.frame);
         } else if (
+          message.type === 'systems_result' ||
           message.type === 'claimResult' ||
           message.type === 'combat_result' ||
           message.type === 'chat_result'
         ) {
           if (message.type === 'combat_result') this.onCombat(message.frame);
+          if (message.type === 'systems_result' && message.frame)
+            this.receiveSystems(message.frame);
           const request = this.pending.get(message.requestId);
           if (request) {
             clearTimeout(request.timer);
@@ -667,9 +713,60 @@ export class MultiplayerConnection {
   door(propId: string, open: boolean) {
     return this.request({ type: 'door', requestId: '', propId, open });
   }
+  private receiveSystems(frame: unknown) {
+    if (
+      !this.livingSystems ||
+      !validLivingSystemsFrame(frame) ||
+      frame.economy.satchel.actorId !== this.peerId
+    )
+      return;
+    this.serial = Math.max(this.serial, frame.nextSequence - 1);
+    this.systemsFrame = frame;
+    this.onSystems(frame);
+  }
+  async systems(command: SystemsCommand): Promise<SystemsResult> {
+    if (!this.livingSystems)
+      return {
+        ok: false,
+        message: 'This room runs an earlier build; field systems are unavailable.',
+      };
+    const epoch = this.epoch,
+      peerId = this.peerId,
+      room = this.room;
+    const response = await this.request({ type: 'systems', requestId: '', command });
+    if (epoch !== this.epoch || peerId !== this.peerId || room !== this.room)
+      return { ok: false, message: 'That action belongs to a previous connection.' };
+    if (!validateSystemResult(response.result) || response.result.ok !== response.ok)
+      return {
+        ok: false,
+        message:
+          response.reason ??
+          'The authority returned an invalid action receipt. Reconnect to reconcile this life.',
+      };
+    if (response.result.ok && response.result.transition) {
+      const frame = response.frame;
+      if (
+        !validLivingSystemsFrame(frame) ||
+        frame.economy.satchel.actorId !== peerId ||
+        !frame.location ||
+        !response.result.receipt ||
+        response.result.receipt.scope !== `room:${room}:${peerId}` ||
+        response.result.receipt.actorId !== peerId ||
+        frame.nextSequence <= response.result.receipt.sequence
+      )
+        return {
+          ok: false,
+          message:
+            'The rescue or passage has no valid current-life location. Reconnect to reconcile this life before continuing.',
+        };
+      // Cached command effects never override the response's fresh authoritative address.
+      this.onSystemsCorrection(frame.location, response.result.message);
+    }
+    return response.result;
+  }
   private request(
     message: Extract<ClientMessage, { requestId: string }>,
-  ): Promise<{ ok: boolean; reason?: string }> {
+  ): Promise<{ ok: boolean; reason?: string; result?: SystemsResult; frame?: unknown }> {
     if (this.status !== 'online')
       return Promise.resolve({ ok: false, reason: 'Reconnect to the shared world first.' });
     const requestId = `r${++this.serial}`;

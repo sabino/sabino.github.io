@@ -1,5 +1,6 @@
 import './voice-ui.css';
 import type { SpatialVoice } from './voice.ts';
+import type { InteractionSequences } from './interaction-sequence.ts';
 
 type Traveler = { id: string; name: string };
 type VoiceUiOptions = {
@@ -12,6 +13,7 @@ type VoiceUiOptions = {
   openRoomSetup?: () => void;
   closeSettings?: () => void;
   onChange?: () => void;
+  sequences?: InteractionSequences;
 };
 const escape = (value: unknown) =>
   String(value).replace(
@@ -52,20 +54,25 @@ export function mountVoiceUi(options: VoiceUiOptions) {
     else voice.press();
   }
   talk.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || heldPointer !== null) return;
+    if (options.sequences && !options.sequences.claim(event, talk)) return;
     event.preventDefault();
+    event.stopPropagation();
     heldPointer = event.pointerId;
     talk.setPointerCapture(event.pointerId);
     toggleOrPress();
   });
   talk.addEventListener('pointerup', (event) => {
     if (heldPointer !== event.pointerId) return;
+    event.stopPropagation();
     heldPointer = null;
     if (voice.settings.ptt === 'hold') voice.release();
   });
-  talk.addEventListener('pointercancel', release);
-  talk.addEventListener('lostpointercapture', () => {
-    if (heldPointer !== null) release();
+  talk.addEventListener('pointercancel', (event) => {
+    if (event.pointerId === heldPointer) release();
+  });
+  talk.addEventListener('lostpointercapture', (event) => {
+    if (event.pointerId === heldPointer) release();
   });
   talk.addEventListener('contextmenu', (event) => event.preventDefault());
   // A synthesized click from keyboard/switch activation has detail=0.

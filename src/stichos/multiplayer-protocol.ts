@@ -1,3 +1,5 @@
+import type { SystemSoundEvent } from './system-events.ts';
+import type { SystemsCommand, SystemsResult, LivingSystemsFrame } from './living-systems.ts';
 import type { FaunaFrame } from './living-world.ts';
 import type { VoiceCapability, VoiceTicket } from './voice-protocol.ts';
 import type { Appearance, Point } from './types.ts';
@@ -33,6 +35,8 @@ export interface RoomInfo {
 
 /** Presence is player-reported; the server validates and owns shared resource claims. */
 export interface MultiplayerPeer extends Point {
+  /** Omitted by older surface-only clients; only authority sets a floor address. */
+  spaceId?: string;
   id: string;
   name: string;
   heading: number;
@@ -44,6 +48,7 @@ export interface MultiplayerPeer extends Point {
 
 export type MultiplayerClientMessage =
   | { type: 'voice_ticket'; requestId: string }
+  | { type: 'systems'; requestId: string; command: SystemsCommand }
   | { type: 'hello'; room: string; protocol: typeof MULTIPLAYER_PROTOCOL; challenge?: string }
   | { type: 'chat'; requestId: string; channel: ChatChannel; text: string }
   | { type: 'machine'; requestId: string; machine: Omit<ProductionMachine, 'ownerId'> }
@@ -63,6 +68,7 @@ export type MultiplayerClientMessage =
       publicWorld?: boolean;
       livingWorld?: 1;
       actionExpansion?: 1;
+      livingSystems?: 1;
       seed: number;
       generation: WorldGeneration;
       name: string;
@@ -111,6 +117,16 @@ export type MultiplayerClientMessage =
 
 export type MultiplayerServerMessage =
   | ({ type: 'voice_ticket'; requestId: string } & VoiceTicket)
+  | { type: 'systems_events'; events: SystemSoundEvent[] }
+  | { type: 'systems_frame'; frame: LivingSystemsFrame }
+  | {
+      type: 'systems_result';
+      requestId: string;
+      ok: boolean;
+      reason?: string;
+      result?: SystemsResult;
+      frame?: LivingSystemsFrame;
+    }
   | { type: 'room_info'; info: RoomInfo; proof?: RoomHelloProof }
   | { type: 'chat'; message: RoomChat }
   | { type: 'chat_result'; requestId: string; ok: boolean; reason?: string }
@@ -121,6 +137,8 @@ export type MultiplayerServerMessage =
       voice?: VoiceCapability;
       living?: FaunaFrame;
       actionExpansion?: 1;
+      livingSystems?: 1;
+      systems?: LivingSystemsFrame;
       protocol: typeof MULTIPLAYER_PROTOCOL;
       room: string;
       peerId: string;
@@ -140,6 +158,11 @@ export type MultiplayerServerMessage =
   | { type: 'peerJoined'; peer: MultiplayerPeer }
   | { type: 'peerLeft'; peerId: string }
   | { type: 'pose'; peer: MultiplayerPeer }
+  | {
+      type: 'systems_correction';
+      location: { spaceId: string; x: number; y: number };
+      reason: string;
+    }
   | { type: 'claimResult'; requestId: string; ok: boolean; reason?: string }
   | {
       type: 'combat_result';

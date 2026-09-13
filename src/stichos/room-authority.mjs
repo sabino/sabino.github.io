@@ -1,7 +1,10 @@
-import { LivingWorld, faunaContacts } from './living-world.ts';
+import { audibleSystemEvents } from './system-events.ts';
+import { LivingSystems, validLivingSystemsSave, validSystemsCommand } from './living-systems.ts';
+import { LivingWorld, faunaContacts, validFaunaLedger } from './living-world.ts';
 import { ACTION_EXPANSION, techniqueById } from './combat-techniques.ts';
 import { worldTimeAt, roomWorldSeconds } from './world-time.ts';
 import { InfiniteWorld } from './world.ts';
+import { deriveSeed } from '../procedural/random.ts';
 import { generateArtifact, normalizeArtifactDesign } from './artifacts.ts';
 import { artifactToolKind, requiredToolFor } from './labor.ts';
 import { MULTIPLAYER_PROTOCOL, MAX_ROOM_PLAYERS } from './multiplayer-protocol.ts';
@@ -20,6 +23,11 @@ import {
 
 const MAX_COORDINATE = Number.MAX_SAFE_INTEGER - 4096;
 export const MAX_MESSAGE_BYTES = 8192;
+export const SURFACE_RECOVERY_RULES = Object.freeze({
+  cooldownSeconds: 30,
+  coinFraction: 0.2,
+  searchRadius: 6,
+});
 const GATHERABLE = new Set(['pine', 'rock', 'cequin', 'heartleaf', 'emberroot', 'mushroom']);
 const GESTURES = new Set(['wave', 'thanks', 'help']);
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
@@ -35,6 +43,15 @@ const point = (value) =>
   object(value) &&
   finite(value.x, -MAX_COORDINATE, MAX_COORDINATE) &&
   finite(value.y, -MAX_COORDINATE, MAX_COORDINATE);
+const recoveryAnchorValid = (value) =>
+  object(value) &&
+  [Object.prototype, null].includes(Object.getPrototypeOf(value)) &&
+  Object.keys(value).every((key) => ['spaceId', 'x', 'y'].includes(key)) &&
+  value.spaceId === 'surface' &&
+  point(value) &&
+  Math.abs(value.x) < 1e7 &&
+  Math.abs(value.y) < 1e7;
+const surfaceAddress = (value) => ({ spaceId: 'surface', x: value.x, y: value.y });
 const bodyIdValid = (value) =>
   text(value, 1, 160) && !['__proto__', 'constructor', 'prototype'].includes(value);
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -87,11 +104,19 @@ const copyAppearance = (value) => ({
 const publicPeer = (member) => ({
   id: member.id,
   name: member.name,
+  ...(member.spaceId && member.spaceId !== 'surface' ? { spaceId: member.spaceId } : {}),
   x: member.x,
   y: member.y,
   heading: member.heading,
   phase: member.phase,
-  appearance: { ...member.appearance },
+  appearance: member.domainWeapon
+    ? {
+        ...member.appearance,
+        weapon: member.domainWeapon.kind,
+        weaponSeed: member.domainWeapon.seed,
+        artifactDesign: undefined,
+      }
+    : { ...member.appearance },
   combatActive: member.combatActive === true,
   ...(member.bodyId ? { bodyId: member.bodyId } : {}),
 });
@@ -224,13 +249,22 @@ export class CoopRooms {
   }
   broadcast(room, message, except = null) {
     for (const member of room.members.values())
-      if (member.connection && member.connection !== except) this.send(member.connection, message);
+      if (member.connection && member.connection !== except) {
+        if (
+          (message.type === 'pose' || message.type === 'peerJoined') &&
+          !member.livingSystems &&
+          (message.peer.spaceId ?? 'surface') !== 'surface'
+        )
+          continue;
+        this.send(member.connection, message);
+      }
   }
   detach(connection) {
     this.connections.delete(connection);
     this.voiceAuthority?.revoke(connection);
     const { room, member } = connection;
     if (!room || !member || member.connection !== connection) return;
+    room.systems?.underworld.leave(member.id);
     member.connection = null;
     member.disconnectedAt = this.now();
     room.lastActivity = this.now();
@@ -265,19 +299,266 @@ export class CoopRooms {
     }
     this.sweep();
   }
+  systemsPeer(member) {
+    return {
+      id: member.id,
+      spaceId: member.spaceId ?? 'surface',
+      x: member.x,
+      y: member.y,
+      name: member.name,
+      heading: member.heading,
+      occupiedBodyId: member.domainBodyId,
+      weaponSeed: member.domainWeapon?.seed,
+      weaponKind: member.domainWeapon?.kind,
+      active: !!member.connection && member.combatHits.size + member.combatDeaths.size < 512,
+      combatActive: member.combatActive === true && this.now() - member.lastPose < 2500,
+    };
+  }
+  enableSystems(room, saved) {
+    if (room.systems) return;
+    room.living = new LivingWorld({ maxNewCells: 2, persistent: true, save: room.faunaLedger });
+    room.livingFrame = undefined;
+    room.systems = new LivingSystems(
+      room.world,
+      room.removed,
+      {
+        mode: 'shared',
+        fauna: () => room.livingFrame?.actors ?? [],
+        woundFauna: (id, attacker, response) => room.living.wound(id, attacker, response),
+        defeatFauna: (id) => {
+          room.living.defeat(id);
+          if (room.livingFrame)
+            room.livingFrame.actors = room.livingFrame.actors.filter((a) => a.id !== id);
+        },
+      },
+      saved,
+    );
+    this.syncSystems(room);
+  }
+  syncSystems(room) {
+    room.systems?.setPeers(
+      [...room.members.values()]
+        .filter((m) => m.connection && m.livingSystems)
+        .map((m) => this.systemsPeer(m)),
+      roomWorldSeconds(room.calendarEpochMs, this.now()),
+    );
+  }
+  publishSystemsContacts(room) {
+    const cues = room.systems.drainEvents();
+    if (cues.length)
+      for (const member of room.members.values())
+        if (member.connection && member.livingSystems) {
+          const events = audibleSystemEvents(cues, this.systemsPeer(member));
+          if (events.length) this.send(member.connection, { type: 'systems_events', events });
+        }
+    const contacts = room.systems.drainCombatEvents().flatMap((hit) => {
+      const member = room.members.get(hit.targetId);
+      if (!member?.livingSystems || (member.spaceId ?? 'surface') !== hit.spaceId) return [];
+      // Surface combat excludes underground peers, but this trusted floor contact
+      // explicitly addresses the authenticated member in that floor.
+      const peer = this.combatPeer(member);
+      peer.combatActive = this.systemsPeer(member).active && this.systemsPeer(member).combatActive;
+      return [{ actorId: hit.actorId, peer, damage: hit.damage }];
+    });
+    if (contacts.length) this.publishCombat(room, room.combat.domainContacts(contacts));
+  }
+  combatOptions(room) {
+    return {
+      now: this.now,
+      canDefeat: (id) =>
+        !room.systems ||
+        room.systems.economy.canAdmitDeath(id, roomWorldSeconds(room.calendarEpochMs, this.now())),
+      onDefeat: (npc, contributors) => {
+        if (!room.systems) return;
+        const time = roomWorldSeconds(room.calendarEpochMs, this.now());
+        room.systems.death({
+          actorId: npc.id,
+          kind: 'enemy',
+          spaceId: 'surface',
+          x: npc.x,
+          y: npc.y,
+          role: npc.role,
+          difficulty: Math.max(1, Math.round(npc.maxHp / 35)),
+          contributors: [...contributors],
+          time,
+          biome: room.world.tile(npc.x, npc.y).biome,
+          night: worldTimeAt(time).nightness > 0.5,
+        });
+      },
+    };
+  }
+  systemsCommand(connection, message) {
+    const { room, member } = connection;
+    if (!member.livingSystems || !room.systems)
+      return this.error(
+        connection,
+        'capability_required',
+        'This authority has not enabled living systems for this life.',
+      );
+    if (!/^r[1-9]\d{0,14}$/.test(message.requestId) || !validSystemsCommand(message.command))
+      return this.error(connection, 'invalid_systems', 'Invalid field or civic action.');
+    const fingerprint = JSON.stringify(['systems', message.command]),
+      old = member.requests.get(message.requestId);
+    if (old) {
+      if (old.fingerprint !== fingerprint)
+        return this.error(
+          connection,
+          'request_reused',
+          'This action ID belongs to a different request.',
+        );
+      this.send(connection, { ...old.result, frame: room.systems.frame(this.systemsPeer(member)) });
+      return;
+    }
+    if (this.now() - (member.lastSystemsAction ?? -Infinity) < 150)
+      return this.send(connection, {
+        type: 'systems_result',
+        requestId: message.requestId,
+        ok: false,
+        reason: 'Finish the current action before acting again.',
+      });
+    member.lastSystemsAction = this.now();
+    this.syncSystems(room);
+    const result =
+      message.command.kind === 'surface-recover'
+        ? this.surfaceRecovery(room, member, Number(message.requestId.slice(1)))
+        : room.systems.command(
+            this.systemsPeer(member),
+            message.command,
+            `room:${member.id}:${message.requestId}`,
+          );
+    if (result.ok)
+      result.receipt = {
+        scope: `room:${room.id}:${member.id}`,
+        sequence: Number(message.requestId.slice(1)),
+        actorId: member.id,
+        targetBodyId: member.bodyId ?? member.id,
+      };
+    if (result.transition) {
+      member.spaceId = result.transition.to.spaceId;
+      member.x = result.transition.to.x;
+      member.y = result.transition.to.y;
+      member.moveCredit = 2;
+      member.movementAt = this.now();
+      if (member.spaceId === 'surface') {
+        room.systems.underworld.syncPeer(this.systemsPeer(member));
+        if (!member.recoveryAnchor && recoveryAnchorValid(surfaceAddress(member)))
+          member.recoveryAnchor = surfaceAddress(member);
+      }
+      this.syncSystems(room);
+      this.voiceAuthority?.stopForTransition?.(connection);
+      for (const other of room.members.values())
+        if (other.connection && other !== member && !other.livingSystems)
+          this.send(
+            other.connection,
+            member.spaceId === 'surface'
+              ? { type: 'peerJoined', peer: publicPeer(member) }
+              : { type: 'peerLeft', peerId: member.id },
+          );
+      this.broadcast(room, { type: 'pose', peer: publicPeer(member) }, connection);
+    }
+    this.publishSystemsContacts(room);
+    const response = {
+      type: 'systems_result',
+      requestId: message.requestId,
+      ok: result.ok,
+      reason: result.message,
+      result,
+    };
+    member.requests.set(message.requestId, { fingerprint, result: response });
+    while (member.requests.size > 128) member.requests.delete(member.requests.keys().next().value);
+    if (result.opened) for (const id of result.opened) room.opened.add(id);
+    this.send(connection, { ...response, frame: room.systems.frame(this.systemsPeer(member)) });
+    if (result.removed?.length || result.opened?.length)
+      this.broadcast(room, {
+        type: 'world',
+        actorId: member.id,
+        removed: result.removed,
+        opened: result.opened,
+      });
+    room.lastActivity = this.now();
+  }
+  /** Explicit paid rescue, not a permission for position messages to teleport. */
+  surfaceRecovery(room, member, sequence) {
+    const fail = (message) => ({ ok: false, message });
+    if (!room.systems.admitExternalCommand(member.id, sequence))
+      return fail('This rescue request has already completed or belongs to an earlier session.');
+    if ((member.spaceId ?? 'surface') !== 'surface')
+      return fail('Use the expedition recall before requesting surface rescue.');
+    const now = roomWorldSeconds(room.calendarEpochMs, this.now());
+    if (now < (member.recoveryReadyAt ?? 0))
+      return fail('The clinic signal needs thirty seconds to recover.');
+    if (!recoveryAnchorValid(member.recoveryAnchor) || !recoveryAnchorValid(surfaceAddress(member)))
+      return fail('This life has no confirmed surface rescue anchor.');
+    const blocked = (p) =>
+      room.world.blocked(p.x, p.y, room.removed) ||
+      room.systems.property.blocks(p) ||
+      [...room.members.values()].some(
+        (other) =>
+          other !== member &&
+          other.connection &&
+          (other.spaceId ?? 'surface') === 'surface' &&
+          distance(other, p) < 0.85,
+      );
+    let target;
+    // Maximum 169 candidates, centered on the frozen admitted anchor. No wire target is read.
+    for (let radius = 0; radius <= SURFACE_RECOVERY_RULES.searchRadius && !target; radius++) {
+      for (let dy = -radius; dy <= radius && !target; dy++)
+        for (let dx = -radius; dx <= radius && !target; dx++) {
+          if (radius && Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          const candidate = radius
+            ? {
+                spaceId: 'surface',
+                x: Math.round(member.recoveryAnchor.x) + dx,
+                y: Math.round(member.recoveryAnchor.y) + dy,
+              }
+            : surfaceAddress(member.recoveryAnchor);
+          if (recoveryAnchorValid(candidate) && !blocked(candidate)) target = candidate;
+        }
+    }
+    if (!target)
+      return fail('The clinic landing area is obstructed. Your coins remain with this life.');
+    const satchel = room.systems.economy.satchel(member.id);
+    if (!satchel) return fail('This life has no admitted field possessions.');
+    const coinLoss =
+      satchel.coins > 0
+        ? Math.max(1, Math.ceil(satchel.coins * SURFACE_RECOVERY_RULES.coinFraction))
+        : 0;
+    const paid = room.systems.economy.forfeitCoins(member.id, coinLoss);
+    if (!paid.ok) return fail(paid.message);
+    member.recoveryReadyAt = now + SURFACE_RECOVERY_RULES.cooldownSeconds;
+    return {
+      ok: true,
+      message: `The clinic signal recalls this body to its confirmed refuge. ${coinLoss} field coin${coinLoss === 1 ? '' : 's'} fund the rescue.`,
+      transition: {
+        actorId: member.id,
+        from: surfaceAddress(member),
+        to: target,
+        reason: 'clinic',
+      },
+      recovery: { coinLoss, cooldownUntil: member.recoveryReadyAt },
+    };
+  }
   combatPeer(member) {
     return {
       id: member.id,
       x: member.x,
       y: member.y,
       heading: member.heading,
-      appearance: member.appearance,
+      appearance: member.domainWeapon
+        ? {
+            ...member.appearance,
+            weapon: member.domainWeapon.kind,
+            weaponSeed: member.domainWeapon.seed,
+            artifactDesign: undefined,
+          }
+        : member.appearance,
       combatActive:
         !!member.connection &&
+        (member.spaceId ?? 'surface') === 'surface' &&
         member.combatActive === true &&
         this.now() - member.lastPose < 2500 &&
         member.combatHits.size + member.combatDeaths.size < 512,
-      progression: member.progression,
+      progression: member.domainWeapon ? { level: 1, combatXp: 0, upgrade: 0 } : member.progression,
       ...(member.bodyId ? { bodyId: member.bodyId } : {}),
     };
   }
@@ -320,6 +601,20 @@ export class CoopRooms {
         room.opened,
       );
       this.publishCombat(room, frame);
+      if (room.systems) {
+        this.syncSystems(room);
+        room.systems.tick(roomWorldSeconds(room.calendarEpochMs, this.now()));
+        this.publishSystemsContacts(room);
+        if (this.now() >= (room.systemsNext ?? 0)) {
+          room.systemsNext = this.now() + 500;
+          for (const member of members)
+            if (member.livingSystems)
+              this.send(member.connection, {
+                type: 'systems_frame',
+                frame: room.systems.frame(this.systemsPeer(member)),
+              });
+        }
+      }
       active.push({ room, members });
     }
     // Rotate service order so occupied rooms cannot starve at the global budget.
@@ -335,7 +630,7 @@ export class CoopRooms {
   }
   livingObservers(room, members) {
     return members
-      .filter((m) => m.livingWorld)
+      .filter((m) => m.livingWorld && (m.spaceId ?? 'surface') === 'surface')
       .map((m) => ({
         id: m.id,
         x: m.x,
@@ -470,7 +765,52 @@ export class CoopRooms {
         (message.progression !== undefined && !validSharedCombatProgression(message.progression))
       )
         return this.error(connection, 'invalid_pose', 'A valid humanoid pose is required.');
-      if (room.world.blocked(message.x, message.y, room.removed))
+      const boundBodyId = member.bodyId ?? member.domainBodyId;
+      if (
+        member.livingSystems &&
+        boundBodyId !== undefined &&
+        message.bodyId !== undefined &&
+        message.bodyId !== boundBodyId
+      )
+        return this.error(
+          connection,
+          'body_transition_required',
+          'This shared life cannot change bodies without an admitted transfer.',
+        );
+      const occupiedSpace = member.spaceId ?? 'surface';
+      const blocked = (x, y) =>
+        occupiedSpace === 'surface'
+          ? room.world.blocked(x, y, room.removed) ||
+            room.systems?.property.blocks({ spaceId: occupiedSpace, x, y })
+          : room.systems?.underworld.blocked(occupiedSpace, x, y) !== false;
+      if (member.livingSystems) {
+        const elapsed = Math.max(
+          0,
+          Math.min(0.5, (this.now() - (member.movementAt ?? this.now())) / 1000),
+        );
+        member.moveCredit = Math.min(3.2, (member.moveCredit ?? 2) + elapsed * 16);
+        member.movementAt = this.now();
+        const span = distance(member, message),
+          steps = Math.max(1, Math.ceil(span / 0.2));
+        if (
+          span > member.moveCredit ||
+          steps > 24 ||
+          Array.from({ length: steps }, (_, i) => i + 1).some((i) =>
+            blocked(
+              member.x + ((message.x - member.x) * i) / steps,
+              member.y + ((message.y - member.y) * i) / steps,
+            ),
+          )
+        ) {
+          this.send(connection, {
+            type: 'systems_correction',
+            location: { spaceId: occupiedSpace, x: member.x, y: member.y },
+            reason: 'The room could not confirm that route.',
+          });
+          return;
+        }
+        member.moveCredit -= span;
+      } else if (blocked(message.x, message.y))
         return this.error(connection, 'blocked_pose', 'That position is blocked.');
       Object.assign(member, {
         name: message.name === undefined ? member.name : message.name.trim(),
@@ -484,10 +824,13 @@ export class CoopRooms {
         progression: message.progression ? { ...message.progression } : member.progression,
         lastPose: this.now(),
       });
+      if (member.livingSystems && occupiedSpace !== 'surface')
+        room.systems.underworld.syncPeer(this.systemsPeer(member));
       room.lastActivity = this.now();
       this.broadcast(room, { type: 'pose', peer: publicPeer(member) }, connection);
       return;
     }
+    if (message.type === 'systems') return this.systemsCommand(connection, message);
     if (message.type === 'chat') return this.chat(connection, message);
     if (message.type === 'machine' || message.type === 'production')
       return this.production(connection, message);
@@ -529,6 +872,7 @@ export class CoopRooms {
       (message.publicWorld !== undefined && typeof message.publicWorld !== 'boolean') ||
       (message.livingWorld !== undefined && message.livingWorld !== 1) ||
       (message.actionExpansion !== undefined && message.actionExpansion !== ACTION_EXPANSION) ||
+      (message.livingSystems !== undefined && message.livingSystems !== 1) ||
       (message.bodyId !== undefined && !bodyIdValid(message.bodyId)) ||
       (message.progression !== undefined && !validSharedCombatProgression(message.progression)) ||
       (message.room !== undefined &&
@@ -594,11 +938,9 @@ export class CoopRooms {
         machines: new Map(),
         productionReceipts: new Map(),
       };
-      room.combat = new SharedCombat(world, room.removed, { now: this.now });
+      room.combat = new SharedCombat(world, room.removed, this.combatOptions(room));
       this.rooms.set(id, room);
     }
-    if (room.world.blocked(message.position.x, message.position.y, room.removed))
-      return this.error(connection, 'blocked_pose', 'Join from clear ground in this world.');
     let member;
     if (message.resumeToken) {
       member = [...room.members.values()].find((value) => value.token === message.resumeToken);
@@ -616,7 +958,62 @@ export class CoopRooms {
         );
       if (member.connection)
         return this.error(connection, 'resume_in_use', 'That traveler is already connected.');
+      if (member.domainWeapon && message.livingSystems !== 1)
+        return this.error(
+          connection,
+          'capability_required',
+          'This life has authoritative field possessions. Resume it using a current build.',
+        );
+      const boundBodyId = member.bodyId ?? member.domainBodyId;
+      if (
+        member.domainWeapon &&
+        boundBodyId !== undefined &&
+        message.bodyId !== undefined &&
+        message.bodyId !== boundBodyId
+      )
+        return this.error(
+          connection,
+          'body_transition_required',
+          'Resume the body already bound to this shared life.',
+        );
     }
+    const resumedLocation = member && room.systems?.underworld.location(member.id);
+    if (resumedLocation?.spaceId !== 'surface' && resumedLocation && message.livingSystems !== 1)
+      return this.error(
+        connection,
+        'capability_required',
+        'Resume this underground life using a current build.',
+      );
+    if (
+      !member &&
+      (room.world.blocked(message.position.x, message.position.y, room.removed) ||
+        (message.livingSystems === 1 &&
+          room.systems?.property.blocks(surfaceAddress(message.position))))
+    )
+      return this.error(connection, 'blocked_pose', 'Join from clear ground in this world.');
+    if (message.livingSystems === 1 && !member && message.bodyId) {
+      const candidate = room.world
+        .npcsAround(message.position.x, message.position.y, 8)
+        .find((n) => n.id === message.bodyId && n.appearance.seed === message.appearance.seed);
+      const record = candidate && room.systems?.actors.get(candidate.id);
+      if (
+        candidate &&
+        (room.removed.has(candidate.id) ||
+          record?.state === 'dead' ||
+          record?.body.hp <= 0 ||
+          (record && (record.spaceId !== 'surface' || distance(record, message.position) > 8)) ||
+          [...room.members.values()].some((m) => m.domainBodyId === candidate.id))
+      )
+        return this.error(
+          connection,
+          'body_unavailable',
+          'That life is no longer available. Choose another living body.',
+        );
+    }
+    const resumedPosition =
+      member && message.livingSystems === 1
+        ? { spaceId: member.spaceId ?? 'surface', x: member.x, y: member.y }
+        : undefined;
     const connected = [...room.members.values()].filter((value) => value.connection).length;
     if (connected >= this.maxPeers)
       return this.error(
@@ -626,6 +1023,12 @@ export class CoopRooms {
       );
     if (!member) {
       // Bound abandoned reconnect records even when visitors repeatedly leave and rejoin.
+      if (room.members.size >= this.maxPeers * 4 && room.systems)
+        return this.error(
+          connection,
+          'life_register_full',
+          'This world has reached its retained life capacity. Existing lives can reconnect.',
+        );
       if (room.members.size >= this.maxPeers * 4) {
         const oldest = [...room.members.values()]
           .filter((value) => !value.connection)
@@ -658,15 +1061,52 @@ export class CoopRooms {
       disconnectedAt: null,
       livingWorld: message.livingWorld === 1,
       actionExpansion: message.actionExpansion === ACTION_EXPANSION,
+      livingSystems: message.livingSystems === 1,
       combatActive: message.combatActive === true,
-      bodyId: message.bodyId,
+      bodyId: message.bodyId ?? member.bodyId ?? member.domainBodyId,
       progression: message.progression
         ? { ...message.progression }
         : { level: 1, combatXp: 0, upgrade: 0 },
       lastPose: this.now(),
     });
+    if (member.livingSystems) {
+      member.domainWeapon ??= {
+        kind: message.appearance.weapon === 'none' ? 'sword' : message.appearance.weapon,
+        seed: deriveSeed(room.seed, member.id, 'expedition-kit'),
+      };
+      if (!member.domainBodyId && message.bodyId) {
+        const body = room.world
+          .npcsAround(message.position.x, message.position.y, 8)
+          .find((n) => n.id === message.bodyId && n.appearance.seed === message.appearance.seed);
+        if (
+          body &&
+          !room.removed.has(body.id) &&
+          room.systems?.actors.get(body.id)?.state !== 'dead' &&
+          ![...room.members.values()].some((m) => m !== member && m.domainBodyId === body.id)
+        )
+          member.domainBodyId = body.id;
+      }
+      Object.assign(
+        member,
+        resumedLocation?.spaceId !== 'surface' && resumedLocation
+          ? resumedLocation
+          : (resumedPosition ?? { spaceId: 'surface' }),
+      );
+      // New admissions were checked above. Migration uses the saved authoritative surface pose,
+      // even if a doorway was closed while this life was away; rescue searches nearby safely.
+      if (
+        !member.recoveryAnchor &&
+        (member.spaceId ?? 'surface') === 'surface' &&
+        recoveryAnchorValid(surfaceAddress(member))
+      )
+        member.recoveryAnchor = surfaceAddress(member);
+      member.moveCredit = 2;
+      member.movementAt = this.now();
+    }
     connection.member = member;
     connection.room = room;
+    if (member.livingSystems) this.enableSystems(room);
+    this.syncSystems(room);
     room.lastActivity = this.now();
     const welcome = (proof) => {
       if (member.connection !== connection || connection.socket.readyState !== 1) return;
@@ -681,13 +1121,26 @@ export class CoopRooms {
         resumeToken: member.token,
         seed: room.seed,
         generation: room.generation,
-        peers: [...room.members.values()].filter((value) => value.connection).map(publicPeer),
+        peers: [...room.members.values()]
+          .filter(
+            (value) =>
+              value.connection &&
+              (member.livingSystems || (value.spaceId ?? 'surface') === 'surface'),
+          )
+          .map(publicPeer),
         removed: [...room.removed],
         opened: [...room.opened],
         combat: this.combatFrame(room, member),
         ...(member.livingWorld ? { living: this.livingFrameFor(room, member) } : {}),
         ...(member.actionExpansion ? { actionExpansion: ACTION_EXPANSION } : {}),
-        chat: room.chat.filter((c) => c.channel === 'world' || distance(c, member) <= 12),
+        ...(member.livingSystems
+          ? { livingSystems: 1, systems: room.systems.frame(this.systemsPeer(member)) }
+          : {}),
+        chat: room.chat.filter(
+          (c) =>
+            c.channel === 'world' ||
+            ((member.spaceId ?? 'surface') === 'surface' && distance(c, member) <= 12),
+        ),
         machines: [...room.machines.values()],
         ...(proof ? { proof } : {}),
       });
@@ -754,6 +1207,11 @@ export class CoopRooms {
       requests: [...m.requests],
       combatHits: [...m.combatHits.values()],
       combatDeaths: [...m.combatDeaths.values()],
+      ...(m.domainWeapon ? { domainWeapon: m.domainWeapon } : {}),
+      ...(m.domainBodyId ? { domainBodyId: m.domainBodyId } : {}),
+      ...(m.spaceId ? { spaceId: m.spaceId } : {}),
+      ...(m.recoveryAnchor ? { recoveryAnchor: surfaceAddress(m.recoveryAnchor) } : {}),
+      ...(m.recoveryReadyAt !== undefined ? { recoveryReadyAt: m.recoveryReadyAt } : {}),
     }));
     return structuredClone({
       state,
@@ -762,6 +1220,7 @@ export class CoopRooms {
         chat: room.chat,
         faunaStrikes: [...room.faunaStrikes],
         calendarEpochMs: room.calendarEpochMs,
+        ...(room.systems ? { systems: room.systems.save(), faunaLedger: room.living.save() } : {}),
       },
     });
   }
@@ -789,6 +1248,10 @@ export class CoopRooms {
         !privateState.faunaStrikes.every((s) => typeof s === 'string' && s.length < 256))
     )
       throw Error('Invalid wildlife receipt backup.');
+    if (privateState.systems !== undefined && !validLivingSystemsSave(privateState.systems))
+      throw Error('Invalid living systems backup.');
+    if (privateState.faunaLedger !== undefined && !validFaunaLedger(privateState.faunaLedger))
+      throw Error('Invalid persistent fauna backup.');
     const world = new InfiniteWorld(state.seed, state.generation),
       removed = new Set(state.removed);
     const room = {
@@ -813,8 +1276,12 @@ export class CoopRooms {
       faunaStrikes: new Set(privateState.faunaStrikes ?? []),
       lastActivity: this.now(),
     };
-    room.combat = new SharedCombat(world, removed, { now: this.now });
+    room.combat = new SharedCombat(world, removed, this.combatOptions(room));
     room.combat.restore(state.combat);
+    if (privateState.systems) {
+      room.faunaLedger = privateState.faunaLedger;
+      this.enableSystems(room, privateState.systems);
+    }
     for (const m of privateState.members) {
       if (
         !object(m) ||
@@ -822,6 +1289,17 @@ export class CoopRooms {
         !text(m.token, 32, 32) ||
         !point(m) ||
         !appearanceValid(m.appearance) ||
+        (m.spaceId !== undefined && !text(m.spaceId, 1, 160)) ||
+        (m.domainBodyId !== undefined && !bodyIdValid(m.domainBodyId)) ||
+        (m.bodyId !== undefined && !bodyIdValid(m.bodyId)) ||
+        (m.recoveryAnchor !== undefined && !recoveryAnchorValid(m.recoveryAnchor)) ||
+        (m.recoveryReadyAt !== undefined &&
+          !finite(m.recoveryReadyAt, 0, Number.MAX_SAFE_INTEGER)) ||
+        (m.domainWeapon !== undefined &&
+          (!object(m.domainWeapon) ||
+            !['sword', 'bow', 'staff'].includes(m.domainWeapon.kind) ||
+            !integer(m.domainWeapon.seed, 0, 0xffffffff) ||
+            Object.keys(m.domainWeapon).some((k) => !['kind', 'seed'].includes(k)))) ||
         !text(m.name, 1, 64) ||
         !integer(m.combatAck, 0, state.combatEvent) ||
         !integer(m.combatSerial, 0, Number.MAX_SAFE_INTEGER) ||
@@ -916,16 +1394,29 @@ export class CoopRooms {
       y: member.y,
       at: this.now(),
     };
-    room.chat.push(chat);
+    if (chat.channel === 'world' || (member.spaceId ?? 'surface') === 'surface')
+      room.chat.push(chat);
     if (room.chat.length > 200) room.chat.shift();
     answer(true);
     for (const target of room.members.values())
-      if (target.connection && (chat.channel === 'world' || distance(member, target) <= 12))
+      if (
+        target.connection &&
+        (chat.channel === 'world' ||
+          ((member.spaceId ?? 'surface') === (target.spaceId ?? 'surface') &&
+            distance(member, target) <= 12))
+      )
         this.send(target.connection, { type: 'chat', message: chat });
     room.lastActivity = this.now();
   }
   production(connection, message) {
     const { room, member } = connection;
+    if ((member.spaceId ?? 'surface') !== 'surface')
+      return this.send(connection, {
+        type: 'claimResult',
+        requestId: message.requestId,
+        ok: false,
+        reason: 'Surface production requires returning through the stairs.',
+      });
     if (!text(message.requestId, 1, 80))
       return this.error(connection, 'invalid_production', 'An action ID is required.');
     const fingerprint = JSON.stringify(message),
@@ -1047,6 +1538,14 @@ export class CoopRooms {
   }
   combat(connection, message) {
     const { room, member } = connection;
+    if ((member.spaceId ?? 'surface') !== 'surface')
+      return this.send(connection, {
+        type: 'combat_result',
+        requestId: message.requestId,
+        ok: false,
+        reason: 'Use this floor’s combat actions.',
+        frame: this.combatFrame(room, member),
+      });
     if (!text(message.requestId, 1, 80))
       return this.error(connection, 'invalid_combat', 'A combat action ID is required.');
     const fingerprint = JSON.stringify([
@@ -1129,6 +1628,13 @@ export class CoopRooms {
   }
   claim(connection, message) {
     const { room, member } = connection;
+    if ((member.spaceId ?? 'surface') !== 'surface')
+      return this.send(connection, {
+        type: 'claimResult',
+        requestId: message.requestId,
+        ok: false,
+        reason: 'Surface objects require returning through the stairs.',
+      });
     if (!text(message.requestId, 1, 80) || !text(message.propId, 1, 160))
       return this.error(connection, 'invalid_claim', 'An action ID and object ID are required.');
     const fingerprint = JSON.stringify([
@@ -1177,9 +1683,18 @@ export class CoopRooms {
       return result(false, 'The object coordinates do not match.');
     if (message.type === 'door') {
       if (prop.kind !== 'door') return result(false, 'That object is not a door.');
+      if (member.livingSystems && room.systems && message.open) {
+        const access = room.systems.doorAccess(this.systemsPeer(member), prop);
+        if (!access.allowed) return result(false, access.label);
+      }
       if (
         !message.open &&
-        [...room.members.values()].some((other) => other.connection && distance(other, prop) < 0.85)
+        [...room.members.values()].some(
+          (other) =>
+            other.connection &&
+            (other.spaceId ?? 'surface') === 'surface' &&
+            distance(other, prop) < 0.85,
+        )
       )
         return result(false, 'A traveler is standing in the doorway.');
       const wasOpen = room.opened.has(prop.id);

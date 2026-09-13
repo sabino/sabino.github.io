@@ -489,13 +489,23 @@ export class SharedCombat {
   private readonly removed: Set<string>;
   private readonly expeditions?: ExpeditionCatalog;
   private worldElapsed = 0;
+  private canDefeat?: (npcId: string) => boolean;
+  private onDefeat?: (npc: SharedEnemy, contributors: readonly string[], killerId: string) => void;
 
   constructor(
     world: CombatWorld,
     removed: Set<string>,
-    options: { now?: () => number; maxEnemies?: number; maxRecords?: number } = {},
+    options: {
+      now?: () => number;
+      maxEnemies?: number;
+      maxRecords?: number;
+      canDefeat?: (npcId: string) => boolean;
+      onDefeat?: (npc: SharedEnemy, contributors: readonly string[], killerId: string) => void;
+    } = {},
   ) {
     this.world = world;
+    this.canDefeat = options.canDefeat;
+    this.onDefeat = options.onDefeat;
     if ('seed' in world && 'settlementsAround' in world)
       this.expeditions = new ExpeditionCatalog(world as InfiniteWorld);
     this.removed = removed;
@@ -615,6 +625,27 @@ export class SharedCombat {
   }
   wardActive(peerId: string): boolean {
     return (this.cooldowns.get(peerId)?.ward ?? 0) > this.now();
+  }
+  /** Trusted civic/dungeon simulation uses the same persisted numeric receipt stream.
+   * This method is deliberately unreachable as a client-supplied damage command. */
+  domainContacts(
+    contacts: readonly { actorId: string; peer: SharedCombatPeer; damage: number }[],
+  ): SharedCombatFrame {
+    for (const { actorId, peer, damage } of contacts.slice(0, 64)) {
+      if (!peer.combatActive || !optionalText(actorId) || !actorId || !finite(damage, 0, 100))
+        continue;
+      this.hits.push({
+        id: ++this.serial,
+        actorId,
+        targetId: peer.id,
+        target: 'peer',
+        damage,
+        kind: 'slash',
+        color: '#d6aa8a',
+        ...(peer.bodyId ? { targetBodyId: peer.bodyId } : {}),
+      });
+    }
+    return this.frame(contacts.length > 0);
   }
 
   private result(ok: boolean, reason?: string): SharedCombatResult {
@@ -788,6 +819,7 @@ export class SharedCombat {
   ) {
     if (npc.hp <= 0 || !npc.hostile || this.dead.has(npc.id) || !this.recordable(npc.id))
       return false;
+    if (amount >= npc.hp && this.canDefeat && !this.canDefeat(npc.id)) return false;
     const damage = Math.min(npc.hp, amount);
     npc.hp = Math.max(0, npc.hp - amount);
     delete npc.intent;
@@ -814,6 +846,7 @@ export class SharedCombat {
       ...(benefits?.renewal ? { renewal: true } : {}),
     });
     if (npc.hp <= 0) {
+      this.onDefeat?.(copy(npc), [...contributors].sort(), actorId);
       this.dead.add(npc.id);
       this.removed.add(npc.id);
       this.records.delete(npc.id);

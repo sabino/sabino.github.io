@@ -1,6 +1,8 @@
 import { deriveSeed, random } from '../procedural/random.ts';
 import type { Biome, Point, Tile } from './types.ts';
 import type { WorldTimeSignal } from './world-time.ts';
+import { ActorLedger, validActorLedgerSave, type ActorLedgerSave } from './actor-ledger.ts';
+import type { NavigationWorld } from './navigation.ts';
 
 export const FAUNA_CELL_TILES = 12;
 export const FAUNA_ACTIVE_RADIUS = 22;
@@ -102,9 +104,52 @@ export class LivingWorld {
   private groups = new Map<string, FaunaActor[]>();
   private cacheSeed = -1;
   private readonly maxNewCells: number;
+  private readonly persistent: boolean;
+  private ledger: ActorLedger<FaunaActor>;
   /** Runtime consumers stream at most two cold ecological cells per refresh; pure replay can opt out. */
-  constructor(options: { maxNewCells?: number } = {}) {
+  constructor(
+    options: {
+      maxNewCells?: number;
+      persistent?: boolean;
+      save?: ActorLedgerSave<FaunaActor>;
+    } = {},
+  ) {
     this.maxNewCells = Math.max(1, Math.min(200, Math.floor(options.maxNewCells ?? 200)));
+    this.persistent = options.persistent ?? false;
+    this.ledger = new ActorLedger(options.save, validFaunaActor);
+  }
+  /** Capability-gated authority checkpoint. Playback calls are intentionally excluded. */
+  save(): ActorLedgerSave<FaunaActor> | undefined {
+    if (!this.persistent) return undefined;
+    const state = this.ledger.snapshot();
+    for (const actor of state.actors) actor.body.call = null;
+    return state;
+  }
+  get persistentActors() {
+    return this.ledger.size;
+  }
+  get persistenceSaturated() {
+    return this.ledger.diagnostics.saturated > 0;
+  }
+  /** Authority harvest/combat owns deaths. Sampling can never regenerate this identity. */
+  defeat(id: string): boolean {
+    return this.persistent && this.ledger.markDead(id);
+  }
+  /** A real authority-confirmed wound changes the persistent animal's immediate goal. */
+  wound(id: string, attacker: Point, response: 'flee' | 'defend'): boolean {
+    const record = this.ledger.get(id);
+    if (!this.persistent || !record || record.state === 'dead') return false;
+    const actor = record.body;
+    const heading = Math.atan2(actor.y - attacker.y, actor.x - attacker.x);
+    actor.activity = response === 'defend' ? 'lunge' : 'flee';
+    actor.call = actor.kind === 'bird' ? 'bird' : actor.kind === 'grazer' ? 'bleat' : 'growl';
+    this.ledger.update(actor, record.simulatedAt);
+    this.ledger.setDestination(id, {
+      spaceId: 'surface',
+      x: actor.x + Math.cos(heading) * 8,
+      y: actor.y + Math.sin(heading) * 8,
+    });
+    return true;
   }
   sample(
     world: FaunaWorld,
@@ -114,12 +159,14 @@ export class LivingWorld {
   ): FaunaFrame {
     if (world.seed !== this.cacheSeed) {
       this.groups.clear();
+      if (this.cacheSeed !== -1) this.ledger = new ActorLedger();
       this.cacheSeed = world.seed;
     }
     const observers = rawObservers
       .filter((p) => typeof p.id === 'string' && Number.isFinite(p.x) && Number.isFinite(p.y))
       .slice(0, FAUNA_MAX_OBSERVERS)
       .sort((a, b) => a.id.localeCompare(b.id));
+    if (this.persistent) return this.samplePersistent(world, time, observers, removed);
     const cells = new Map<string, { x: number; y: number }>();
     for (const p of observers) {
       const cx = Math.floor(p.x / FAUNA_CELL_TILES),
@@ -160,6 +207,195 @@ export class LivingWorld {
       version: 1,
       elapsedSeconds: time.elapsedSeconds,
       actors: candidates.slice(0, FAUNA_MAX_ACTORS),
+    };
+  }
+  private samplePersistent(
+    world: FaunaWorld,
+    time: WorldTimeSignal,
+    observers: LivingObserver[],
+    removed: ReadonlySet<string>,
+  ): FaunaFrame {
+    const cells = new Map<string, Point>();
+    for (const p of observers) {
+      const cx = Math.floor(p.x / FAUNA_CELL_TILES),
+        cy = Math.floor(p.y / FAUNA_CELL_TILES);
+      for (let y = cy - 2; y <= cy + 2; y++)
+        for (let x = cx - 2; x <= cx + 2; x++) {
+          const key = `${x},${y}`;
+          // Warm, already admitted spawn cells need no allocation or sorting.
+          if (!this.groups.has(key) && !cells.has(key)) cells.set(key, { x, y });
+        }
+    }
+    const nearest = (p: Point) => {
+      let d = Infinity;
+      // Sorting only needs ordering. Squared distance avoids thousands of hypot
+      // calls per refresh with eight observers in the same population.
+      for (const observer of observers) {
+        const dx = observer.x - p.x,
+          dy = observer.y - p.y;
+        d = Math.min(d, dx * dx + dy * dy);
+      }
+      return d;
+    };
+    const ordered = [...cells]
+      .map(([key, cell]) => ({
+        key,
+        ...cell,
+        range: nearest({
+          x: (cell.x + 0.5) * FAUNA_CELL_TILES,
+          y: (cell.y + 0.5) * FAUNA_CELL_TILES,
+        }),
+      }))
+      .sort((a, b) => a.range - b.range || a.y - b.y || a.x - b.x);
+    let fresh = 0;
+    for (const cell of ordered) {
+      if (fresh++ >= this.maxNewCells) break;
+      const group = this.spawn(world, cell.x, cell.y, removed);
+      this.groups.set(cell.key, group);
+      for (const actor of group)
+        this.ledger.register(actor, 'fauna', time.elapsedSeconds, {
+          home: { ...actor.home, spaceId: 'surface' },
+          speed: actor.kind === 'bird' ? 2.3 : 1.2,
+        });
+    }
+    // The spawn cache can be forgotten; the identity and tombstone ledger cannot.
+    while (this.groups.size > 256) this.groups.delete(this.groups.keys().next().value!);
+    const active = new Map<string, ReturnType<ActorLedger<FaunaActor>['get']>>();
+    for (const p of observers)
+      for (const record of this.ledger.query(
+        { x: p.x, y: p.y, spaceId: 'surface' },
+        FAUNA_ACTIVE_RADIUS,
+        FAUNA_MAX_ACTORS,
+      ))
+        active.set(record.id, record);
+    const selected = [...active.values()]
+      .filter((r): r is NonNullable<typeof r> => !!r)
+      .map((record) => ({ record, range: nearest(record) }))
+      .sort((a, b) => a.range - b.range || a.record.id.localeCompare(b.record.id))
+      .slice(0, FAUNA_MAX_ACTORS)
+      .map((entry) => entry.record);
+    const frames: FaunaActor[] = [];
+    const groundNavigation = this.faunaNavigation(world, removed, false);
+    const flightNavigation = this.faunaNavigation(world, removed, true);
+    for (const record of selected) {
+      const source = record.body;
+      const dt = Math.max(0, Math.min(0.75, time.elapsedSeconds - record.simulatedAt));
+      // query() already returns a detached body. update() captures it before playback
+      // calls are added; a second body/home clone here only adds garbage each refresh.
+      const actor = source;
+      actor.call = null;
+      const observer = observers.reduce<LivingObserver | undefined>(
+        (best, candidate) =>
+          !best || distance(candidate, actor) < distance(best, actor) ? candidate : best,
+        undefined,
+      );
+      const range = observer ? distance(observer, actor) : Infinity;
+      const phase = (time.elapsedSeconds + (actor.seed % 5)) % FAUNA_ATTACK_PERIOD;
+      let target: Point | undefined,
+        speed = actor.kind === 'bird' ? 2.3 : 1.2;
+      delete actor.targetId;
+      if (
+        source.activity === 'flee' &&
+        record.destination &&
+        distance(actor, record.destination) > 0.5
+      ) {
+        actor.activity = 'flee';
+        target = record.destination;
+        speed = actor.kind === 'bird' ? 4.2 : 3.4;
+      } else if (!faunaActive(actor.kind, time) || (actor.kind === 'wolf' && time.daylight > 0.7))
+        actor.activity = 'sleep';
+      else if (
+        observer &&
+        (observer.ward || !actor.dangerous) &&
+        range < (actor.kind === 'bird' ? 4.8 : 3.8)
+      ) {
+        const angle =
+          range < 0.01
+            ? (actor.seed % 628) / 100
+            : Math.atan2(actor.y - observer.y, actor.x - observer.x);
+        target = { x: actor.x + Math.cos(angle) * 5, y: actor.y + Math.sin(angle) * 5 };
+        actor.activity = 'flee';
+        speed = actor.kind === 'bird' ? 4.2 : 3.4;
+      } else if (observer && actor.dangerous && range < (actor.kind === 'wolf' ? 9 : 3.2)) {
+        // Pursuit is measured from the animal's current position, never its birth tile.
+        actor.targetId = observer.id;
+        actor.activity = phase < 3.5 ? 'stalk' : 'lunge';
+        target = observer;
+        speed = actor.activity === 'lunge' ? 4.4 : 1.6;
+      } else if (observer && actor.kind === 'grazer' && range < 6 && !observer.moving)
+        actor.activity = 'curious';
+      else {
+        const episode = Math.floor(time.elapsedSeconds / 28),
+          rng = random(deriveSeed(actor.seed, `journey:${episode}`));
+        if ((time.elapsedSeconds + (actor.seed % 24)) % 24 > 18) actor.activity = 'idle';
+        else {
+          actor.activity = actor.kind === 'bird' ? 'fly' : 'forage';
+          target = record.destination ?? {
+            x: actor.x + (rng() - 0.5) * 12,
+            y: actor.y + (rng() - 0.5) * 12,
+          };
+          if (distance(actor, target) < 0.4)
+            target = { x: actor.x + (rng() - 0.5) * 12, y: actor.y + (rng() - 0.5) * 12 };
+        }
+      }
+      if (target && dt > 0) {
+        const d = distance(actor, target),
+          amount = Math.min(d, speed * dt),
+          heading = Math.atan2(target.y - actor.y, target.x - actor.x);
+        const end = {
+          x: actor.x + Math.cos(heading) * amount,
+          y: actor.y + Math.sin(heading) * amount,
+        };
+        const navigation = actor.kind === 'bird' ? flightNavigation : groundNavigation;
+        let moved = 0;
+        const steps = Math.max(1, Math.ceil(amount / 0.2));
+        const startX = actor.x,
+          startY = actor.y;
+        for (let i = 1; i <= steps; i++) {
+          const x = startX + ((end.x - startX) * i) / steps;
+          const y = startY + ((end.y - startY) * i) / steps;
+          if (navigation.cell(Math.round(x), Math.round(y)).kind === 'blocked') break;
+          moved += Math.hypot(actor.x - x, actor.y - y);
+          actor.x = x;
+          actor.y = y;
+        }
+        actor.heading = heading;
+        actor.phase += moved * 2.5;
+        this.ledger.setDestination(actor.id, { ...target, spaceId: 'surface' });
+      } else if (actor.activity === 'sleep' || actor.activity === 'curious')
+        this.ledger.setDestination(actor.id);
+      this.ledger.update(actor, Math.max(time.elapsedSeconds, record.simulatedAt));
+      if (faunaActive(actor.kind, time)) {
+        if (Math.floor(time.elapsedSeconds + (actor.seed % 31)) % 19 === 0)
+          actor.call =
+            actor.kind === 'bird'
+              ? 'bird'
+              : actor.kind === 'wolf'
+                ? 'growl'
+                : actor.kind === 'grazer'
+                  ? 'bleat'
+                  : 'rustle';
+        frames.push(actor);
+      }
+    }
+    this.ledger.advance(time.elapsedSeconds, () => groundNavigation, {
+      active: new Set(selected.map((r) => r.id)),
+    });
+    return { version: 1, elapsedSeconds: time.elapsedSeconds, actors: frames };
+  }
+  private faunaNavigation(
+    world: FaunaWorld,
+    removed: ReadonlySet<string>,
+    bird: boolean,
+  ): NavigationWorld {
+    return {
+      cell: (x, y) => {
+        const tile = world.tile(x, y);
+        // An open building floor is traversable; a real wall/closed door is not.
+        const blocked =
+          bird && ['water', 'ice'].includes(tile.terrain) ? false : world.blocked(x, y, removed);
+        return { kind: blocked ? 'blocked' : 'open' };
+      },
     };
   }
   private spawn(
@@ -367,4 +603,10 @@ export function validFaunaFrame(value: unknown): value is FaunaFrame {
     ) &&
     new Set(v.actors.map((a) => a.id)).size === v.actors.length
   );
+}
+function validFaunaActor(value: unknown): value is FaunaActor {
+  return validFaunaFrame({ version: 1, elapsedSeconds: 0, actors: [value] });
+}
+export function validFaunaLedger(value: unknown): value is ActorLedgerSave<FaunaActor> {
+  return validActorLedgerSave(value, validFaunaActor);
 }

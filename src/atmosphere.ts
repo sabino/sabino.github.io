@@ -1,4 +1,6 @@
 import type { WorldLocationSignal } from './stichos/world-signals.ts';
+import { crowdAudibility } from './semantic-audio.ts';
+import type { ScoreContext } from './adaptive-score.ts';
 import type { WorldTimeSignal } from './stichos/world-time.ts';
 
 export type SoundscapeZone =
@@ -16,6 +18,8 @@ export interface WorldSoundEvent {
   distance: number;
   pan?: number;
   id?: string;
+  species?: 'bird' | 'grazer' | 'boar' | 'wolf';
+  state?: string;
 }
 export const AUDIO_LIMITS = Object.freeze({
   transientVoices: 48,
@@ -50,6 +54,8 @@ export interface SoundscapeFrame {
   activity: number;
   phase: WorldTimeSignal['phase'];
   variationSeed: number;
+  crowd: number;
+  crowdPan: number;
 }
 
 const clamp = (value: number) => (Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0);
@@ -64,6 +70,7 @@ export function selectSoundscape(
   seed = 1,
 ): SoundscapeFrame {
   const indoor = location.interior;
+  const context: ScoreContext = location.audioContext ?? {};
   const zone: SoundscapeZone =
     danger > 0.55
       ? 'danger'
@@ -159,6 +166,13 @@ export function selectSoundscape(
     activity: location.settlement || indoor ? activity : 0,
     phase: time.phase,
     variationSeed,
+    crowd: crowdAudibility(
+      context.population ?? 0,
+      context.crowdDistance ?? Infinity,
+      time.hour,
+      zone === 'tavern',
+    ),
+    crowdPan: Math.max(-0.8, Math.min(0.8, context.crowdPan ?? 0)),
   };
 }
 
@@ -187,7 +201,12 @@ export function ambientEvents(
           ? frame.activity * 0.09
           : 0,
     ],
-    ['social', frame.zone === 'tavern' || frame.zone === 'settlement' ? frame.activity * 0.2 : 0],
+    [
+      'social',
+      (frame.zone === 'tavern' || frame.zone === 'settlement') && slice % 6 === 0
+        ? frame.crowd * 0.14
+        : 0,
+    ],
   ];
   return choices
     .flatMap(([kind, chance], index) =>
@@ -195,7 +214,10 @@ export function ambientEvents(
         ? [
             {
               kind,
-              pan: atmosphereRandom(frame.variationSeed, slice, index + 8) * 1.6 - 0.8,
+              pan:
+                kind === 'social'
+                  ? frame.crowdPan
+                  : atmosphereRandom(frame.variationSeed, slice, index + 8) * 1.6 - 0.8,
               strength: 0.7 + atmosphereRandom(frame.variationSeed, slice, index + 16) * 0.3,
             },
           ]

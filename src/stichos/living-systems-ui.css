@@ -1,0 +1,539 @@
+/* Verso's framed slate/linen palette; these panes remain game tools, not dashboard cards. */
+.s-modal:has(.v-living-window) {
+  padding: max(12px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  align-items: center;
+  overflow: hidden;
+}
+.s-window.v-living-window {
+  width: min(650px, 100%);
+  max-width: 100%;
+  max-height: min(820px, calc(100dvh - 40px));
+  padding: 14px;
+  margin: 0;
+  line-height: 1.45;
+  overflow: hidden;
+  border: 2px solid #b7a77d;
+  box-sizing: border-box;
+}
+.v-living-window::before,
+.v-living-window::after {
+  pointer-events: none;
+}
+.v-living-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: min(780px, calc(100dvh - 76px));
+  min-height: 0;
+  font-family: system-ui, sans-serif;
+  color: #e5eeea;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.v-living-panel * {
+  box-sizing: border-box;
+  min-width: 0;
+}
+.v-living-header {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 2px 10px;
+}
+.v-living-header h2 {
+  font-size: clamp(18px, 4.8vw, 25px);
+  line-height: 1.1;
+  margin: 0;
+  color: #eee1b5;
+  font-family: Georgia, serif;
+  letter-spacing: 0.01em;
+}
+.v-living-header > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.v-living-header p {
+  font-size: 12px;
+  margin: 5px 0 0;
+  color: #b6cbc9;
+}
+.v-living-panel button,
+.v-living-panel input,
+.v-living-panel select,
+.v-living-panel summary {
+  font: inherit;
+  font-size: 14px;
+  min-height: 44px;
+  line-height: 1.25;
+  touch-action: manipulation;
+}
+.v-living-panel button {
+  border: 1px solid #839b91;
+  border-radius: 2px;
+  padding: 10px 12px;
+  background: #263f46;
+  color: #f2efda;
+  cursor: pointer;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: center;
+  white-space: normal;
+  box-shadow: inset 0 -3px #142b34;
+}
+.v-living-panel button:hover {
+  background: #36545a;
+}
+.v-living-panel button:active {
+  background: #142a34;
+  box-shadow: inset 0 2px #0b1f28;
+}
+.v-living-panel button:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+.v-living-panel :focus-visible {
+  outline: 3px solid #f2d18b;
+  outline-offset: 2px;
+}
+.v-living-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  flex-shrink: 0;
+  border-bottom: 2px solid #81978b;
+  padding-bottom: 6px;
+}
+.v-living-tabs button {
+  padding-inline: 4px;
+  font-weight: 650;
+  font-size: 13px;
+  border-color: transparent;
+}
+.v-living-tabs button[aria-selected='true'] {
+  background: #c9b984;
+  color: #172c35;
+  box-shadow: inset 0 -3px #847a50;
+}
+.v-living-body {
+  min-height: 100px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #79988f #152a33;
+  padding: 10px 3px 12px;
+  flex: 1 1 auto;
+  contain: layout;
+}
+.v-living-body h3 {
+  margin: 5px 0;
+  font-size: 18px;
+  line-height: 1.25;
+  color: #e9deb6;
+}
+.v-living-body p {
+  margin: 7px 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.v-living-note {
+  color: #b7ceca;
+}
+.v-living-empty {
+  padding: 18px 8px;
+  color: #cadad4;
+}
+.v-living-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.v-living-subnav button {
+  flex: 1 1 75px;
+  padding-inline: 7px;
+}
+.v-living-list {
+  display: grid;
+  gap: 0;
+}
+.v-living-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 2px;
+  border-bottom: 1px solid #476069;
+}
+.v-living-row > div {
+  flex: 1 1 auto;
+}
+.v-living-row strong {
+  display: block;
+  line-height: 1.25;
+  font-size: 15px;
+  color: #eff0da;
+}
+.v-living-row p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #bacfc9;
+}
+.v-living-row > button {
+  flex: 0 0 auto;
+  max-width: 42%;
+}
+.v-living-tag {
+  display: block;
+  color: #e2c78d;
+  font-size: 11px;
+  margin-top: 3px;
+}
+.v-living-pager {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+}
+.v-living-pager span {
+  font-size: 12px;
+  color: #bacfc9;
+}
+.v-living-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 10px 0;
+}
+.v-living-actions button {
+  flex: 1 1 120px;
+}
+.v-living-detail-head {
+  margin: 5px 0 10px;
+}
+.v-living-emblem-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.v-living-emblem-title .v-living-detail-head {
+  flex: 1;
+}
+.v-living-heraldry {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  image-rendering: pixelated;
+  margin-top: 3px;
+}
+.v-living-facts {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(0, 2fr);
+  gap: 9px;
+  padding: 12px 0;
+  border-block: 1px solid #476069;
+}
+.v-living-facts dt {
+  color: #b8cdc7;
+  font-size: 13px;
+}
+.v-living-facts dd {
+  margin: 0;
+  color: #f0e7c5;
+}
+.v-living-form {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+.v-living-form label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: #bfd2ca;
+}
+.v-living-form input,
+.v-living-form select {
+  width: 100%;
+  border: 1px solid #8caa9a;
+  border-radius: 2px;
+  padding: 9px;
+  background: #112b35;
+  color: #f1eddb;
+  font-size: 16px;
+}
+.v-living-form button {
+  width: 100%;
+}
+.v-living-disclosure {
+  margin: 10px 0;
+  border-block: 1px solid #56746e;
+  padding: 0 2px 4px;
+}
+.v-living-disclosure summary {
+  cursor: pointer;
+  padding: 13px 2px;
+  color: #e4d7aa;
+}
+.v-living-disclosure ul {
+  padding-left: 22px;
+}
+.v-living-disclosure li {
+  margin-block: 8px;
+}
+.v-living-task {
+  border-left: 3px solid #a5ad7f;
+  padding: 8px 10px;
+  margin: 12px 0;
+  background: #203b41;
+}
+.v-living-stocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  font-size: 12px;
+  border-block: 1px solid #476069;
+  padding: 10px 0;
+}
+.v-living-stocks strong {
+  color: #e5d095;
+}
+.v-living-balance {
+  color: #e8d19c;
+}
+.v-living-progress label {
+  display: block;
+  font-size: 12px;
+  color: #c8dad1;
+}
+.v-living-progress progress {
+  display: block;
+  width: 100%;
+  height: 12px;
+  margin: 8px 0 12px;
+  accent-color: #bdca87;
+}
+.v-living-sign-copy {
+  border: 2px solid #718b79;
+  padding: 10px 14px;
+  margin: 12px 0;
+  background: #152d33;
+  font-size: 16px;
+}
+.v-living-sign-copy p {
+  font-size: 16px;
+}
+.v-living-sign-warning {
+  border-left: 3px solid #edbb83;
+  padding-left: 9px;
+  color: #f3d5a3;
+}
+.v-living-sign-access {
+  font-weight: 650;
+  color: #d7e2ac;
+}
+.v-living-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  border-top: 1px solid #687d74;
+  padding-top: 7px;
+}
+.v-living-footer .v-living-result {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #c7dad0;
+}
+@media (max-width: 430px) {
+  .s-window.v-living-window {
+    padding: 10px;
+    max-height: calc(100dvh - 40px);
+  }
+  .v-living-panel {
+    max-height: calc(100dvh - 66px);
+  }
+  .v-living-header {
+    gap: 8px;
+  }
+  .v-living-header > button {
+    padding-inline: 10px;
+  }
+  .v-living-row {
+    gap: 7px;
+  }
+  .v-living-heraldry {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+}
+@media (max-height: 620px) and (pointer: coarse) {
+  .s-modal:has(.v-living-window) {
+    padding-block: 5px;
+  }
+  .s-window.v-living-window {
+    max-height: calc(100dvh - 14px);
+  }
+  .v-living-panel {
+    max-height: calc(100dvh - 40px);
+  }
+  .v-living-header h2 {
+    font-size: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v-living-panel *,
+  .v-living-panel *::before,
+  .v-living-panel *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (forced-colors: active) {
+  .v-living-panel button {
+    border: 1px solid ButtonText;
+  }
+  .v-living-tabs button[aria-selected='true'] {
+    border: 3px solid Highlight;
+  }
+}
+
+/* A two-by-two field switcher leaves four full thumb targets in narrow portrait. */
+.v-living-subnav[aria-label='Field pages'] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.v-living-subnav button[aria-current='page'] {
+  background: #c9b984;
+  color: #172c35;
+  box-shadow: inset 0 -3px #847a50;
+}
+.v-living-depth {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  border-block: 1px solid #647a73;
+  padding: 8px 0;
+  font-size: 12px;
+  color: #c8dad2;
+}
+.v-living-depth strong {
+  color: #efdab1;
+}
+.v-living-boss {
+  border-left: 3px solid #d59a7e;
+  background: #3a3035;
+  padding: 8px 10px;
+  margin: 9px 0;
+}
+.v-living-boss p {
+  color: #eed6c7;
+}
+.v-living-boss progress {
+  width: 100%;
+  display: block;
+  accent-color: #d69b81;
+}
+.v-living-feature-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  border: 2px solid #b4bf9b;
+  color: #e2ddb0;
+  font-weight: 700;
+  font-size: 16px;
+}
+.v-living-supplies button {
+  flex-basis: 130px;
+}
+@media (min-width: 520px) {
+  .v-living-subnav[aria-label='Field pages'] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.v-estate-placement {
+  position: absolute;
+  z-index: 24;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 12.5rem;
+  width: min(23rem, calc(100% - 1.5rem));
+  padding: 0.65rem;
+  background: #102b33f5;
+  border: 2px solid #d9c38b;
+  box-shadow: 0 4px 16px #0008;
+  color: #f1e6c6;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.v-estate-placement[hidden] {
+  display: none;
+}
+.v-estate-placement p {
+  width: 100%;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  margin: 0;
+}
+.v-estate-placement button {
+  min-height: 44px;
+  flex: 1;
+  border: 1px solid #d9c38b;
+  background: #234550;
+  color: #fff0c9;
+  font: inherit;
+}
+.v-estate-placement button:disabled {
+  opacity: 0.55;
+}
+.v-estate-placement button:focus-visible {
+  outline: 3px solid #fff6ce;
+  outline-offset: 2px;
+}
+.v-trade-reaction {
+  font-size: 0.85rem;
+  line-height: 1.35;
+  max-height: 4.2em;
+  overflow: auto;
+}
+@media (min-width: 760px) {
+  .v-estate-placement {
+    bottom: 5rem;
+  }
+}
+
+/* Keep the reviewed footprint visible on the shortest supported portrait phone. */
+@media (max-height: 650px) and (max-width: 759px) {
+  .v-estate-placement {
+    bottom: calc(6.9rem + env(safe-area-inset-bottom));
+    padding: 0.45rem;
+    gap: 0.3rem;
+  }
+  .v-estate-placement p {
+    font-size: 0.75rem;
+    line-height: 1.3;
+  }
+}
+#s-pack-tools,
+#s-pack-invent {
+  min-height: 44px;
+  font-size: 0.875rem;
+  line-height: 1.3;
+}
+.v-audio-controls input[type='range'],
+.v-audio-controls select,
+.v-voice-people input[type='range'] {
+  min-height: 44px;
+}
+.s-window:has(.v-voice-consent) .s-window-close {
+  min-height: 44px;
+  min-width: 44px;
+}

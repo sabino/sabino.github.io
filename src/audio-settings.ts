@@ -5,6 +5,7 @@ export interface AudioSettings {
   music: number;
   effects: number;
   muted: boolean;
+  reducedSensory: boolean;
 }
 
 export const AUDIO_SETTINGS_KEY = 'verso.audio.settings.v1';
@@ -14,6 +15,7 @@ export const DEFAULT_AUDIO_SETTINGS: Readonly<AudioSettings> = Object.freeze({
   music: 0.55,
   effects: 0.85,
   muted: false,
+  reducedSensory: false,
 });
 
 export interface AudioSettingsStorage {
@@ -36,6 +38,8 @@ export function normalizeAudioSettings(
     music: level('music'),
     effects: level('effects'),
     muted: typeof input.muted === 'boolean' ? input.muted : base.muted,
+    reducedSensory:
+      typeof input.reducedSensory === 'boolean' ? input.reducedSensory : base.reducedSensory,
   };
 }
 
