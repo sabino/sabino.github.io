@@ -343,6 +343,54 @@ export class CoopRooms {
       roomWorldSeconds(room.calendarEpochMs, this.now()),
     );
   }
+  /** Cosmetic generation seeds do not authenticate an existing resident's identity. */
+  bodyAdmission(room, member, bodyId, position, history = {}) {
+    if (!bodyId) return {};
+    const record = room.systems?.actors.get(bodyId);
+    const retainedExpedition = history.retainedExpedition === true;
+    const anchor = recoveryAnchorValid(history.retainedAnchor) ? history.retainedAnchor : undefined;
+    const originalBody =
+      !retainedExpedition &&
+      anchor &&
+      room.world.npcsAround(anchor.x, anchor.y, 8).find((n) => n.id === bodyId);
+    const retainedOrigin =
+      !!anchor &&
+      (!!originalBody || (record?.spaceId === 'surface' && distance(record, anchor) <= 8));
+    const body =
+      record?.body ??
+      originalBody ??
+      (!retainedExpedition &&
+        room.world.npcsAround(position.x, position.y, 8).find((n) => n.id === bodyId));
+    const unavailable = {
+      error: 'That life is no longer available here. Choose another living body.',
+    };
+    const holder =
+      [...room.members.values()].find((m) => m.domainBodyId === bodyId) ??
+      [...room.members.values()].find((m) => m.domainWeapon && m.bodyId === bodyId);
+    if (room.removed.has(bodyId) || (holder && holder !== member)) return unavailable;
+    if (!body) {
+      // An authenticated old expedition may predate actor custody. Let that retained life
+      // reconnect and recall, but never invent a resident from unrelated underground XY.
+      if (retainedExpedition) return {};
+      // Keep old identity-only labels (for example the story priest), but do not silently
+      // turn a remote/missing generated resident into an unreserved duplicate identity.
+      return room.removed.has(bodyId) || /^(?:origin[-:]|town:|wanderer:|vault:)/.test(bodyId)
+        ? unavailable
+        : {};
+    }
+    if (
+      record?.state === 'dead' ||
+      body.hp <= 0 ||
+      body.hostile ||
+      (!retainedExpedition &&
+        !retainedOrigin &&
+        ((position.spaceId ?? 'surface') !== 'surface' ||
+          (record?.spaceId ?? 'surface') !== 'surface' ||
+          distance(record ?? body, position) > 8))
+    )
+      return unavailable;
+    return { id: body.id };
+  }
   publishSystemsContacts(room) {
     const cues = room.systems.drainEvents();
     if (cues.length)
@@ -777,6 +825,15 @@ export class CoopRooms {
           'body_transition_required',
           'This shared life cannot change bodies without an admitted transfer.',
         );
+      const adoptedBody =
+        member.livingSystems && boundBodyId === undefined && message.bodyId !== undefined
+          ? this.bodyAdmission(room, member, message.bodyId, {
+              spaceId: member.spaceId ?? 'surface',
+              x: member.x,
+              y: member.y,
+            })
+          : {};
+      if (adoptedBody.error) return this.error(connection, 'body_unavailable', adoptedBody.error);
       const occupiedSpace = member.spaceId ?? 'surface';
       const blocked = (x, y) =>
         occupiedSpace === 'surface'
@@ -824,6 +881,10 @@ export class CoopRooms {
         progression: message.progression ? { ...message.progression } : member.progression,
         lastPose: this.now(),
       });
+      if (adoptedBody.id) {
+        member.domainBodyId = adoptedBody.id;
+        this.syncSystems(room);
+      }
       if (member.livingSystems && occupiedSpace !== 'surface')
         room.systems.underworld.syncPeer(this.systemsPeer(member));
       room.lastActivity = this.now();
@@ -991,25 +1052,35 @@ export class CoopRooms {
           room.systems?.property.blocks(surfaceAddress(message.position))))
     )
       return this.error(connection, 'blocked_pose', 'Join from clear ground in this world.');
-    if (message.livingSystems === 1 && !member && message.bodyId) {
-      const candidate = room.world
-        .npcsAround(message.position.x, message.position.y, 8)
-        .find((n) => n.id === message.bodyId && n.appearance.seed === message.appearance.seed);
-      const record = candidate && room.systems?.actors.get(candidate.id);
-      if (
-        candidate &&
-        (room.removed.has(candidate.id) ||
-          record?.state === 'dead' ||
-          record?.body.hp <= 0 ||
-          (record && (record.spaceId !== 'surface' || distance(record, message.position) > 8)) ||
-          [...room.members.values()].some((m) => m.domainBodyId === candidate.id))
-      )
-        return this.error(
-          connection,
-          'body_unavailable',
-          'That life is no longer available. Choose another living body.',
-        );
-    }
+    const requestedBodyId = member?.domainWeapon
+      ? (member.bodyId ?? member.domainBodyId ?? message.bodyId)
+      : (message.bodyId ?? member?.bodyId);
+    const admittedBody =
+      message.livingSystems === 1 && !member?.domainBodyId
+        ? this.bodyAdmission(
+            room,
+            member,
+            requestedBodyId,
+            member
+              ? {
+                  spaceId: resumedLocation?.spaceId.startsWith('underground:')
+                    ? resumedLocation.spaceId
+                    : (member.spaceId ?? 'surface'),
+                  x: member.x,
+                  y: member.y,
+                }
+              : surfaceAddress(message.position),
+            // Retained authority history proves an earlier admission or floor transition.
+            // The incoming pose, cosmetic seed, or requested body cannot grant this exception.
+            member?.domainWeapon && member.bodyId === requestedBodyId
+              ? {
+                  retainedExpedition: !!resumedLocation?.spaceId.startsWith('underground:'),
+                  retainedAnchor: member.recoveryAnchor,
+                }
+              : {},
+          )
+        : {};
+    if (admittedBody.error) return this.error(connection, 'body_unavailable', admittedBody.error);
     const resumedPosition =
       member && message.livingSystems === 1
         ? { spaceId: member.spaceId ?? 'surface', x: member.x, y: member.y }
@@ -1074,18 +1145,7 @@ export class CoopRooms {
         kind: message.appearance.weapon === 'none' ? 'sword' : message.appearance.weapon,
         seed: deriveSeed(room.seed, member.id, 'expedition-kit'),
       };
-      if (!member.domainBodyId && message.bodyId) {
-        const body = room.world
-          .npcsAround(message.position.x, message.position.y, 8)
-          .find((n) => n.id === message.bodyId && n.appearance.seed === message.appearance.seed);
-        if (
-          body &&
-          !room.removed.has(body.id) &&
-          room.systems?.actors.get(body.id)?.state !== 'dead' &&
-          ![...room.members.values()].some((m) => m !== member && m.domainBodyId === body.id)
-        )
-          member.domainBodyId = body.id;
-      }
+      if (admittedBody.id) member.domainBodyId = admittedBody.id;
       Object.assign(
         member,
         resumedLocation?.spaceId !== 'surface' && resumedLocation
