@@ -1,12 +1,19 @@
 {
   "schema": 1,
   "sourceRepository": "https://github.com/sabino/sabino.github.io",
-  "sourceBranch": "feat/portrait-action-expansion",
-  "sourceCommit": "79ed0944dfe0d43b2091a17cca140a9358a3e352",
+  "sourceBranch": "feat/living-systems-expansion",
+  "sourceCommit": "8b88dc2e0321d236a28fb373c57d24385f096077",
   "prerequisiteCommits": [
-    "d78b4a6f25878c5931886bbc26730b31b4d79817"
+    "b2311c8a1c092783da35af4ab44b07a96a1c1af9",
+    "234c94c362e7a2b10ca5be66d4aba27883dd8ade",
+    "662ee31a03aa804c1cbb24431a84ae8f796bcf30",
+    "68cdf2b80dfbf674dd35cb8057e602d9bcd8a460",
+    "c059e0c1b5e8ef8a823de4c9b5951bdc658d9b41",
+    "6cf0454fd69193a894bd0d7d4a1f3ba6002b489b",
+    "53f4e83cac217f0c49d8dd3998b8eb4730869b1b",
+    "495d5c266de43c8cace1c84fa907c83bf042aa6a"
   ],
-  "worldNodeSourceCommit": "79ed0944dfe0d43b2091a17cca140a9358a3e352",
+  "worldNodeSourceCommit": "8b88dc2e0321d236a28fb373c57d24385f096077",
   "worldNodeDeploymentChanged": true,
   "frontendUrl": "https://sabino.pro/games/verso/",
   "base": "/games/verso/",
@@ -14,12 +21,16 @@
   "voiceEndpoint": "wss://verso-world.host.sabino.pro/voice",
   "codec": "ima-adpcm-16k-v1",
   "actionExpansion": 1,
+  "livingSystems": 1,
   "features": [
-    "offline-release-bulletin",
-    "portrait-two-thumb-controls",
-    "six-weapon-techniques",
-    "bounded-combat-feedback",
-    "settlement-field-expeditions",
-    "earned-combat-attunements"
+    "persistent-actor-navigation",
+    "local-witnesses-and-guilds",
+    "authoritative-field-loot",
+    "property-workers-and-production",
+    "procedural-underground-expeditions",
+    "adaptive-phrase-score-and-material-foley",
+    "pointer-sequence-ownership",
+    "docked-walk-run-controls",
+    "movement-pace-shortcut-C"
   ]
 }
