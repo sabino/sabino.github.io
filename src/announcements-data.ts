@@ -7,7 +7,7 @@ export const RELEASE_NOTES: readonly AnnouncementEntry[] = [
     version: '0.1.0',
     date: '2026-09-12',
     title: 'Take the field',
-    status: 'development',
+    status: 'released',
     changes: [
       {
         category: 'New',
@@ -40,7 +40,7 @@ export const RELEASE_NOTES: readonly AnnouncementEntry[] = [
           'Movement continues while shared attacks are acknowledged. Leaving a room cancels prepared attacks, and older rooms keep their existing combat controls.',
       },
     ],
-    evidence: [],
+    evidence: ['c95155a', '2141ba5', 'd78b4a6'],
   },
   {
     id: '2026-09-12-physical-sound-voice',
