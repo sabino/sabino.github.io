@@ -61,9 +61,9 @@ A dense accepted stress frame with 96 workers, 384 charter memberships, 64 estat
 
 See [public references](LIVING-SYSTEMS-REFERENCES.md), [audio design and provenance](ADAPTIVE-AUDIO.md), [navigation](NAVIGATION-ACTORS.md), [economy](FIELD-ECONOMY.md), [civic world/signs](CIVIC-WORLD-AND-SIGNS.md), [property/production](PROPERTY-PRODUCTION.md), [underworld](UNDERWORLD.md) and [input lifecycle](INTERACTION-LIFECYCLE.md). Only verified public design principles informed this implementation. No proprietary game art, audio, code, dialogue, names or layouts were copied. Existing recorded audio retains its original CC0 attribution and hashes.
 
-## Deployment remains unapproved
+## Deployment status at the local gate
 
-A separate authorization is required before any push or rollout. Use the existing frontend/world-node pipeline and domains, preserve private storage/signing/payment/secrets and `/ws`/`/voice` proxy settings, capture both prior revisions for rollback, and deploy the compatible world node before the matching frontend. Verify the exact source/PWA revision, live storage health, older `/ws`, synthetic `/voice`, mobile/offline update behavior and new domain recovery before declaring success. No new infrastructure or DNS is required by this local batch.
+This local-gate report predates deployment authorization. The subsequent approved controls/rollout contract is [LIVING-SYSTEMS-RELEASE.md](LIVING-SYSTEMS-RELEASE.md); final live results belong to the operator report. Use the existing frontend/world-node pipeline and domains, preserve private storage/signing/payment/secrets and `/ws`/`/voice` proxy settings, capture both prior revisions for rollback, and deploy the compatible world node before the matching frontend. Verify the exact source/PWA revision, live storage health, older `/ws`, synthetic `/voice`, mobile/offline update behavior and new domain recovery before declaring success. No new infrastructure or DNS is required by this local batch.
 
 ## Gate record and source references
 

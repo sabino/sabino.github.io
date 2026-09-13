@@ -41,7 +41,13 @@ test('source release records validate without silent omissions or duplicate IDs'
   assert.deepEqual(validateAnnouncements(RELEASE_NOTES), RELEASE_NOTES);
   assert.equal(new Set(RELEASE_NOTES.map((release) => release.id)).size, RELEASE_NOTES.length);
   assert.equal(RELEASE_NOTES[0].status, 'released', 'The approved batch is ready for publication');
-  assert.ok(RELEASE_NOTES[0].evidence.includes('d78b4a6'));
+  assert.ok(RELEASE_NOTES[0].evidence.includes('6cf0454'));
+  assert.ok(
+    RELEASE_NOTES.find((entry) => entry.id === 'portrait-action-preview-1')?.evidence.includes(
+      'd78b4a6',
+    ),
+    'The prior published milestone remains intact',
+  );
   assert.ok(
     RELEASE_NOTES.filter((release) => release.status === 'released').every(
       (release) => release.evidence.length > 0,

@@ -1,10 +1,11 @@
 # Local systems batch — exact changed files
 
-Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Generated browser/performance evidence stays ignored under `.dream-loop/living-systems/`. No package/dependency, deployment, payment, DNS or production-secret configuration changed.
+Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Generated browser/performance and operator evidence stays ignored under `.dream-loop/`. No package/dependency, payment, DNS or production-secret configuration changed. The approved rollout contract is in [LIVING-SYSTEMS-RELEASE.md](LIVING-SYSTEMS-RELEASE.md).
 
 ## Runtime modules and presentation
 
 - [src/adaptive-score.ts](../src/adaptive-score.ts)
+- [src/announcements-data.ts](../src/announcements-data.ts)
 - [src/atmosphere.ts](../src/atmosphere.ts)
 - [src/audio-settings.ts](../src/audio-settings.ts)
 - [src/audio.ts](../src/audio.ts)
@@ -31,6 +32,7 @@ Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Gene
 - [src/stichos/multiplayer.ts](../src/stichos/multiplayer.ts)
 - [src/stichos/navigation.ts](../src/stichos/navigation.ts)
 - [src/stichos/persistent-npc.ts](../src/stichos/persistent-npc.ts)
+- [src/stichos/portrait-controls.css](../src/stichos/portrait-controls.css)
 - [src/stichos/portrait-controls.ts](../src/stichos/portrait-controls.ts)
 - [src/stichos/property-world.ts](../src/stichos/property-world.ts)
 - [src/stichos/render.ts](../src/stichos/render.ts)
@@ -52,22 +54,23 @@ Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Gene
 - [src/stichos/world-signs.ts](../src/stichos/world-signs.ts)
 - [src/stichos/world.ts](../src/stichos/world.ts)
 
-## World-node integration
+## Server compatibility
 
 - [server/voice.mjs](../server/voice.mjs)
 
-## Automated regression coverage
+## Automated tests
 
-- [tests/living-systems-creator-binding-review.test.ts](../tests/living-systems-creator-binding-review.test.ts)
-- [tests/creation-body-binding-review.test.ts](../tests/creation-body-binding-review.test.ts)
 - [tests/adaptive-score.test.ts](../tests/adaptive-score.test.ts)
+- [tests/announcements.test.ts](../tests/announcements.test.ts)
 - [tests/audio-atmosphere.test.ts](../tests/audio-atmosphere.test.ts)
 - [tests/audio-director.test.ts](../tests/audio-director.test.ts)
 - [tests/civic-world.test.ts](../tests/civic-world.test.ts)
+- [tests/creation-body-binding-review.test.ts](../tests/creation-body-binding-review.test.ts)
 - [tests/estate-presentation.test.ts](../tests/estate-presentation.test.ts)
 - [tests/frame-profiler.test.ts](../tests/frame-profiler.test.ts)
 - [tests/interaction-sequence.test.ts](../tests/interaction-sequence.test.ts)
 - [tests/living-systems-authority.test.ts](../tests/living-systems-authority.test.ts)
+- [tests/living-systems-creator-binding-review.test.ts](../tests/living-systems-creator-binding-review.test.ts)
 - [tests/living-systems-fairness-review.test.ts](../tests/living-systems-fairness-review.test.ts)
 - [tests/living-systems-final-review.test.ts](../tests/living-systems-final-review.test.ts)
 - [tests/living-systems-floor-isolation-review.test.ts](../tests/living-systems-floor-isolation-review.test.ts)
@@ -77,6 +80,7 @@ Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Gene
 - [tests/living-systems-recovery-compat-review.test.ts](../tests/living-systems-recovery-compat-review.test.ts)
 - [tests/living-systems-ui.test.ts](../tests/living-systems-ui.test.ts)
 - [tests/mobile-layout.test.ts](../tests/mobile-layout.test.ts)
+- [tests/movement-pace-review.test.ts](../tests/movement-pace-review.test.ts)
 - [tests/property-world.test.ts](../tests/property-world.test.ts)
 - [tests/stichos-actor-save.test.ts](../tests/stichos-actor-save.test.ts)
 - [tests/stichos-campaign.test.ts](../tests/stichos-campaign.test.ts)
@@ -88,11 +92,12 @@ Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Gene
 - [tests/system-events.test.ts](../tests/system-events.test.ts)
 - [tests/systems-receipts-capacity-review.test.ts](../tests/systems-receipts-capacity-review.test.ts)
 - [tests/systems-receipts.test.ts](../tests/systems-receipts.test.ts)
+- [tests/travel-ui.test.ts](../tests/travel-ui.test.ts)
 - [tests/underworld.test.ts](../tests/underworld.test.ts)
 - [tests/world-audio-signals.test.ts](../tests/world-audio-signals.test.ts)
 - [tests/world-signs.test.ts](../tests/world-signs.test.ts)
 
-## Native browser QA
+## Reproducible browser checks
 
 - [scripts/browser-final-interaction-review.mjs](../scripts/browser-final-interaction-review.mjs)
 - [scripts/browser-final-mobile-fixtures.mjs](../scripts/browser-final-mobile-fixtures.mjs)
@@ -107,6 +112,7 @@ Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Gene
 - [scripts/browser-mobile-estate-review.mjs](../scripts/browser-mobile-estate-review.mjs)
 - [scripts/browser-mobile-systems-fixtures.mjs](../scripts/browser-mobile-systems-fixtures.mjs)
 - [scripts/browser-mobile-systems-review.mjs](../scripts/browser-mobile-systems-review.mjs)
+- [scripts/browser-pace-review.mjs](../scripts/browser-pace-review.mjs)
 - [scripts/browser-underworld-encounter-fixtures.mjs](../scripts/browser-underworld-encounter-fixtures.mjs)
 - [scripts/browser-underworld-fixture.mjs](../scripts/browser-underworld-fixture.mjs)
 - [scripts/browser-underworld-smoke.mjs](../scripts/browser-underworld-smoke.mjs)
@@ -124,6 +130,7 @@ Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Gene
 - [docs/LIVING-SYSTEMS-LOCAL-BATCH.md](../docs/LIVING-SYSTEMS-LOCAL-BATCH.md)
 - [docs/LIVING-SYSTEMS-MOBILE-REVIEW.md](../docs/LIVING-SYSTEMS-MOBILE-REVIEW.md)
 - [docs/LIVING-SYSTEMS-REFERENCES.md](../docs/LIVING-SYSTEMS-REFERENCES.md)
+- [docs/LIVING-SYSTEMS-RELEASE.md](../docs/LIVING-SYSTEMS-RELEASE.md)
 - [docs/NAVIGATION-ACTORS.md](../docs/NAVIGATION-ACTORS.md)
 - [docs/PROPERTY-PRODUCTION.md](../docs/PROPERTY-PRODUCTION.md)
 - [docs/UNDERWORLD.md](../docs/UNDERWORLD.md)

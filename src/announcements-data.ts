@@ -3,6 +3,51 @@ import type { AnnouncementEntry } from './announcements.ts';
 /** Player-facing records. Evidence and publication rules live in docs/releases.md. */
 export const RELEASE_NOTES: readonly AnnouncementEntry[] = [
   {
+    id: '2026-09-13-living-systems',
+    version: '0.1.0',
+    date: '2026-09-13',
+    title: 'Make a life, leave a mark',
+    status: 'released',
+    changes: [
+      {
+        category: 'Improved',
+        description:
+          'Choose Walk or Run beside your movement controls, or press C on a keyboard. Travel offers direction lock, Stop and a route to your owned home.',
+      },
+      {
+        category: 'Fixed',
+        description:
+          'A single touch cannot open a conversation and immediately leave it. Created characters keep their own body when joining or resuming a shared room.',
+      },
+      {
+        category: 'New',
+        description:
+          'In More, choose Field satchel, guilds & estates to find field supplies, useful wildlife rewards, local charters, readable signs and nearby property. Witnessed actions change local trust and guard reactions.',
+      },
+      {
+        category: 'New',
+        description:
+          'Buy or rent property, construct workstations and hire named workers. Supply their jobs, pay wages and put their physical deliveries to use.',
+      },
+      {
+        category: 'New',
+        description:
+          'Explore three connected underground floors with puzzles, hazards, phased bosses and survivors. Bring rescued people and recovered plans back to help surface rebuilding.',
+      },
+      {
+        category: 'Improved',
+        description:
+          'Original musical themes follow the hour and your surroundings. Footsteps respond to twelve materials; wildlife and settlement sounds belong to the places and people around you.',
+      },
+      {
+        category: 'Improved',
+        description:
+          'Surface actors retain their journeys across chunks. Bounded navigation, audio scheduling and cached ground textures reduce repeated frame stalls.',
+      },
+    ],
+    evidence: ['b2311c8', '234c94c', '662ee31', '68cdf2b', 'c059e0c', '6cf0454', '53f4e83'],
+  },
+  {
     id: 'portrait-action-preview-1',
     version: '0.1.0',
     date: '2026-09-12',
