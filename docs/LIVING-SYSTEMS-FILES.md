@@ -58,6 +58,8 @@ Compared with deployed baseline `79ed0944dfe0d43b2091a17cca140a9358a3e352`. Gene
 
 ## Automated regression coverage
 
+- [tests/living-systems-creator-binding-review.test.ts](../tests/living-systems-creator-binding-review.test.ts)
+- [tests/creation-body-binding-review.test.ts](../tests/creation-body-binding-review.test.ts)
 - [tests/adaptive-score.test.ts](../tests/adaptive-score.test.ts)
 - [tests/audio-atmosphere.test.ts](../tests/audio-atmosphere.test.ts)
 - [tests/audio-director.test.ts](../tests/audio-director.test.ts)
