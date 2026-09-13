@@ -1,23 +1,25 @@
 {
   "schema": 1,
   "sourceRepository": "https://github.com/sabino/sabino.github.io",
-  "sourceBranch": "feat/mobile-mic-realistic-audio",
-  "sourceCommit": "e6063ea9a074e34e9c0baa45ec115016fe384fa0",
+  "sourceBranch": "feat/portrait-action-expansion",
+  "sourceCommit": "79ed0944dfe0d43b2091a17cca140a9358a3e352",
   "prerequisiteCommits": [
-    "6a99b8a13e4928f75cf0e073419011beefc93dcd",
-    "c7255bdd7b16201fa439b0e78763389f07711543",
-    "245e1053cf7f3decde1577a3ce00fc9296b0f12f"
+    "d78b4a6f25878c5931886bbc26730b31b4d79817"
   ],
-  "worldNodeSourceCommit": "408b1b0501238a80ed258819749d1ad9f3ca284d",
-  "worldNodeDeploymentChanged": false,
+  "worldNodeSourceCommit": "79ed0944dfe0d43b2091a17cca140a9358a3e352",
+  "worldNodeDeploymentChanged": true,
   "frontendUrl": "https://sabino.pro/games/verso/",
   "base": "/games/verso/",
   "worldEndpoint": "wss://verso-world.host.sabino.pro/ws",
   "voiceEndpoint": "wss://verso-world.host.sabino.pro/voice",
   "codec": "ima-adpcm-16k-v1",
+  "actionExpansion": 1,
   "features": [
-    "explicit-mobile-microphone-setup",
-    "recorded-material-foley",
-    "natural-field-ambience"
+    "offline-release-bulletin",
+    "portrait-two-thumb-controls",
+    "six-weapon-techniques",
+    "bounded-combat-feedback",
+    "settlement-field-expeditions",
+    "earned-combat-attunements"
   ]
 }
