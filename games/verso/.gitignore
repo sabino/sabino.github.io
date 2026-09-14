@@ -1,0 +1,9 @@
+# The game is built and deployed by sabino/verso. Keep only this source loader.
+*
+!.gitignore
+!README.md
+!index.html
+!bridge.js
+!release.js
+!sw.js
+!manifest.webmanifest
